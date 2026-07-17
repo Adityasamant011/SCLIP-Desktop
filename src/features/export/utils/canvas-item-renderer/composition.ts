@@ -441,6 +441,12 @@ function isSubCompFullyOccludingItem(
 ): boolean {
   if (localFrame < item.from || localFrame >= item.from + item.durationInFrames) return false
   if (item.type !== 'video' && item.type !== 'image') return false
+  // A video whose source can carry alpha is not opaque even at full cover, so it
+  // must not cull the layers beneath it (mirrors the top-level guard in
+  // frame-occlusion.ts). Without this, a full-canvas transparent overlay INSIDE a
+  // pre-composition would reveal the black base fill instead of the clip below.
+  if (item.type === 'video' && rctx.videoExtractors.get(item.id)?.getCanBeTransparent())
+    return false
   if (item.blendMode && item.blendMode !== 'normal') return false
   if (hasCornerPin(item.cornerPin)) return false
   // Use the same preview-override path as the renderer above. Otherwise a
