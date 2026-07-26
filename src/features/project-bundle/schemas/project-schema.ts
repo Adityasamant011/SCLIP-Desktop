@@ -590,6 +590,14 @@ const timelineItemSchema = z
     audioEqHighCutEnabled: z.boolean().optional(),
     audioEqHighCutFrequencyHz: z.number().min(1400).max(22000).optional(),
     audioEqHighCutSlopeDbPerOct: audioEqCutSlopeSchema.optional(),
+    audioDucking: z
+      .object({
+        duckOthersDb: z.number().min(-60).max(0),
+        attackSec: z.number().min(0).max(5).optional(),
+        releaseSec: z.number().min(0).max(5).optional(),
+        targetTrackIds: z.array(z.string().min(1)).optional(),
+      })
+      .optional(),
     // Video properties
     fadeIn: z.number().min(0).optional(),
     fadeOut: z.number().min(0).optional(),

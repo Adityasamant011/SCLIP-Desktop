@@ -42,6 +42,18 @@ export interface TimelineTranscriptCaptions {
   style?: TimelineTranscriptCaptionStyle
 }
 
+/** Sidechain ducking settings carried by a duck-source item. */
+export interface AudioDuckingSettings {
+  /** Attenuation applied to other audio while this item is audible, in dB (<= 0). */
+  duckOthersDb: number
+  /** Ramp-down time into the duck, seconds (default 0.08). */
+  attackSec?: number
+  /** Ramp-up time out of the duck, seconds (default 0.25). */
+  releaseSec?: number
+  /** Restrict ducking to these tracks (default: all other audible tracks). */
+  targetTrackIds?: string[]
+}
+
 // Base type for all timeline items (following Composition pattern)
 type BaseTimelineItem = {
   id: string
@@ -134,6 +146,13 @@ type BaseTimelineItem = {
   audioEqHighCutEnabled?: boolean // Enable high cut / low-pass filter
   audioEqHighCutFrequencyHz?: number // High cut frequency in Hz
   audioEqHighCutSlopeDbPerOct?: 6 | 12 | 18 | 24 // High cut slope
+  /**
+   * Sidechain ducking: while THIS item is audible, other audio in the mix is
+   * attenuated by `duckOthersDb` with attack/release ramps. Scope with
+   * `targetTrackIds` (default: every other audible track). The source itself
+   * is never ducked by its own envelope.
+   */
+  audioDucking?: AudioDuckingSettings
   // Video properties (for video items)
   fadeIn?: number // Video fade in duration in seconds (default: 0)
   fadeOut?: number // Video fade out duration in seconds (default: 0)
