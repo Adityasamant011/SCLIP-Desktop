@@ -134,27 +134,59 @@ export const TextContent: React.FC<{ item: TextItem & { _sequenceFrameOffset?: n
           boxSizing: 'border-box',
         }}
       >
-        {spanStyles.map((span, index) => (
+        {mergedItem.spanLayout === 'inline' && spanStyles.length > 0 ? (
+          // Inline span flow: one wrapped text stream, spans recolor/underline
+          // words inside a line. Font/size come from the FIRST span — same
+          // base-style rule as the shared layoutTextBlock inline path.
           <div
-            key={`${index}:${span.text}`}
             style={{
-              fontSize: span.fontSize * scale,
-              fontFamily: loadFont(span.fontFamily),
-              fontWeight: span.fontWeight,
-              fontStyle: span.fontStyle,
-              textDecoration: span.underline ? 'underline' : 'none',
-              color: span.color,
+              fontSize: spanStyles[0]!.fontSize * scale,
+              fontFamily: loadFont(spanStyles[0]!.fontFamily),
+              fontWeight: spanStyles[0]!.fontWeight,
+              fontStyle: spanStyles[0]!.fontStyle,
               lineHeight: style.lineHeight,
-              letterSpacing: span.letterSpacing * scaleX,
+              letterSpacing: spanStyles[0]!.letterSpacing * scaleX,
               display: 'block',
               whiteSpace: 'pre-wrap',
               wordBreak: 'break-word',
               width: '100%',
             }}
           >
-            {span.text}
+            {spanStyles.map((span, index) => (
+              <span
+                key={`${index}:${span.text}`}
+                style={{
+                  color: span.color,
+                  textDecoration: span.underline ? 'underline' : 'none',
+                }}
+              >
+                {span.text}
+              </span>
+            ))}
           </div>
-        ))}
+        ) : (
+          spanStyles.map((span, index) => (
+            <div
+              key={`${index}:${span.text}`}
+              style={{
+                fontSize: span.fontSize * scale,
+                fontFamily: loadFont(span.fontFamily),
+                fontWeight: span.fontWeight,
+                fontStyle: span.fontStyle,
+                textDecoration: span.underline ? 'underline' : 'none',
+                color: span.color,
+                lineHeight: style.lineHeight,
+                letterSpacing: span.letterSpacing * scaleX,
+                display: 'block',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+                width: '100%',
+              }}
+            >
+              {span.text}
+            </div>
+          ))
+        )}
       </div>
     </div>
   )

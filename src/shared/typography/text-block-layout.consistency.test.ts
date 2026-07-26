@@ -147,3 +147,78 @@ describe('layoutTextBlock', () => {
     expect(bg.radius).toBe(12)
   })
 })
+
+describe('inline span flow (spanLayout: inline)', () => {
+  const inlineItem = (overrides: Partial<TextItem> = {}): TextItem =>
+    baseTextItem({
+      text: 'ключевое слово тут',
+      textSpans: [
+        { text: 'ключевое ', color: '#ffffff' },
+        { text: 'слово тут', color: '#ff7a00' },
+      ],
+      spanLayout: 'inline',
+      fontSize: 58,
+      textPadding: 0,
+      ...overrides,
+    })
+
+  it('flows spans into ONE line with color runs when they fit', () => {
+    const layout = layoutTextBlock(inlineItem(), 900, 200, makeMeasurer())
+    expect(layout.lines).toHaveLength(1)
+    const line = layout.lines[0]!
+    expect(line.text).toBe('ключевое слово тут')
+    expect(line.runs?.map((run) => run.text)).toEqual(['ключевое ', 'слово тут'])
+    expect(line.runs?.map((run) => run.color)).toEqual(['#ffffff', '#ff7a00'])
+    // Run offsets are prefix-measured: run 2 starts where run 1's advance ends.
+    expect(line.runs![1]!.offsetX).toBeCloseTo(makeMeasurer().measure('ключевое ', '58px x', 0))
+    // Line width equals the whole-text measure (geometry identical to a
+    // single-style line — runs only affect paint).
+    expect(line.width).toBeCloseTo(makeMeasurer().measure(line.text, '58px x', 0))
+  })
+
+  it('wraps by box width and splits runs at word boundaries', () => {
+    // 10 glyphs fit (10 * 58 * 0.5 = 290 <= 300): first line takes 'ключевое'.
+    const layout = layoutTextBlock(inlineItem(), 300, 400, makeMeasurer())
+    expect(layout.lines.map((line) => line.text)).toEqual(['ключевое', 'слово тут'])
+    expect(layout.lines[0]!.runs?.map((run) => run.color)).toEqual(['#ffffff'])
+    expect(layout.lines[1]!.runs?.map((run) => run.color)).toEqual(['#ff7a00'])
+  })
+
+  it('splits mid-word span boundaries into adjacent runs', () => {
+    const layout = layoutTextBlock(
+      inlineItem({
+        text: 'ключевое',
+        textSpans: [
+          { text: 'клю', color: '#ffffff' },
+          { text: 'чевое', color: '#ff7a00', underline: true },
+        ],
+      }),
+      900,
+      200,
+      makeMeasurer(),
+    )
+    expect(layout.lines).toHaveLength(1)
+    const runs = layout.lines[0]!.runs!
+    expect(runs.map((run) => run.text)).toEqual(['клю', 'чевое'])
+    expect(runs[1]!.offsetX).toBeCloseTo(makeMeasurer().measure('клю', '58px x', 0))
+    expect(runs[1]!.underline).toBe(true)
+  })
+
+  it('keeps the default stack flow untouched when spanLayout is absent', () => {
+    const layout = layoutTextBlock(
+      baseTextItem({
+        text: 'a b',
+        textSpans: [
+          { text: 'a', color: '#ffffff' },
+          { text: 'b', color: '#ff7a00' },
+        ],
+        textPadding: 0,
+      }),
+      900,
+      200,
+      makeMeasurer(),
+    )
+    expect(layout.lines.map((line) => line.text)).toEqual(['a', 'b'])
+    expect(layout.lines[0]!.runs).toBeUndefined()
+  })
+})

@@ -508,6 +508,7 @@ export const renderRequestSchema = z
     outSec: finite.positive().optional(),
     duration: finite.positive().optional(),
     audioOnly: z.boolean().optional(),
+    strict: z.boolean().optional(),
   })
   .strict()
   .refine((v) => Boolean(v.project) !== Boolean(v.projectObject), {
@@ -536,6 +537,7 @@ export function normalizeRenderInput(value) {
   if (out.in !== undefined) out.inSec = Number(out.in)
   if (out['out-sec'] !== undefined) out.outSec = Number(out['out-sec'])
   if (out['audio-only'] !== undefined) out.audioOnly = Boolean(out['audio-only'])
+  if (out.strict !== undefined) out.strict = Boolean(out.strict)
   delete out.in
   delete out['out-sec']
   delete out['audio-only']

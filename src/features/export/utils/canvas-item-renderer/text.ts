@@ -60,6 +60,7 @@ export function getTextRasterCacheKey(item: TextItem, boxWidth: number, boxHeigh
     h: Math.round(boxHeight),
     text: item.text,
     textSpans: item.textSpans,
+    spanLayout: item.spanLayout,
     fontSize: item.fontSize,
     fontFamily: item.fontFamily,
     fontWeight: item.fontWeight,
@@ -141,7 +142,6 @@ function paintTextBlock(
 
     ctx.font = line.cssFont
     applyCanvasLetterSpacing(ctx, line.letterSpacing)
-    ctx.fillStyle = line.color
 
     if (item.stroke && strokeWidth > 0) {
       ctx.strokeStyle = item.stroke.color
@@ -150,10 +150,22 @@ function paintTextBlock(
       ctx.strokeText(line.text, x, y)
     }
 
-    ctx.fillText(line.text, x, y)
-
-    if (line.underline) {
-      drawUnderline(ctx, line, x, y)
+    if (line.runs && line.runs.length > 0) {
+      // Inline span flow: same geometry as the whole-line draw (runs are
+      // prefix-measured offsets), painted per-run for color/underline.
+      for (const run of line.runs) {
+        ctx.fillStyle = run.color
+        ctx.fillText(run.text, x + run.offsetX, y)
+        if (run.underline) {
+          drawUnderline(ctx, { ...line, width: run.width, color: run.color }, x + run.offsetX, y)
+        }
+      }
+    } else {
+      ctx.fillStyle = line.color
+      ctx.fillText(line.text, x, y)
+      if (line.underline) {
+        drawUnderline(ctx, line, x, y)
+      }
     }
   }
 }
@@ -286,6 +298,8 @@ function paintTextBlockWithMotion(
     // letter-spacing (which would add a trailing gap to each fillText).
     applyCanvasLetterSpacing(ctx, 0)
     const lineUnits = segmentation.lineUnitIndices[lineIndex]
+    // Inline span flow: per-glyph color follows the run covering that char.
+    const runColorByChar = line.runs?.flatMap((run) => Array.from(run.text, () => run.color))
     const baselineY = originY + line.baselineY
     let currentX = originX + line.startX
     let charIndex = 0
@@ -303,7 +317,7 @@ function paintTextBlockWithMotion(
             advance,
             line.cssFont,
             line.fontSize,
-            line.color,
+            runColorByChar?.[charIndex] ?? line.color,
             strokeColor,
             strokeWidth,
             glyphMotion,

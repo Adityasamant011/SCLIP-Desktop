@@ -77,8 +77,8 @@ async function main() {
       media,
       frame,
       atSeconds,
+      strict: Boolean(args.strict),
     })
-
     // stderr, so the boxes on stdout stay pipeable into jq. A font that never
     // became active makes every reported text box a fallback measurement.
     for (const warning of layout.warnings ?? [])

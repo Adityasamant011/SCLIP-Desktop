@@ -21,6 +21,7 @@ import { DEFAULT_TRACK_HEIGHT, DEFAULT_FPS } from '@/shared/timeline/defaults'
 import { normalizeAudioEqSettings } from '@/shared/utils/audio-eq'
 import { applyOptionalClamps } from '@/shared/timeline/item-clamps'
 import { sanitizeTextMotion } from './sanitize-text-motion'
+import type { ProjectWarning } from './types'
 
 /**
  * Normalize a track to ensure all fields have valid values.
@@ -54,12 +55,29 @@ function normalizeTrack(
 /**
  * Normalize a timeline item to ensure all fields have valid values.
  */
-function normalizeItem(item: ProjectTimeline['items'][number]): ProjectTimeline['items'][number] {
+function normalizeItem(
+  item: ProjectTimeline['items'][number],
+  warnings?: ProjectWarning[],
+  compositionId?: string,
+): ProjectTimeline['items'][number] {
   const normalized = { ...item }
 
   // Keep timeline coordinates aligned to whole frames.
   normalized.from = Math.max(0, Math.round(normalized.from ?? 0))
   normalized.durationInFrames = Math.max(1, Math.round(normalized.durationInFrames ?? 1))
+
+  // A shape item without `shapeType` passes schema validation (the field is
+  // optional there) but the renderer draws nothing — report it loudly instead
+  // of letting the element vanish from the frame.
+  if (normalized.type === 'shape' && !(normalized as { shapeType?: unknown }).shapeType) {
+    warnings?.push({
+      code: 'SHAPE_MISSING_TYPE',
+      message: `Shape item "${normalized.id}" has no "shapeType" (e.g. 'rectangle') and will not render`,
+      itemIds: [normalized.id],
+      trackId: normalized.trackId,
+      compositionId,
+    })
+  }
 
   // Frame/audio/EQ optional-field clamps — shared with the runtime items-store
   // normalizer so adding a new clamped field only needs registering once.
@@ -179,10 +197,14 @@ function buildTransitionPairs(
  * Detect and repair overlapping items on the same track.
  * Pushes later-starting items forward to eliminate overlaps.
  * Transition-linked overlaps are intentional and left untouched.
+ * Every repair is reported to `warnings` — for hand-built projects a silent
+ * shift reads as "the item vanished from its window".
  */
 function repairOverlappingItems(
   items: ProjectTimeline['items'],
   transitions?: NonNullable<ProjectTimeline['transitions']>,
+  warnings?: ProjectWarning[],
+  compositionId?: string,
 ): ProjectTimeline['items'] {
   const transitionPairs = buildTransitionPairs(transitions)
 
@@ -219,6 +241,16 @@ function repairOverlappingItems(
         if (transitionPairs.has(pairKey)) continue
 
         // Push the later item to start right after the current one
+        warnings?.push({
+          code: 'TRACK_OVERLAP_REPAIRED',
+          message:
+            `Items "${current.item.id}" and "${next.item.id}" overlap on track ` +
+            `"${current.item.trackId}" (frames ${next.item.from}-${currentEnd}); ` +
+            `"${next.item.id}" was shifted to frame ${currentEnd}`,
+          itemIds: [current.item.id, next.item.id],
+          trackId: current.item.trackId,
+          compositionId,
+        })
         const repairedItem = { ...next.item, from: currentEnd }
         repaired[next.index] = repairedItem
         next.item = repairedItem
@@ -232,12 +264,15 @@ function repairOverlappingItems(
 /**
  * Normalize a timeline to ensure all data conforms to current defaults.
  */
-function normalizeTimeline(timeline: ProjectTimeline): ProjectTimeline {
+function normalizeTimeline(
+  timeline: ProjectTimeline,
+  warnings?: ProjectWarning[],
+): ProjectTimeline {
   const normalizedTracks = flattenTrackGroups(
     timeline.tracks.map((track, index) => normalizeTrack(track, index)),
   )
 
-  const normalizedItems = timeline.items.map(normalizeItem)
+  const normalizedItems = timeline.items.map((item) => normalizeItem(item, warnings))
   const normalizedTransitions = timeline.transitions?.map(normalizeTransition)
 
   // Drop tab ids that don't resolve to a composition (and any duplicates), so
@@ -258,19 +293,19 @@ function normalizeTimeline(timeline: ProjectTimeline): ProjectTimeline {
     tracks: normalizedTracks,
     busAudioEq: normalizeAudioEqSettings(timeline.busAudioEq),
     // Normalize items and repair overlaps
-    items: repairOverlappingItems(normalizedItems, normalizedTransitions),
+    items: repairOverlappingItems(normalizedItems, normalizedTransitions, warnings),
     // Normalize transitions if present
     transitions: normalizedTransitions,
     // Normalize sub-composition tracks and items
     compositions: timeline.compositions?.map((comp) => {
-      const compItems = comp.items.map(normalizeItem)
+      const compItems = comp.items.map((item) => normalizeItem(item, warnings, comp.id))
       const compTransitions = comp.transitions?.map(normalizeTransition)
       return {
         ...comp,
         editorKind: comp.editorKind === 'composite-2d' ? 'composite-2d' : 'sequence',
         tracks: flattenTrackGroups(comp.tracks.map((track, index) => normalizeTrack(track, index))),
         busAudioEq: normalizeAudioEqSettings(comp.busAudioEq),
-        items: repairOverlappingItems(compItems, compTransitions),
+        items: repairOverlappingItems(compItems, compTransitions, warnings, comp.id),
         transitions: compTransitions,
       }
     }),
@@ -301,7 +336,7 @@ function normalizeMetadata(metadata: Project['metadata']): Project['metadata'] {
  * Normalize a project to ensure all data conforms to current defaults.
  * This is applied after migrations on every load.
  */
-export function normalizeProject(project: Project): Project {
+export function normalizeProject(project: Project, warnings?: ProjectWarning[]): Project {
   const normalized: Project = {
     ...project,
     // Normalize metadata
@@ -310,7 +345,7 @@ export function normalizeProject(project: Project): Project {
 
   // Normalize timeline if present
   if (normalized.timeline) {
-    normalized.timeline = normalizeTimeline(normalized.timeline)
+    normalized.timeline = normalizeTimeline(normalized.timeline, warnings)
   }
 
   return normalized

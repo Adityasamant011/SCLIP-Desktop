@@ -17,6 +17,7 @@
 //   --format <f>          png|jpg|webp (default: png)
 //   --width/--height <n>  Output size (default: project resolution — full quality)
 //   --quality <0..1>      Encoder quality for jpg/webp (default: 1)
+//   --strict              Fail (before rendering) on any project validation warning
 //   --head                Run headed (visible browser) for debugging
 //   --build               Build dist/ first if the harness isn't built
 //   --harness-url <url>   Dev mode: drive a running Vite dev server instead of dist/
@@ -95,6 +96,7 @@ async function main() {
       height: args.height ? Number(args.height) : undefined,
       format: mime,
       quality: args.quality ? Number(args.quality) : undefined,
+      strict: Boolean(args.strict),
     })
     const download = await downloadPromise
     await download.saveAs(outPath)

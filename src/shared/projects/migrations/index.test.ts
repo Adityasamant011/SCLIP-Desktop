@@ -432,3 +432,99 @@ describe('migrateProject transition normalization', () => {
     expect(result.project.timeline?.tracks.map((track) => track.order)).toEqual([0, 1, 2])
   })
 })
+
+describe('migrateProject validation warnings', () => {
+  it('reports a TRACK_OVERLAP_REPAIRED warning with both item ids when items overlap', () => {
+    const project = createBaseProject({
+      tracks: [createTrack('t-ov', 0, 'video')],
+      items: [
+        {
+          id: 'ov_a',
+          type: 'text',
+          trackId: 't-ov',
+          from: 0,
+          durationInFrames: 50,
+          label: 'A',
+          text: 'A',
+          color: '#fff',
+        },
+        {
+          id: 'ov_b',
+          type: 'text',
+          trackId: 't-ov',
+          from: 0,
+          durationInFrames: 50,
+          label: 'B',
+          text: 'B',
+          color: '#fff',
+        },
+      ] as ProjectTimeline['items'],
+      transitions: [],
+      currentFrame: 0,
+      zoomLevel: 1,
+      scrollPosition: 0,
+    } as unknown as ProjectTimeline)
+
+    const result = migrateProject(project)
+
+    const overlap = result.warnings.filter((w) => w.code === 'TRACK_OVERLAP_REPAIRED')
+    expect(overlap).toHaveLength(1)
+    expect(overlap[0]!.itemIds).toEqual(['ov_a', 'ov_b'])
+    expect(overlap[0]!.trackId).toBe('t-ov')
+    // The repair itself is unchanged: the later item is shifted, not dropped.
+    const shifted = result.project.timeline!.items.find((item) => item.id === 'ov_b')!
+    expect(shifted.from).toBe(50)
+  })
+
+  it('reports SHAPE_MISSING_TYPE for a shape item without shapeType', () => {
+    const project = createBaseProject({
+      tracks: [createTrack('t-bg', 0, 'video')],
+      items: [
+        {
+          id: 'bg',
+          type: 'shape',
+          trackId: 't-bg',
+          from: 0,
+          durationInFrames: 50,
+          label: 'bg',
+          // shapeType deliberately missing — the renderer draws nothing.
+          fillColor: '#0B0E14',
+        },
+      ] as unknown as ProjectTimeline['items'],
+      transitions: [],
+      currentFrame: 0,
+      zoomLevel: 1,
+      scrollPosition: 0,
+    } as unknown as ProjectTimeline)
+
+    const result = migrateProject(project)
+
+    const shape = result.warnings.filter((w) => w.code === 'SHAPE_MISSING_TYPE')
+    expect(shape).toHaveLength(1)
+    expect(shape[0]!.itemIds).toEqual(['bg'])
+  })
+
+  it('collects no warnings for a clean timeline', () => {
+    const project = createBaseProject({
+      tracks: [createTrack('t-1', 0, 'video')],
+      items: [
+        {
+          id: 'ok',
+          type: 'text',
+          trackId: 't-1',
+          from: 0,
+          durationInFrames: 50,
+          label: 'ok',
+          text: 'ok',
+          color: '#fff',
+        },
+      ] as ProjectTimeline['items'],
+      transitions: [],
+      currentFrame: 0,
+      zoomLevel: 1,
+      scrollPosition: 0,
+    } as unknown as ProjectTimeline)
+
+    expect(migrateProject(project).warnings).toEqual([])
+  })
+})

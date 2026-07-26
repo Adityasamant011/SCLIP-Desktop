@@ -196,6 +196,14 @@ export type TextItem = BaseTimelineItem &
     type: 'text'
     text: string
     textSpans?: TextSpan[]
+    /**
+     * How `textSpans` flow: 'stack' (default) lays every span out as its own
+     * line group; 'inline' concatenates spans into one wrapped text stream so
+     * a span can recolor/underline words INSIDE a line (karaoke/keyword
+     * accents). Inline flow uses the first span's font/size/letter-spacing for
+     * the whole stream — per-span font/size differences are ignored there.
+     */
+    spanLayout?: 'stack' | 'inline'
     textLayoutDrafts?: TextLayoutDrafts
     textStylePresetId?: TextStylePresetId
     textStyleScale?: number

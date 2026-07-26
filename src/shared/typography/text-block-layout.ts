@@ -18,6 +18,21 @@ import type { TextStyleInput } from './text-style'
 import { resolveSpanStyles, resolveTextStyle } from './text-style'
 import type { TextMeasurer } from './text-measurer'
 
+/**
+ * A styled sub-range of an inline-flowed line (`spanLayout: 'inline'`).
+ * Runs share the line's font/size/letter-spacing; only color and underline
+ * vary. Painters that ignore `runs` still draw the full line in the line's
+ * base style — geometry is identical either way.
+ */
+export interface LaidOutRun {
+  text: string
+  color: string
+  underline: boolean
+  /** Advance offset from the line's startX. */
+  offsetX: number
+  width: number
+}
+
 export interface LaidOutLine {
   text: string
   cssFont: string
@@ -34,6 +49,8 @@ export interface LaidOutLine {
   /** Box-local x of the left edge of the occupied box (left-anchored origin). */
   startX: number
   lineHeightPx: number
+  /** Present only for inline span flow — color/underline sub-ranges. */
+  runs?: LaidOutRun[]
 }
 
 export interface TextBlockBackground {
@@ -105,6 +122,129 @@ function wrapText(
   return lines.length > 0 ? lines : ['']
 }
 
+interface InlineWord {
+  text: string
+  /** Style index (into spans) per character of `text`. */
+  charStyles: number[]
+}
+
+/**
+ * Inline span flow (`spanLayout: 'inline'`): spans are concatenated into one
+ * text stream and wrapped by box width; each wrapped line carries `runs`
+ * describing the color/underline sub-ranges. All runs share the FIRST span's
+ * font/size/letter-spacing — mixed fonts/sizes on one line are out of scope
+ * (such spans render in the base font).
+ */
+function layoutInlineSpanLines(
+  spans: ReturnType<typeof resolveSpanStyles>,
+  lineHeightFactor: number,
+  availableWidth: number,
+  measurer: TextMeasurer,
+): LaidOutLine[] {
+  const base = spans[0]!
+  const metrics = measurer.fontMetrics(base.cssFont)
+  const lineHeightPx = base.fontSize * lineHeightFactor
+  const halfLeading = (lineHeightPx - (metrics.ascent + metrics.descent)) / 2
+  const baselineOffset = halfLeading + metrics.ascent
+
+  // Tokenize the concatenated span stream into words/breaks with per-char style ids.
+  const paragraphs: InlineWord[][] = [[]]
+  let currentWord: InlineWord | null = null
+  const flushWord = () => {
+    if (currentWord) paragraphs[paragraphs.length - 1]!.push(currentWord)
+    currentWord = null
+  }
+  for (let spanIndex = 0; spanIndex < spans.length; spanIndex++) {
+    for (const char of spans[spanIndex]!.text) {
+      if (char === '\n') {
+        flushWord()
+        paragraphs.push([])
+      } else if (char === ' ') {
+        flushWord()
+      } else {
+        if (!currentWord) currentWord = { text: '', charStyles: [] }
+        currentWord.text += char
+        currentWord.charStyles.push(spanIndex)
+      }
+    }
+  }
+  flushWord()
+
+  const measure = (text: string) => measurer.measure(text, base.cssFont, base.letterSpacing)
+
+  const lines: LaidOutLine[] = []
+  const pushLine = (words: InlineWord[]) => {
+    let text = ''
+    const charStyles: number[] = []
+    for (const [wordIndex, word] of words.entries()) {
+      if (wordIndex > 0) {
+        text += ' '
+        // A space inherits the style of the character before it.
+        charStyles.push(charStyles[charStyles.length - 1] ?? word.charStyles[0] ?? 0)
+      }
+      text += word.text
+      charStyles.push(...word.charStyles)
+    }
+
+    const runs: LaidOutRun[] = []
+    let runStart = 0
+    for (let i = 1; i <= text.length; i++) {
+      if (i === text.length || charStyles[i] !== charStyles[runStart]) {
+        const span = spans[charStyles[runStart] ?? 0] ?? base
+        const prefixWidth = runStart === 0 ? 0 : measure(text.slice(0, runStart))
+        runs.push({
+          text: text.slice(runStart, i),
+          color: span.color,
+          underline: span.underline,
+          offsetX: prefixWidth,
+          width: measure(text.slice(0, i)) - prefixWidth,
+        })
+        runStart = i
+      }
+    }
+
+    lines.push({
+      text,
+      cssFont: base.cssFont,
+      fontSize: base.fontSize,
+      color: base.color,
+      letterSpacing: base.letterSpacing,
+      underline: false,
+      width: measure(text),
+      top: 0,
+      baselineY: baselineOffset, // refined by the caller once block top is known
+      startX: 0,
+      lineHeightPx,
+      runs,
+    })
+  }
+
+  for (const words of paragraphs) {
+    if (words.length === 0) {
+      pushLine([])
+      continue
+    }
+    let lineWords: InlineWord[] = []
+    let lineText = ''
+    for (const word of words) {
+      const testText = lineText ? `${lineText} ${word.text}` : word.text
+      if (measure(testText) > availableWidth && lineWords.length > 0) {
+        pushLine(lineWords)
+        lineWords = [word]
+        lineText = word.text
+      } else {
+        lineWords.push(word)
+        lineText = testText
+      }
+      // Overlong single words fall through un-broken (rare for inline accents);
+      // the stack path's char-breaking can be ported here if it ever matters.
+    }
+    if (lineWords.length > 0) pushLine(lineWords)
+  }
+
+  return lines
+}
+
 export function layoutTextBlock(
   item: TextStyleInput,
   boxWidth: number,
@@ -117,32 +257,39 @@ export function layoutTextBlock(
   const availableWidth = Math.max(1, boxWidth - padding * 2)
   const availableHeight = boxHeight - padding * 2
 
-  const lines: LaidOutLine[] = []
-  for (const span of spans) {
-    const metrics = measurer.fontMetrics(span.cssFont)
-    const lineHeightPx = span.fontSize * style.lineHeight
-    const halfLeading = (lineHeightPx - (metrics.ascent + metrics.descent)) / 2
-    const baselineOffset = halfLeading + metrics.ascent
-    for (const text of wrapText(
-      span.text,
-      span.cssFont,
-      span.letterSpacing,
-      availableWidth,
-      measurer,
-    )) {
-      lines.push({
-        text,
-        cssFont: span.cssFont,
-        fontSize: span.fontSize,
-        color: span.color,
-        letterSpacing: span.letterSpacing,
-        underline: span.underline,
-        width: measurer.measure(text, span.cssFont, span.letterSpacing),
-        top: 0,
-        baselineY: baselineOffset, // refined below once block top is known
-        startX: 0,
-        lineHeightPx,
-      })
+  const inlineFlow =
+    (item as { spanLayout?: 'stack' | 'inline' }).spanLayout === 'inline' && spans.length > 0
+
+  const lines: LaidOutLine[] = inlineFlow
+    ? layoutInlineSpanLines(spans, style.lineHeight, availableWidth, measurer)
+    : []
+  if (!inlineFlow) {
+    for (const span of spans) {
+      const metrics = measurer.fontMetrics(span.cssFont)
+      const lineHeightPx = span.fontSize * style.lineHeight
+      const halfLeading = (lineHeightPx - (metrics.ascent + metrics.descent)) / 2
+      const baselineOffset = halfLeading + metrics.ascent
+      for (const text of wrapText(
+        span.text,
+        span.cssFont,
+        span.letterSpacing,
+        availableWidth,
+        measurer,
+      )) {
+        lines.push({
+          text,
+          cssFont: span.cssFont,
+          fontSize: span.fontSize,
+          color: span.color,
+          letterSpacing: span.letterSpacing,
+          underline: span.underline,
+          width: measurer.measure(text, span.cssFont, span.letterSpacing),
+          top: 0,
+          baselineY: baselineOffset, // refined below once block top is known
+          startX: 0,
+          lineHeightPx,
+        })
+      }
     }
   }
 

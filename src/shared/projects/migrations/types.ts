@@ -31,6 +31,23 @@ export interface Migration {
 }
 
 /**
+ * Non-fatal problem detected while normalizing a project on load.
+ *
+ * Normalization silently repairs what it can (e.g. shifting overlapping items),
+ * but for programmatically-built projects a silent repair hides authoring bugs —
+ * these warnings make the repairs and un-renderable items visible to callers
+ * (the headless harness logs them and can fail hard in --strict mode).
+ */
+export interface ProjectWarning {
+  code: 'TRACK_OVERLAP_REPAIRED' | 'SHAPE_MISSING_TYPE'
+  message: string
+  itemIds?: string[]
+  trackId?: string
+  /** Sub-composition id when the finding is inside a pre-comp. */
+  compositionId?: string
+}
+
+/**
  * Result of running migrations on a project.
  */
 export interface MigrationResult {
@@ -44,4 +61,6 @@ export interface MigrationResult {
   fromVersion: number
   /** The final schema version */
   toVersion: number
+  /** Non-fatal findings from normalization (silent repairs, un-renderable items). */
+  warnings: ProjectWarning[]
 }
