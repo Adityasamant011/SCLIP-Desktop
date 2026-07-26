@@ -11,42 +11,14 @@ import type { ObjectUrlSourceMetadata } from '@/infrastructure/browser/object-ur
 
 const TIMESTAMP_EPSILON = 1e-4
 const LOOKAHEAD_TOLERANCE_SECONDS = 0.05
-const STREAM_BACKTRACK_SECONDS = 1.0
 const FORWARD_JUMP_RESTART_SECONDS = 3.0
 const MAX_EXTRACTORS_PER_WORKER = 8
 const MAX_ACTIVE_PREVIEW_EXTRACTORS = 2
 const ACTIVE_PREVIEW_CANCELLED = Symbol('active-preview-cancelled')
-let activePreviewGeneration = 0
+const activePreviewGenerationBySrc = new Map<string, number>()
 
 /** Per-source keyframe index received from main thread */
 const keyframeIndexBySrc = new Map<string, number[]>()
-
-/**
- * Binary search for the largest keyframe timestamp <= target.
- */
-function nearestKeyframeBefore(timestamps: number[], target: number): number | null {
-  if (timestamps.length === 0 || timestamps[0]! > target) return null
-  let lo = 0
-  let hi = timestamps.length - 1
-  while (lo < hi) {
-    const mid = (lo + hi + 1) >>> 1
-    if (timestamps[mid]! <= target) lo = mid
-    else hi = mid - 1
-  }
-  return timestamps[lo]!
-}
-
-/**
- * Compute adaptive stream start from keyframe index.
- * Returns null if no index available (caller falls back to fixed backtrack).
- */
-function getAdaptiveStart(src: string, targetTimestamp: number): number | null {
-  const timestamps = keyframeIndexBySrc.get(src)
-  if (!timestamps || timestamps.length === 0) return null
-  const kf = nearestKeyframeBefore(timestamps, targetTimestamp)
-  if (kf === null) return null
-  return Math.max(0, kf - 0.05) // small margin
-}
 
 // Lazy-load mediabunny (same pattern as filmstrip and proxy workers)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -127,9 +99,9 @@ async function getExtractor(
         return null
       }
 
-      // Lazy-extract keyframe index for sources that arrive without one.
-      // Uses metadata-only key-packet chain: O(K) — typically < 10ms.
-      // Ensures adaptive seek is available from the very first decode.
+      // Lazy-extract a keyframe index for sources that arrive without one.
+      // The main thread persists it for other preview/proxy consumers; the
+      // VideoSampleSink range path performs its own verified keyframe lookup.
       if (!keyframeIndexBySrc.has(src)) {
         try {
           const eps = new mediabunny.EncodedPacketSink(videoTrack)
@@ -288,12 +260,13 @@ function closeStreamState(state: ExtractorState): void {
   state.nextSample = null
 }
 
-function resetSampleIterator(state: ExtractorState, startTimestamp: number, src?: string): void {
+function resetSampleIterator(state: ExtractorState, startTimestamp: number): void {
   closeStreamState(state)
-  // Use keyframe index for precise backtrack; fall back to fixed 1.0s
-  const adaptiveStart = src ? getAdaptiveStart(src, startTimestamp) : null
-  const streamStart = adaptiveStart ?? Math.max(0, startTimestamp - STREAM_BACKTRACK_SECONDS)
-  state.sampleIterator = state.sink.samples(streamStart, Infinity) as AsyncGenerator<
+  // MediaBunny already locates and verifies the preceding key packet before
+  // decoding a range. Starting at the requested presentation timestamp keeps
+  // that necessary GOP decode inside the sink without yielding a keyframe-to-
+  // target runway that this worker would only close and discard.
+  state.sampleIterator = state.sink.samples(Math.max(0, startTimestamp), Infinity) as AsyncGenerator<
     WorkerSample,
     void,
     unknown
@@ -328,23 +301,22 @@ async function peekNextSample(state: ExtractorState): Promise<WorkerSample | nul
 async function ensureSampleForTimestamp(
   state: ExtractorState,
   timestamp: number,
-  src?: string,
   shouldContinue?: () => boolean,
 ): Promise<void> {
   if (shouldContinue && !shouldContinue()) throw ACTIVE_PREVIEW_CANCELLED
   if (!state.sampleIterator) {
-    resetSampleIterator(state, timestamp, src)
+    resetSampleIterator(state, timestamp)
   } else if (
     state.lastRequestedTimestamp !== null &&
     timestamp + TIMESTAMP_EPSILON < state.lastRequestedTimestamp &&
     !currentSampleCoversTimestamp(state, timestamp)
   ) {
-    resetSampleIterator(state, timestamp, src)
+    resetSampleIterator(state, timestamp)
   } else if (
     state.lastRequestedTimestamp !== null &&
     timestamp - state.lastRequestedTimestamp > FORWARD_JUMP_RESTART_SECONDS
   ) {
-    resetSampleIterator(state, timestamp, src)
+    resetSampleIterator(state, timestamp)
   }
 
   state.lastRequestedTimestamp = timestamp
@@ -447,8 +419,8 @@ function renderSampleToBitmap(
   const outputWidth = Math.max(1, Math.round(size.width * scale))
   const outputHeight = Math.max(1, Math.round(size.height * scale))
 
-  state.canvas.width = outputWidth
-  state.canvas.height = outputHeight
+  if (state.canvas.width !== outputWidth) state.canvas.width = outputWidth
+  if (state.canvas.height !== outputHeight) state.canvas.height = outputHeight
   sample.draw(state.ctx, 0, 0, outputWidth, outputHeight)
   return state.canvas.transferToImageBitmap()
 }
@@ -466,7 +438,6 @@ async function recoverAndPrime(
   state: ExtractorState,
   timestamp: number,
   error: unknown,
-  src?: string,
 ): Promise<boolean> {
   const message = error instanceof Error ? error.message : String(error)
   const looksRecoverable = /key frame|configure\(\)|flush\(\)|InvalidStateError|decode/i.test(
@@ -477,8 +448,8 @@ async function recoverAndPrime(
   }
 
   try {
-    resetSampleIterator(state, timestamp, src)
-    await ensureSampleForTimestamp(state, timestamp, src)
+    resetSampleIterator(state, timestamp)
+    await ensureSampleForTimestamp(state, timestamp)
     return state.currentSample !== null
   } catch {
     return false
@@ -488,16 +459,15 @@ async function recoverAndPrime(
 async function preseekWithState(
   state: ExtractorState,
   timestamp: number,
-  src?: string,
   shouldContinue?: () => boolean,
 ): Promise<ImageBitmap | null> {
   try {
-    await ensureSampleForTimestamp(state, timestamp, src, shouldContinue)
+    await ensureSampleForTimestamp(state, timestamp, shouldContinue)
     if (shouldContinue && !shouldContinue()) return null
     return renderCurrentSampleToBitmap(state)
   } catch (error) {
     if (error === ACTIVE_PREVIEW_CANCELLED) return null
-    const recovered = await recoverAndPrime(state, timestamp, error, src)
+    const recovered = await recoverAndPrime(state, timestamp, error)
     if (!recovered) {
       return null
     }
@@ -514,11 +484,20 @@ async function sparsePreseekWithState(
   let sample: WorkerSample | null = null
   try {
     // Active held scrubs are sparse random access. Mediabunny's dedicated
-    // sparse path seeks/decodes directly to the requested presentation sample;
-    // the range iterator below is retained for sequential background runway.
+    // sparse path seeks/decodes directly to the requested presentation sample.
+    // Sink calls are independent, so another generation may decode concurrently;
+    // only the shared canvas draw is serialized below.
     sample = await state.sink.getSample(timestamp)
     if (!sample || !shouldContinue()) return null
-    return renderSampleToBitmap(state, sample)
+    const previousDraw = state.drawLock ?? Promise.resolve()
+    const draw = previousDraw.then(() =>
+      shouldContinue() && sample ? renderSampleToBitmap(state, sample) : null,
+    )
+    state.drawLock = draw.then(
+      () => undefined,
+      () => undefined,
+    )
+    return await draw
   } catch {
     return null
   } finally {
@@ -540,12 +519,12 @@ async function preseek(
   })
   if (!state) return null
 
+  if (shouldContinue) {
+    return sparsePreseekWithState(state, timestamp, shouldContinue)
+  }
+
   const previous = state.drawLock ?? Promise.resolve()
-  const result = previous.then(() =>
-    shouldContinue
-      ? sparsePreseekWithState(state, timestamp, shouldContinue)
-      : preseekWithState(state, timestamp, src),
-  )
+  const result = previous.then(() => preseekWithState(state, timestamp))
   state.drawLock = result.then(
     () => undefined,
     () => undefined,
@@ -641,7 +620,16 @@ self.onmessage = async (event: MessageEvent) => {
   }
 
   if (msg.type === 'active_cancel') {
-    activePreviewGeneration = Math.max(activePreviewGeneration, Number(msg.generation) || 0)
+    const src = String(msg.src ?? '')
+    if (src) {
+      activePreviewGenerationBySrc.set(
+        src,
+        Math.max(
+          activePreviewGenerationBySrc.get(src) ?? 0,
+          Number(msg.generation) || 0,
+        ),
+      )
+    }
     return
   }
 
@@ -697,7 +685,13 @@ self.onmessage = async (event: MessageEvent) => {
 
   const isActivePreviewRequest = msg.type === 'active_preseek'
   if (isActivePreviewRequest) {
-    activePreviewGeneration = Math.max(activePreviewGeneration, Number(msg.generation) || 0)
+    activePreviewGenerationBySrc.set(
+      msg.src,
+      Math.max(
+        activePreviewGenerationBySrc.get(msg.src) ?? 0,
+        Number(msg.generation) || 0,
+      ),
+    )
   }
 
   // Accept inline keyframe data on first preseek for a source
@@ -712,7 +706,9 @@ self.onmessage = async (event: MessageEvent) => {
       msg.timestamp,
       msg.blob,
       msg.sourceMetadata,
-      isActivePreviewRequest ? () => activePreviewGeneration === Number(msg.generation) : undefined,
+      isActivePreviewRequest
+        ? () => activePreviewGenerationBySrc.get(msg.src) === Number(msg.generation)
+        : undefined,
     )
     if (isActivePreviewRequest) {
       self.postMessage({

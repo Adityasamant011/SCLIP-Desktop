@@ -34,6 +34,8 @@ const MAX_CACHED_BITMAP_SOURCES = 4
 const MAX_FALLBACK_BITMAPS_PER_SOURCE = 2
 const MAX_FALLBACK_BITMAP_SOURCES = 4
 const MAX_INFLIGHT_PER_WORKER = 1
+const MAX_ACTIVE_PREVIEW_INFLIGHT = 2
+const MAX_QUEUED_ACTIVE_PREVIEW_SOURCES = 2
 const PRESEEK_REQUEST_REUSE_TOLERANCE_SECONDS = 1 / 240
 /** Min 3 (transition pair + spare), max 6 (memory cap ~12MB WASM) */
 const WORKER_POOL_SIZE = Math.max(
@@ -188,8 +190,8 @@ const inflightPreseekBySrc = new Map<string, InflightPreseek[]>()
 const queuedPreseekBySrc = new Map<string, QueuedPreseek>()
 let activePreviewWorker: Worker | null = null
 let activePreviewGeneration = 0
-let activePreviewInflight: ActivePreviewInflightState | null = null
-let queuedActivePreviewRequest: ActivePreviewRequestState | null = null
+const activePreviewInflightById = new Map<string, ActivePreviewInflightState>()
+const queuedActivePreviewRequestsBySrc = new Map<string, ActivePreviewRequestState>()
 let activePreviewScrubSession = false
 let latestActivePreviewTimelineFrame: number | null = null
 let activePreviewRequestVersion = 0
@@ -737,10 +739,48 @@ function scheduleMissingActivePreviewLookahead(src: string, timestamps: number[]
   void backgroundBatchPreseek(src, missing)
 }
 
+function drainQueuedActivePreviewRequests(): void {
+  while (
+    activePreviewInflightById.size < MAX_ACTIVE_PREVIEW_INFLIGHT &&
+    queuedActivePreviewRequestsBySrc.size > 0
+  ) {
+    const entry = queuedActivePreviewRequestsBySrc.entries().next().value as
+      | [string, ActivePreviewRequestState]
+      | undefined
+    if (!entry) return
+    const [src, request] = entry
+    queuedActivePreviewRequestsBySrc.delete(src)
+    startActivePreviewRequest(request)
+  }
+}
+
+function cancelSupersededActivePreviewRequests(src: string): void {
+  let cancelledAny = false
+  for (const inflight of activePreviewInflightById.values()) {
+    if (inflight.src !== src || inflight.cancelled) continue
+    inflight.cancelled = true
+    decoderPrewarmMetrics.activeCancellations += 1
+    settleActivePreviewRequest(inflight, null)
+    cancelledAny = true
+  }
+  if (!cancelledAny) return
+
+  // MediaBunny sink calls are independent, so the stale decode may finish in
+  // the background while a second bounded request starts immediately. Updating
+  // the source generation makes the worker discard the stale result before it
+  // touches the shared canvas, without throwing away the warm worker/Input.
+  activePreviewWorker?.postMessage({
+    type: 'active_cancel',
+    src,
+    generation: ++activePreviewGeneration,
+  })
+}
+
 function startActivePreviewRequest(request: ActivePreviewRequestState): void {
   const worker = ensureActivePreviewWorker()
   if (!worker) {
     settleActivePreviewRequest(request, null)
+    drainQueuedActivePreviewRequests()
     return
   }
 
@@ -752,16 +792,17 @@ function startActivePreviewRequest(request: ActivePreviewRequestState): void {
     generation,
     cancelled: false,
   }
-  activePreviewInflight = inflight
+  activePreviewInflightById.set(id, inflight)
 
   let timeoutId: ReturnType<typeof setTimeout> | null = null
   const finish = (bitmap: ImageBitmap | null) => {
     if (timeoutId !== null) clearTimeout(timeoutId)
     pendingRequests.delete(id)
-    if (activePreviewInflight?.id !== id) {
+    if (activePreviewInflightById.get(id) !== inflight) {
       closeUnclaimedBitmap(bitmap)
       return
     }
+    activePreviewInflightById.delete(id)
 
     const wasCancelled = inflight.cancelled
     if (bitmap && !wasCancelled) {
@@ -781,25 +822,23 @@ function startActivePreviewRequest(request: ActivePreviewRequestState): void {
           PRESEEK_REQUEST_REUSE_TOLERANCE_SECONDS,
         )
     settleActivePreviewRequest(inflight, resolvedBitmap)
-    activePreviewInflight = null
-
-    const queued = queuedActivePreviewRequest
-    queuedActivePreviewRequest = null
-    if (queued) {
-      startActivePreviewRequest(queued)
-      return
-    }
 
     if (resolvedBitmap && inflight.lookaheadTimestamps.length > 0) {
       scheduleMissingActivePreviewLookahead(inflight.src, inflight.lookaheadTimestamps)
     }
+    drainQueuedActivePreviewRequests()
   }
 
   timeoutId = setTimeout(() => {
     if (!inflight.cancelled) {
       inflight.cancelled = true
       decoderPrewarmMetrics.activeCancellations += 1
-      worker.postMessage({ type: 'active_cancel', generation: ++activePreviewGeneration })
+      settleActivePreviewRequest(inflight, null)
+      worker.postMessage({
+        type: 'active_cancel',
+        src: inflight.src,
+        generation: ++activePreviewGeneration,
+      })
     }
     finish(null)
   }, 5000)
@@ -866,8 +905,10 @@ function startActivePreviewRequest(request: ActivePreviewRequestState): void {
 
 /**
  * Decode the current held-scrub target on a worker reserved for active preview
- * interaction. At most one request is executing and one latest target is
- * retained; intermediate pointer positions are cancelled and never decoded.
+ * interaction. MediaBunny sink calls are independent, so at most two requests
+ * may overlap while one latest target per source is retained. Stale generations
+ * are discarded before drawing and the warm worker is never restarted merely
+ * because the pointer moved.
  */
 export function activePreviewPreseek(
   request: ActivePreviewPreseekRequest,
@@ -885,6 +926,7 @@ export function activePreviewPreseek(
     PRESEEK_REQUEST_REUSE_TOLERANCE_SECONDS,
   )
   if (cached) {
+    cancelSupersededActivePreviewRequests(request.src)
     decoderPrewarmMetrics.activeCacheHits += 1
     if (request.lookaheadTimestamps?.length) {
       scheduleMissingActivePreviewLookahead(request.src, request.lookaheadTimestamps)
@@ -892,52 +934,46 @@ export function activePreviewPreseek(
     return Promise.resolve(cached)
   }
 
-  if (
-    activePreviewInflight &&
-    !activePreviewInflight.cancelled &&
-    activePreviewInflight.src === request.src &&
-    Math.abs(activePreviewInflight.timestamp - request.timestamp) <=
-      PRESEEK_REQUEST_REUSE_TOLERANCE_SECONDS
-  ) {
-    decoderPrewarmMetrics.inflightReuses += 1
-    return activePreviewInflight.promise
-  }
-  if (
-    queuedActivePreviewRequest &&
-    queuedActivePreviewRequest.src === request.src &&
-    Math.abs(queuedActivePreviewRequest.timestamp - request.timestamp) <=
-      PRESEEK_REQUEST_REUSE_TOLERANCE_SECONDS
-  ) {
-    decoderPrewarmMetrics.inflightReuses += 1
-    return queuedActivePreviewRequest.promise
-  }
-
-  const next = createActivePreviewRequestState(request)
-  if (queuedActivePreviewRequest) {
-    decoderPrewarmMetrics.activeSupersededRequests += 1
-    settleActivePreviewRequest(queuedActivePreviewRequest, null)
-  }
-  queuedActivePreviewRequest = next
-
-  if (activePreviewInflight) {
-    if (!activePreviewInflight.cancelled) {
-      activePreviewInflight.cancelled = true
-      decoderPrewarmMetrics.activeCancellations += 1
-      // Mediabunny's packet iterator cannot interrupt an in-progress
-      // decoder await. Terminating this isolated worker prevents a stale
-      // long-GOP seek from serializing the newest pointer target behind it.
-      const staleWorker = activePreviewWorker
-      activePreviewWorker = null
-      decoderPrewarmMetrics.activeWorkerReady = false
-      decoderPrewarmMetrics.activeWorkerRestarts += 1
-      staleWorker?.terminate()
-      pendingRequests.get(activePreviewInflight.id)?.resolve(null)
+  for (const inflight of activePreviewInflightById.values()) {
+    if (
+      !inflight.cancelled &&
+      inflight.src === request.src &&
+      Math.abs(inflight.timestamp - request.timestamp) <=
+        PRESEEK_REQUEST_REUSE_TOLERANCE_SECONDS
+    ) {
+      decoderPrewarmMetrics.inflightReuses += 1
+      return inflight.promise
     }
-    return next.promise
+  }
+  const queuedForSource = queuedActivePreviewRequestsBySrc.get(request.src)
+  if (
+    queuedForSource &&
+    Math.abs(queuedForSource.timestamp - request.timestamp) <=
+      PRESEEK_REQUEST_REUSE_TOLERANCE_SECONDS
+  ) {
+    decoderPrewarmMetrics.inflightReuses += 1
+    return queuedForSource.promise
   }
 
-  queuedActivePreviewRequest = null
-  startActivePreviewRequest(next)
+  cancelSupersededActivePreviewRequests(request.src)
+  const next = createActivePreviewRequestState(request)
+  if (queuedForSource) {
+    decoderPrewarmMetrics.activeSupersededRequests += 1
+    settleActivePreviewRequest(queuedForSource, null)
+    queuedActivePreviewRequestsBySrc.delete(request.src)
+  }
+  queuedActivePreviewRequestsBySrc.set(request.src, next)
+  while (queuedActivePreviewRequestsBySrc.size > MAX_QUEUED_ACTIVE_PREVIEW_SOURCES) {
+    const oldest = queuedActivePreviewRequestsBySrc.entries().next().value as
+      | [string, ActivePreviewRequestState]
+      | undefined
+    if (!oldest) break
+    queuedActivePreviewRequestsBySrc.delete(oldest[0])
+    decoderPrewarmMetrics.activeSupersededRequests += 1
+    settleActivePreviewRequest(oldest[1], null)
+  }
+
+  drainQueuedActivePreviewRequests()
   return next.promise
 }
 
@@ -1466,15 +1502,15 @@ function clearPredecodedCache(src?: string): void {
  * Dispose all workers in the pool and clean up.
  */
 export function disposePrewarmWorker(): void {
-  if (activePreviewInflight) {
-    pendingRequests.delete(activePreviewInflight.id)
-    settleActivePreviewRequest(activePreviewInflight, null)
-    activePreviewInflight = null
+  for (const inflight of activePreviewInflightById.values()) {
+    pendingRequests.delete(inflight.id)
+    settleActivePreviewRequest(inflight, null)
   }
-  if (queuedActivePreviewRequest) {
-    settleActivePreviewRequest(queuedActivePreviewRequest, null)
-    queuedActivePreviewRequest = null
+  activePreviewInflightById.clear()
+  for (const queued of queuedActivePreviewRequestsBySrc.values()) {
+    settleActivePreviewRequest(queued, null)
   }
+  queuedActivePreviewRequestsBySrc.clear()
   activePreviewWorker?.terminate()
   activePreviewWorker = null
   activePreviewGeneration = 0

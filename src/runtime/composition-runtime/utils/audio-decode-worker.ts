@@ -276,26 +276,40 @@ async function decodeWindow(
     }
 
     const initialSample = (await sink.getSample(safeStartTime)) as DecodeSampleData | null
+    let initialSampleEndTime: number | null = null
     if (initialSample) {
       try {
         append(initialSample)
+        if (
+          Number.isFinite(initialSample.timestamp) &&
+          Number.isFinite(initialSample.duration) &&
+          Number(initialSample.duration) > 0
+        ) {
+          initialSampleEndTime =
+            Number(initialSample.timestamp) + Number(initialSample.duration)
+        }
       } finally {
         initialSample.close()
       }
     }
 
-    const iteratorStartTime = sliceStartTime ?? safeStartTime
-    for await (const sample of sink.samples(
-      iteratorStartTime,
-      targetCoverageEndTime,
-    ) as AsyncIterable<DecodeSampleData>) {
-      try {
-        append(sample)
-      } finally {
-        sample.close()
-      }
-      if (coverageEndTime >= targetCoverageEndTime) {
-        break
+    const iteratorStartTime =
+      initialSampleEndTime === null
+        ? safeStartTime
+        : Math.max(safeStartTime, initialSampleEndTime)
+    if (coverageEndTime < targetCoverageEndTime) {
+      for await (const sample of sink.samples(
+        iteratorStartTime,
+        targetCoverageEndTime,
+      ) as AsyncIterable<DecodeSampleData>) {
+        try {
+          append(sample)
+        } finally {
+          sample.close()
+        }
+        if (coverageEndTime >= targetCoverageEndTime) {
+          break
+        }
       }
     }
 
