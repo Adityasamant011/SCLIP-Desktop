@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vite-plus/test'
 import type { Project, ProjectTimeline } from '@/types/project'
 import { CURRENT_SCHEMA_VERSION, migrateProject } from './index'
+import { getMigrationsToApply } from './migrations'
 
 function createTrack(
   id: string,
@@ -526,5 +527,166 @@ describe('migrateProject validation warnings', () => {
     } as unknown as ProjectTimeline)
 
     expect(migrateProject(project).warnings).toEqual([])
+  })
+})
+
+describe('migration v5: transitions virtual-window → FCP overlap model', () => {
+  function v4Project(rightFrom: number, transitionFrames: number): Project {
+    return {
+      ...createBaseProject({
+        tracks: [createTrack('t-v', 0, 'video')],
+        items: [
+          {
+            id: 'left',
+            type: 'video',
+            trackId: 't-v',
+            from: 0,
+            durationInFrames: 60,
+            label: 'L',
+            src: 'l.mp4',
+            mediaId: 'm1',
+            sourceStart: 0,
+            sourceEnd: 60,
+            sourceDuration: 300,
+          },
+          {
+            id: 'right',
+            type: 'video',
+            trackId: 't-v',
+            from: rightFrom,
+            durationInFrames: 60,
+            label: 'R',
+            src: 'r.mp4',
+            mediaId: 'm2',
+            sourceStart: 100,
+            sourceEnd: 160,
+            sourceDuration: 300,
+          },
+          {
+            id: 'tail',
+            type: 'video',
+            trackId: 't-v',
+            from: rightFrom + 60,
+            durationInFrames: 30,
+            label: 'T',
+            src: 't.mp4',
+            mediaId: 'm3',
+            sourceStart: 0,
+            sourceEnd: 30,
+            sourceDuration: 300,
+          },
+        ],
+        transitions: [
+          {
+            id: 'tr',
+            type: 'fade',
+            presentation: 'fade',
+            timing: 'linear',
+            leftClipId: 'left',
+            rightClipId: 'right',
+            trackId: 't-v',
+            durationInFrames: transitionFrames,
+          },
+        ],
+        currentFrame: 0,
+        zoomLevel: 1,
+        scrollPosition: 0,
+      } as unknown as ProjectTimeline),
+      schemaVersion: 4,
+    }
+  }
+
+  const applyV5 = (project: Project): Project => {
+    const migration = getMigrationsToApply(4, 5)[0]!
+    return migration.migrate(project)
+  }
+
+  it('slides the right clip left by the transition duration and ripples the tail', () => {
+    const project = applyV5(v4Project(60, 10))
+    const items = Object.fromEntries(project.timeline!.items.map((i) => [i.id, i]))
+    expect(items['right']!.from).toBe(50) // 60 − 10 overlap
+    expect(items['tail']!.from).toBe(110) // rippled left with it
+    // sourceStart stays: the first D source frames become the transition-in.
+    expect((items['right'] as { sourceStart?: number }).sourceStart).toBe(100)
+  })
+
+  it('clamps the transition to the shorter clip minus one frame', () => {
+    const project = applyV5(v4Project(60, 90))
+    const transition = project.timeline!.transitions![0]!
+    expect(transition.durationInFrames).toBe(59) // min(60,60) − 1
+  })
+
+  it('leaves already-overlapping (post-v5) clips untouched', () => {
+    const project = applyV5(v4Project(45, 10)) // already overlaps by 15
+    const items = Object.fromEntries(project.timeline!.items.map((i) => [i.id, i]))
+    expect(items['right']!.from).toBe(45)
+  })
+})
+
+describe('migration v6: legacy effects → GPU shader effects', () => {
+  function v5ProjectWithEffects(effects: unknown[]): Project {
+    return {
+      ...createBaseProject({
+        tracks: [createTrack('t-v', 0, 'video')],
+        items: [
+          {
+            id: 'clip',
+            type: 'video',
+            trackId: 't-v',
+            from: 0,
+            durationInFrames: 30,
+            label: 'C',
+            src: 'c.mp4',
+            mediaId: 'm1',
+            effects,
+          },
+        ],
+        transitions: [],
+        currentFrame: 0,
+        zoomLevel: 1,
+        scrollPosition: 0,
+      } as unknown as ProjectTimeline),
+      schemaVersion: 5,
+    }
+  }
+
+  function effectsOf(project: Project): Array<{ effect: Record<string, unknown> }> {
+    return (
+      project.timeline!.items[0] as unknown as {
+        effects: Array<{ effect: Record<string, unknown> }>
+      }
+    ).effects
+  }
+
+  const applyV6 = (project: Project): Project => getMigrationsToApply(5, 6)[0]!.migrate(project)
+
+  it('converts css-filter brightness/blur with the documented param math', () => {
+    const project = applyV6(
+      v5ProjectWithEffects([
+        {
+          id: 'e1',
+          enabled: true,
+          effect: { type: 'css-filter', filter: 'brightness', value: 150 },
+        },
+        { id: 'e2', enabled: true, effect: { type: 'css-filter', filter: 'blur', value: 8 } },
+      ]),
+    )
+    const effects = effectsOf(project)
+    expect(effects[0]!.effect).toMatchObject({
+      type: 'gpu-effect',
+      gpuEffectType: 'gpu-brightness',
+      params: { amount: 0.5 }, // (150 − 100) / 100
+    })
+    expect(effects[1]!.effect).toMatchObject({
+      type: 'gpu-effect',
+      gpuEffectType: 'gpu-gaussian-blur',
+      params: { radius: 8 },
+    })
+  })
+
+  it('passes existing gpu-effect entries through unchanged', () => {
+    const gpu = { type: 'gpu-effect', gpuEffectType: 'gpu-sepia', params: { amount: 0.4 } }
+    const project = applyV6(v5ProjectWithEffects([{ id: 'e1', enabled: false, effect: gpu }]))
+    expect(effectsOf(project)[0]!.effect).toEqual(gpu)
   })
 })

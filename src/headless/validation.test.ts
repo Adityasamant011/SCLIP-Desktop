@@ -3,7 +3,12 @@
 import { describe, expect, it } from 'vite-plus/test'
 import type { TimelineItem } from '@/types/timeline'
 import type { MediaMetadata } from '@/types/storage'
-import { collectSourceRangeFindings } from './validation'
+import {
+  buildMediaMetadataMap,
+  collectSourceRangeFindings,
+  hasAudioCapableItems,
+  videoCarriesAudio,
+} from './validation'
 
 function makeMetadata(): MediaMetadata {
   return {
@@ -68,5 +73,41 @@ describe('collectSourceRangeFindings', () => {
     const noMeta = makeVideo({ mediaId: 'unknown' })
     const image = makeVideo({ type: 'image' })
     expect(collectSourceRangeFindings([noMeta, image], mediaById, 25)).toEqual([])
+  })
+})
+
+describe('audio-capability helpers', () => {
+  const withAudio = { ...makeMetadata(), audioCodec: 'aac' } as MediaMetadata
+  const silent = { ...makeMetadata(), audioCodec: undefined } as MediaMetadata
+
+  it('buildMediaMetadataMap keeps only entries that carry metadata', () => {
+    const map = buildMediaMetadataMap([{ mediaId: 'a', metadata: withAudio }, { mediaId: 'b' }])
+    expect(map.has('a')).toBe(true)
+    expect(map.has('b')).toBe(false)
+  })
+
+  it('video without an audio track (per metadata) cannot carry audio', () => {
+    const map = new Map([['m', silent]])
+    expect(videoCarriesAudio({ mediaId: 'm' }, map)).toBe(false)
+  })
+
+  it('embeddedAudioMuted silences the video regardless of metadata', () => {
+    const map = new Map([['m', withAudio]])
+    expect(videoCarriesAudio({ mediaId: 'm', embeddedAudioMuted: true }, map)).toBe(false)
+    expect(videoCarriesAudio({ mediaId: 'm' }, map)).toBe(true)
+  })
+
+  it('unknown metadata assumes the video may carry audio (no false negatives)', () => {
+    expect(videoCarriesAudio({ mediaId: 'unknown' }, new Map())).toBe(true)
+  })
+
+  it('hasAudioCapableItems skips muted and hidden tracks', () => {
+    const map = new Map([['m', withAudio]])
+    const item = { id: 'v', type: 'video', mediaId: 'm', from: 0, durationInFrames: 10 }
+    const track = (overrides: Record<string, unknown>) =>
+      ({ id: 't', items: [item], ...overrides }) as never
+    expect(hasAudioCapableItems([track({})], map)).toBe(true)
+    expect(hasAudioCapableItems([track({ muted: true })], map)).toBe(false)
+    expect(hasAudioCapableItems([track({ visible: false })], map)).toBe(false)
   })
 })

@@ -43,7 +43,19 @@ vi.mock('mediabunny', () => {
       }
       const sampleRate = this.track.src.includes('44100') ? 44100 : 48000
       const frameCount = Math.max(1, Math.round((endTime - startTime) * sampleRate))
-      const makePlane = () => new Float32Array(frameCount).fill(0.1)
+      // 'ramp' sources yield a monotone ramp tied to the ABSOLUTE source
+      // position, so tests can observe reversal and speed consumption.
+      const ramp = this.track.src.includes('ramp')
+      const startIndex = Math.round(startTime * sampleRate)
+      const makePlane = () => {
+        const plane = new Float32Array(frameCount)
+        if (ramp) {
+          for (let i = 0; i < frameCount; i++) plane[i] = (startIndex + i) / 1_000_000
+        } else {
+          plane.fill(0.1)
+        }
+        return plane
+      }
       const planes = [makePlane(), makePlane()]
 
       yield {
@@ -72,6 +84,7 @@ import {
   downmixToOutputChannels,
   extractAudioSegments,
   getAudioPacketPassthroughPlan,
+  hasAudioContent,
   processAudio,
   processAudioWindows,
   supportsWindowedAudioProcessing,
@@ -829,5 +842,61 @@ describe('downmixToOutputChannels', () => {
     const [Lo, Ro] = downmixToOutputChannels(channels, 2)
     expect(Lo![0]).toBeCloseTo(Math.SQRT1_2, 5)
     expect(Ro![0]).toBeCloseTo(Math.SQRT1_2, 5)
+  })
+})
+
+describe('audio DSP through processAudio (real pipeline, mocked decode)', () => {
+  beforeEach(() => {
+    clearAudioDecodeCache()
+  })
+
+  function dspComposition(itemOverrides: Partial<AudioItem>): CompositionInputProps {
+    return {
+      fps: 30,
+      durationInFrames: 90, // 3s output window
+      width: 1920,
+      height: 1080,
+      tracks: [
+        makeTrack({
+          id: 'track-a1',
+          order: 0,
+          kind: 'audio',
+          items: [makeAudioItem(itemOverrides)],
+        }),
+      ],
+      transitions: [],
+      keyframes: [],
+    }
+  }
+
+  it('isReversed plays the source backwards (ramp arrives descending)', async () => {
+    const result = await processAudio(dspComposition({ src: 'blob:audio-ramp', isReversed: true }))
+    expect(result).not.toBeNull()
+    const samples = result!.samples[0]!
+    // Forward ramp is ascending; reversed output must descend.
+    expect(samples[0]!).toBeGreaterThan(samples[24_000]!)
+    expect(samples[24_000]!).toBeGreaterThan(samples[47_000]!)
+  })
+
+  it('speed 2x consumes twice the source material into the same window', async () => {
+    const result = await processAudio(
+      dspComposition({ src: 'blob:audio-ramp', speed: 2, durationInFrames: 90 }),
+    )
+    expect(result).not.toBeNull()
+    const samples = result!.samples[0]!
+    expect(samples).toHaveLength(3 * 48_000)
+    // At 1s of output the time-stretcher has consumed ~2s of source
+    // (ramp ≈ 0.096); an unstretched read would sit at ~0.048. The WSOLA
+    // stretcher flushes with silence at the very tail, so probe mid-window.
+    const midway = samples[48_000]!
+    expect(midway).toBeGreaterThan(0.07)
+    expect(midway).toBeLessThan(0.125)
+  })
+
+  it('hasAudioContent: true for an audible clip, false when its track is muted', async () => {
+    await expect(hasAudioContent(dspComposition({}))).resolves.toBe(true)
+    const muted = dspComposition({})
+    muted.tracks[0]! = { ...muted.tracks[0]!, muted: true }
+    await expect(hasAudioContent(muted)).resolves.toBe(false)
   })
 })

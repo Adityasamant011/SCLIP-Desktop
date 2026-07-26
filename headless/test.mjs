@@ -416,6 +416,61 @@ async function main() {
       `got ${editedSummary.durationSeconds}, expected ${expectedEditedDurationSeconds}`,
     )
     check('edited render produced bytes (>1KB)', editedSize > 1000, `size ${editedSize}`)
+
+    console.log('\nFrame grab + layout dump:')
+    const frameDownloadPromise = page.waitForEvent('download', { timeout: 60_000 })
+    frameDownloadPromise.catch(() => {})
+    const frameSummary = await page.evaluate((input) => window.freecut.renderFrame(input), {
+      project: reopenedProject,
+      atSeconds: 1,
+    })
+    const framePath = path.join(tempDir, 'frame.png')
+    const frameDownload = await frameDownloadPromise
+    await frameDownload.saveAs(framePath)
+    const frameSize = fs.existsSync(framePath) ? fs.statSync(framePath).size : 0
+    check('frame grab returns ok', frameSummary.ok === true)
+    check(
+      'frame grab matches project resolution',
+      frameSummary.width === (reopenedProject.metadata?.width ?? -1),
+      `got ${frameSummary.width}`,
+    )
+    check('frame PNG has real pixels (>10KB)', frameSize > 10_000, `size ${frameSize}`)
+
+    const layout = await page.evaluate((input) => window.freecut.dumpLayout(input), {
+      project: reopenedProject,
+      atSeconds: 1,
+    })
+    const titleBox = layout.items.find((box) => box.id === 'text-1')
+    check('layout reports the title box', Boolean(titleBox))
+    check(
+      'layout title is visible with sane bounds',
+      Boolean(titleBox && titleBox.visible && titleBox.width > 0 && titleBox.height > 0),
+      titleBox ? `${titleBox.width}x${titleBox.height}` : 'missing',
+    )
+    check('layout carries a validation warnings array', Array.isArray(layout.warnings))
+
+    // --strict must fail BEFORE rendering on silent-failure findings.
+    const brokenProject = JSON.parse(JSON.stringify(reopenedProject))
+    brokenProject.timeline.items.push({
+      ...brokenProject.timeline.items.find((item) => item.id === 'text-1'),
+      id: 'text-overlap',
+    })
+    const strictError = await page.evaluate(
+      async (input) => {
+        try {
+          await window.freecut.dumpLayout(input)
+          return null
+        } catch (error) {
+          return String(error?.message ?? error)
+        }
+      },
+      { project: brokenProject, strict: true },
+    )
+    check(
+      'strict mode rejects a project with overlapping items',
+      Boolean(strictError && strictError.includes('TRACK_OVERLAP_REPAIRED')),
+      strictError ?? 'no error thrown',
+    )
   } finally {
     await browser.close()
     await server.close()

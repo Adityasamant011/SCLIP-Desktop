@@ -1,5 +1,12 @@
 // @vitest-environment node
 
+// NOTE: this file does NOT import canvas-render-orchestrator — it re-implements
+// the frame-loop shape on mocks, so it is a design sketch, not coverage of the
+// real orchestrator. Real protection is the headless chrome e2e
+// (headless/test.mjs). Planned: extract the pure frame-loop planning from the
+// orchestrator and test that directly (deferred until after the next upstream
+// sync — upstream is actively changing this file).
+
 import { describe, it, expect, vi } from 'vite-plus/test'
 
 describe('pipelined frame loop', () => {
