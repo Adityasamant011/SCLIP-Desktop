@@ -9,9 +9,12 @@ describe('shouldPreferDomPlayerForGizmo', () => {
     },
   )
 
-  it('keeps an effected underlay rendered while a shape transform is previewed', () => {
-    expect(shouldPreferDomPlayerForGizmo(true, 'shape')).toBe(false)
-  })
+  it.each(['text', 'shape'] as const)(
+    'keeps an effected underlay rendered while a %s transform is previewed',
+    (itemType) => {
+      expect(shouldPreferDomPlayerForGizmo(true, itemType)).toBe(false)
+    },
+  )
 
   it('does not change presentation for media gizmos', () => {
     expect(shouldPreferDomPlayerForGizmo(false, 'video')).toBe(false)
