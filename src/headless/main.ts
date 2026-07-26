@@ -313,24 +313,74 @@ function sourceRangeWarnings(
   }))
 }
 
+function videoCarriesAudio(
+  videoItem: { embeddedAudioMuted?: boolean; mediaId?: string },
+  mediaById: Map<string, MediaMetadata>,
+): boolean {
+  if (videoItem.embeddedAudioMuted) return false
+  const metadata = videoItem.mediaId ? mediaById.get(videoItem.mediaId) : undefined
+  // Without metadata assume the video may carry audio; with it require an audio track.
+  return !metadata || Boolean(metadata.audioCodec)
+}
+
+function itemCanCarryAudio(
+  item: CompositionInputProps['tracks'][number]['items'][number],
+  mediaById: Map<string, MediaMetadata>,
+): boolean {
+  if (item.type === 'audio') return true
+  return item.type === 'video' && videoCarriesAudio(item, mediaById)
+}
+
 /** True when any item on an unmuted, visible track can contribute audio. */
 function hasAudioCapableItems(
   tracks: CompositionInputProps['tracks'],
   mediaById: Map<string, MediaMetadata>,
 ): boolean {
-  for (const track of tracks) {
-    if (track.visible === false || track.muted === true) continue
-    for (const item of track.items ?? []) {
-      if (item.type === 'audio') return true
-      if (item.type !== 'video') continue
-      const videoItem = item as { embeddedAudioMuted?: boolean; mediaId?: string }
-      if (videoItem.embeddedAudioMuted) continue
-      const metadata = videoItem.mediaId ? mediaById.get(videoItem.mediaId) : undefined
-      // Without metadata assume the video may carry audio; with it require an audio track.
-      if (!metadata || metadata.audioCodec) return true
-    }
+  return tracks.some(
+    (track) =>
+      track.visible !== false &&
+      track.muted !== true &&
+      (track.items ?? []).some((item) => itemCanCarryAudio(item, mediaById)),
+  )
+}
+
+/**
+ * Warn (or throw in strict mode) when the composition has audio-capable items
+ * but the extracted mix contains zero audible segments.
+ */
+async function collectSilentMixWarnings(
+  composition: CompositionInputProps,
+  mediaById: Map<string, MediaMetadata>,
+  strict: boolean | undefined,
+): Promise<HeadlessRenderWarning[]> {
+  if (!hasAudioCapableItems(composition.tracks, mediaById)) return []
+  if (await hasAudioContent(composition)) return []
+  const warning: HeadlessRenderWarning = {
+    code: 'NO_AUDIO_IN_MIX',
+    message:
+      'Composition contains items with audio, but the final mix has zero audible segments — the output file will have NO audio track',
   }
-  return false
+  log.warn(warning.message)
+  if (strict) {
+    throw new Error(`Strict validation failed (render): ${warning.code}: ${warning.message}`)
+  }
+  return [warning]
+}
+
+/** Merge caller findings with source-overrun checks and report them. */
+function runLoadValidation(
+  input: HeadlessTimelineInput,
+  items: readonly TimelineItem[],
+  compositions: readonly SubComposition[] | undefined,
+  fps: number,
+  mediaById: Map<string, MediaMetadata>,
+): HeadlessRenderWarning[] {
+  const validationWarnings = [
+    ...(input.validationWarnings ?? []),
+    ...sourceRangeWarnings(items, compositions, mediaById, fps),
+  ]
+  reportValidationWarnings(validationWarnings, input.strict, 'render')
+  return validationWarnings
 }
 
 /** Log every validation warning; in strict mode abort before any rendering. */
@@ -549,12 +599,7 @@ async function renderTimeline(input: HeadlessTimelineInput): Promise<HeadlessRen
   // Load-time validation: caller-collected findings (project normalization)
   // plus source-overrun checks. Logged always; fatal before render in --strict.
   const mediaById = buildMediaMetadataMap(media)
-  const validationWarnings = [
-    ...(input.validationWarnings ?? []),
-    ...sourceRangeWarnings(items, compositions, mediaById, fps),
-  ]
-  reportValidationWarnings(validationWarnings, input.strict, 'render')
-  warnings.unshift(...validationWarnings)
+  warnings.unshift(...runLoadValidation(input, items, compositions, fps, mediaById))
 
   const composition: CompositionInputProps = convertTimelineToComposition(
     tracks,
@@ -580,21 +625,9 @@ async function renderTimeline(input: HeadlessTimelineInput): Promise<HeadlessRen
   composition.tracks = await resolveMediaUrls(composition.tracks, { useProxy: false })
 
   // Silent-failure guard: items with audio present but zero audible segments in
-  // the final mix is almost always an authoring/engine bug, not intent.
-  if (settings.mode !== 'audio' && hasAudioCapableItems(composition.tracks, mediaById)) {
-    if (!(await hasAudioContent(composition))) {
-      const warning: HeadlessRenderWarning = {
-        code: 'NO_AUDIO_IN_MIX',
-        message:
-          'Composition contains items with audio, but the final mix has zero audible segments — the output file will have NO audio track',
-      }
-      log.warn(warning.message)
-      warnings.push(warning)
-      if (input.strict) {
-        throw new Error(`Strict validation failed (render): ${warning.code}: ${warning.message}`)
-      }
-    }
-  }
+  // the final mix is almost always an authoring/engine bug, not intent. (In
+  // audio-only mode renderAudioOnly additionally throws on an empty mix.)
+  warnings.push(...(await collectSilentMixWarnings(composition, mediaById, input.strict)))
 
   const result =
     settings.mode === 'audio'

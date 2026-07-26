@@ -177,6 +177,71 @@ export function calculateContainedRect(
   }
 }
 
+function isPositiveFinite(value: number): boolean {
+  return Number.isFinite(value) && value > 0
+}
+
+/**
+ * `refit`: fit the CROPPED region (not the full source) into the container,
+ * then position the full-source rect so the cropped window lands there —
+ * downstream math (crop pixels, viewport, softness) is unchanged.
+ * See CropSettings in src/types/transform.ts for both semantics.
+ */
+function calculateRefitMediaRect(
+  sourceWidth: number,
+  sourceHeight: number,
+  containerWidth: number,
+  containerHeight: number,
+  resolvedCrop: ResolvedCropSettings,
+): Rect {
+  const remainingW = Math.max(1e-6, 1 - resolvedCrop.left - resolvedCrop.right)
+  const remainingH = Math.max(1e-6, 1 - resolvedCrop.top - resolvedCrop.bottom)
+  const croppedW = sourceWidth * remainingW
+  const croppedH = sourceHeight * remainingH
+  const fitted = calculateContainedRect(croppedW, croppedH, containerWidth, containerHeight)
+  const scale = fitted.width / croppedW
+  return {
+    x: fitted.x - sourceWidth * resolvedCrop.left * scale,
+    y: fitted.y - sourceHeight * resolvedCrop.top * scale,
+    width: sourceWidth * scale,
+    height: sourceHeight * scale,
+  }
+}
+
+function resolveMediaRect(
+  sourceWidth: number,
+  sourceHeight: number,
+  containerWidth: number,
+  containerHeight: number,
+  crop: CropSettings | undefined,
+  resolvedCrop: ResolvedCropSettings,
+  fitMode: MediaCropFitMode,
+): Rect {
+  const validDims = [sourceWidth, sourceHeight, containerWidth, containerHeight].every(
+    isPositiveFinite,
+  )
+  // `refit` wins over `fitMode`: it is an explicit per-crop request to frame the
+  // cropped window, which 'fill' would otherwise override.
+  if (crop?.refit === true && validDims) {
+    return calculateRefitMediaRect(
+      sourceWidth,
+      sourceHeight,
+      containerWidth,
+      containerHeight,
+      resolvedCrop,
+    )
+  }
+  if (fitMode === 'fill') {
+    return {
+      x: 0,
+      y: 0,
+      width: Math.max(0, containerWidth),
+      height: Math.max(0, containerHeight),
+    }
+  }
+  return calculateContainedRect(sourceWidth, sourceHeight, containerWidth, containerHeight)
+}
+
 export function calculateMediaCropLayout(
   sourceWidth: number,
   sourceHeight: number,
@@ -186,46 +251,15 @@ export function calculateMediaCropLayout(
   fitMode: MediaCropFitMode = 'contain',
 ): MediaCropLayout {
   const resolvedCrop = resolveCropSettings(crop)
-
-  // `refit`: fit the CROPPED region (not the full source) into the container,
-  // then position the full-source rect so the cropped window lands there —
-  // downstream math (crop pixels, viewport, softness) is unchanged.
-  // See CropSettings in src/types/transform.ts for both semantics.
-  // `refit` wins over `fitMode` when both are set: it is an explicit per-crop
-  // request to frame the cropped window, which 'fill' would otherwise override.
-  let mediaRect: Rect
-  const validDims =
-    Number.isFinite(sourceWidth) &&
-    sourceWidth > 0 &&
-    Number.isFinite(sourceHeight) &&
-    sourceHeight > 0 &&
-    Number.isFinite(containerWidth) &&
-    containerWidth > 0 &&
-    Number.isFinite(containerHeight) &&
-    containerHeight > 0
-  if (crop?.refit === true && validDims) {
-    const remainingW = Math.max(1e-6, 1 - resolvedCrop.left - resolvedCrop.right)
-    const remainingH = Math.max(1e-6, 1 - resolvedCrop.top - resolvedCrop.bottom)
-    const croppedW = sourceWidth * remainingW
-    const croppedH = sourceHeight * remainingH
-    const fitted = calculateContainedRect(croppedW, croppedH, containerWidth, containerHeight)
-    const scale = fitted.width / croppedW
-    mediaRect = {
-      x: fitted.x - sourceWidth * resolvedCrop.left * scale,
-      y: fitted.y - sourceHeight * resolvedCrop.top * scale,
-      width: sourceWidth * scale,
-      height: sourceHeight * scale,
-    }
-  } else if (fitMode === 'fill') {
-    mediaRect = {
-      x: 0,
-      y: 0,
-      width: Math.max(0, containerWidth),
-      height: Math.max(0, containerHeight),
-    }
-  } else {
-    mediaRect = calculateContainedRect(sourceWidth, sourceHeight, containerWidth, containerHeight)
-  }
+  const mediaRect = resolveMediaRect(
+    sourceWidth,
+    sourceHeight,
+    containerWidth,
+    containerHeight,
+    crop,
+    resolvedCrop,
+    fitMode,
+  )
 
   const cropPixels: CropInsets = {
     left: mediaRect.width * resolvedCrop.left,

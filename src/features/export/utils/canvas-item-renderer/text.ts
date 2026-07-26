@@ -137,35 +137,43 @@ function paintTextBlock(
 
   for (const line of layout.lines) {
     if (line.text.length === 0) continue
-    const x = originX + line.startX
-    const y = originY + line.baselineY
+    paintLaidOutLine(ctx, item, line, originX + line.startX, originY + line.baselineY, strokeWidth)
+  }
+}
 
-    ctx.font = line.cssFont
-    applyCanvasLetterSpacing(ctx, line.letterSpacing)
+/** Paint one laid-out line: stroke pass, then fill (per-run for inline flow). */
+function paintLaidOutLine(
+  ctx: OffscreenCanvasRenderingContext2D,
+  item: TextItem,
+  line: LaidOutLine,
+  x: number,
+  y: number,
+  strokeWidth: number,
+): void {
+  ctx.font = line.cssFont
+  applyCanvasLetterSpacing(ctx, line.letterSpacing)
 
-    if (item.stroke && strokeWidth > 0) {
-      ctx.strokeStyle = item.stroke.color
-      ctx.lineWidth = strokeWidth * 2
-      ctx.lineJoin = 'round'
-      ctx.strokeText(line.text, x, y)
-    }
+  if (item.stroke && strokeWidth > 0) {
+    ctx.strokeStyle = item.stroke.color
+    ctx.lineWidth = strokeWidth * 2
+    ctx.lineJoin = 'round'
+    ctx.strokeText(line.text, x, y)
+  }
 
-    if (line.runs && line.runs.length > 0) {
-      // Inline span flow: same geometry as the whole-line draw (runs are
-      // prefix-measured offsets), painted per-run for color/underline.
-      for (const run of line.runs) {
-        ctx.fillStyle = run.color
-        ctx.fillText(run.text, x + run.offsetX, y)
-        if (run.underline) {
-          drawUnderline(ctx, { ...line, width: run.width, color: run.color }, x + run.offsetX, y)
-        }
-      }
-    } else {
-      ctx.fillStyle = line.color
-      ctx.fillText(line.text, x, y)
-      if (line.underline) {
-        drawUnderline(ctx, line, x, y)
-      }
+  if (!line.runs || line.runs.length === 0) {
+    ctx.fillStyle = line.color
+    ctx.fillText(line.text, x, y)
+    if (line.underline) drawUnderline(ctx, line, x, y)
+    return
+  }
+
+  // Inline span flow: same geometry as the whole-line draw (runs are
+  // prefix-measured offsets), painted per-run for color/underline.
+  for (const run of line.runs) {
+    ctx.fillStyle = run.color
+    ctx.fillText(run.text, x + run.offsetX, y)
+    if (run.underline) {
+      drawUnderline(ctx, { ...line, width: run.width, color: run.color }, x + run.offsetX, y)
     }
   }
 }

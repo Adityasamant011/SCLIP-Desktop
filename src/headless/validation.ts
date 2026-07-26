@@ -27,6 +27,30 @@ export interface SourceRangeFinding {
  * `sourceEnd` is absent the needed range is derived from the timeline duration
  * and speed. Media without a known duration is skipped.
  */
+function findSourceOverrun(
+  item: TimelineItem,
+  metadata: MediaMetadata,
+  projectFps: number,
+): SourceRangeFinding | null {
+  const sourceFps = metadata.fps > 0 ? metadata.fps : projectFps
+  const speed = (item as { speed?: number }).speed ?? 1
+  const sourceStart = (item as { sourceStart?: number }).sourceStart ?? 0
+  const sourceEnd =
+    (item as { sourceEnd?: number }).sourceEnd ??
+    sourceStart + (item.durationInFrames * speed * sourceFps) / projectFps
+
+  const neededSeconds = sourceEnd / sourceFps
+  // Half a frame + a small epsilon of slack: metadata durations are rounded.
+  const tolerance = Math.max(0.05, 0.5 / sourceFps)
+  if (neededSeconds <= metadata.duration + tolerance) return null
+  return {
+    itemId: item.id,
+    mediaId: (item as { mediaId?: string }).mediaId ?? '',
+    neededSeconds,
+    availableSeconds: metadata.duration,
+  }
+}
+
 export function collectSourceRangeFindings(
   items: readonly TimelineItem[],
   mediaById: ReadonlyMap<string, MediaMetadata>,
@@ -36,28 +60,10 @@ export function collectSourceRangeFindings(
   for (const item of items) {
     if (item.type !== 'video' && item.type !== 'audio') continue
     const mediaId = (item as { mediaId?: string }).mediaId
-    if (!mediaId) continue
-    const metadata = mediaById.get(mediaId)
+    const metadata = mediaId ? mediaById.get(mediaId) : undefined
     if (!metadata || !(metadata.duration > 0)) continue
-
-    const sourceFps = metadata.fps > 0 ? metadata.fps : projectFps
-    const speed = (item as { speed?: number }).speed ?? 1
-    const sourceStart = (item as { sourceStart?: number }).sourceStart ?? 0
-    const sourceEnd =
-      (item as { sourceEnd?: number }).sourceEnd ??
-      sourceStart + (item.durationInFrames * speed * sourceFps) / projectFps
-
-    const neededSeconds = sourceEnd / sourceFps
-    // Half a frame + a small epsilon of slack: metadata durations are rounded.
-    const tolerance = Math.max(0.05, 0.5 / sourceFps)
-    if (neededSeconds > metadata.duration + tolerance) {
-      findings.push({
-        itemId: item.id,
-        mediaId,
-        neededSeconds,
-        availableSeconds: metadata.duration,
-      })
-    }
+    const finding = findSourceOverrun(item, metadata, projectFps)
+    if (finding) findings.push(finding)
   }
   return findings
 }

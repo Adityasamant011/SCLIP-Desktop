@@ -128,26 +128,8 @@ interface InlineWord {
   charStyles: number[]
 }
 
-/**
- * Inline span flow (`spanLayout: 'inline'`): spans are concatenated into one
- * text stream and wrapped by box width; each wrapped line carries `runs`
- * describing the color/underline sub-ranges. All runs share the FIRST span's
- * font/size/letter-spacing — mixed fonts/sizes on one line are out of scope
- * (such spans render in the base font).
- */
-function layoutInlineSpanLines(
-  spans: ReturnType<typeof resolveSpanStyles>,
-  lineHeightFactor: number,
-  availableWidth: number,
-  measurer: TextMeasurer,
-): LaidOutLine[] {
-  const base = spans[0]!
-  const metrics = measurer.fontMetrics(base.cssFont)
-  const lineHeightPx = base.fontSize * lineHeightFactor
-  const halfLeading = (lineHeightPx - (metrics.ascent + metrics.descent)) / 2
-  const baselineOffset = halfLeading + metrics.ascent
-
-  // Tokenize the concatenated span stream into words/breaks with per-char style ids.
+/** Split concatenated inline spans into paragraphs of words with per-char style ids. */
+function tokenizeInlineSpans(spans: ReturnType<typeof resolveSpanStyles>): InlineWord[][] {
   const paragraphs: InlineWord[][] = [[]]
   let currentWord: InlineWord | null = null
   const flushWord = () => {
@@ -169,6 +151,54 @@ function layoutInlineSpanLines(
     }
   }
   flushWord()
+  return paragraphs
+}
+
+/** Group a line's chars into color/underline runs with prefix-measured offsets. */
+function buildLineRuns(
+  text: string,
+  charStyles: number[],
+  spans: ReturnType<typeof resolveSpanStyles>,
+  measure: (text: string) => number,
+): LaidOutRun[] {
+  const runs: LaidOutRun[] = []
+  let runStart = 0
+  for (let i = 1; i <= text.length; i++) {
+    if (i !== text.length && charStyles[i] === charStyles[runStart]) continue
+    const span = spans[charStyles[runStart] ?? 0] ?? spans[0]!
+    const prefixWidth = runStart === 0 ? 0 : measure(text.slice(0, runStart))
+    runs.push({
+      text: text.slice(runStart, i),
+      color: span.color,
+      underline: span.underline,
+      offsetX: prefixWidth,
+      width: measure(text.slice(0, i)) - prefixWidth,
+    })
+    runStart = i
+  }
+  return runs
+}
+
+/**
+ * Inline span flow (`spanLayout: 'inline'`): spans are concatenated into one
+ * text stream and wrapped by box width; each wrapped line carries `runs`
+ * describing the color/underline sub-ranges. All runs share the FIRST span's
+ * font/size/letter-spacing — mixed fonts/sizes on one line are out of scope
+ * (such spans render in the base font).
+ */
+function layoutInlineSpanLines(
+  spans: ReturnType<typeof resolveSpanStyles>,
+  lineHeightFactor: number,
+  availableWidth: number,
+  measurer: TextMeasurer,
+): LaidOutLine[] {
+  const base = spans[0]!
+  const metrics = measurer.fontMetrics(base.cssFont)
+  const lineHeightPx = base.fontSize * lineHeightFactor
+  const halfLeading = (lineHeightPx - (metrics.ascent + metrics.descent)) / 2
+  const baselineOffset = halfLeading + metrics.ascent
+
+  const paragraphs = tokenizeInlineSpans(spans)
 
   const measure = (text: string) => measurer.measure(text, base.cssFont, base.letterSpacing)
 
@@ -186,22 +216,7 @@ function layoutInlineSpanLines(
       charStyles.push(...word.charStyles)
     }
 
-    const runs: LaidOutRun[] = []
-    let runStart = 0
-    for (let i = 1; i <= text.length; i++) {
-      if (i === text.length || charStyles[i] !== charStyles[runStart]) {
-        const span = spans[charStyles[runStart] ?? 0] ?? base
-        const prefixWidth = runStart === 0 ? 0 : measure(text.slice(0, runStart))
-        runs.push({
-          text: text.slice(runStart, i),
-          color: span.color,
-          underline: span.underline,
-          offsetX: prefixWidth,
-          width: measure(text.slice(0, i)) - prefixWidth,
-        })
-        runStart = i
-      }
-    }
+    const runs = buildLineRuns(text, charStyles, spans, measure)
 
     lines.push({
       text,
