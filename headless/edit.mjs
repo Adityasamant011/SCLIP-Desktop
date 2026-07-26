@@ -28,11 +28,11 @@
 //   trimStart    { id, amount }
 //   trimEnd      { id, amount }
 //   addTransition{ leftClipId, rightClipId, type?, durationInFrames? }
-import { chromium } from 'playwright'
 import fs from 'node:fs'
 import path from 'node:path'
 import { loadProject, collectAddClipMedia } from './lib/workspace.mjs'
 import { parseArgs } from './lib/cli.mjs'
+import { withHarnessPage } from './lib/page-session.mjs'
 import { startHarness } from './lib/render-core.mjs'
 import { editRequestSchema, validate } from './lib/contract.mjs'
 
@@ -86,25 +86,22 @@ async function main() {
     devUrl: args['harness-url'],
     build: args.build,
   })
-  const browser = await chromium.launch({ channel: 'chrome', headless: !args.head })
   let result
   try {
-    const page = await browser.newPage()
-    page.on('pageerror', (e) => console.error('  [pageerror]', e.message))
-    page.on('console', (m) => {
-      if (m.type() === 'error' && !m.text().includes('favicon')) {
-        console.error('  [page:error]', m.text())
-      }
-    })
-    await page.goto(harnessUrl, { waitUntil: 'load', timeout: 60_000 })
-    await page.waitForFunction(() => Boolean(window.freecut?.ready), { timeout: 30_000 })
-    result = await page.evaluate((payload) => window.freecut.editProject(payload), {
-      project,
-      ops,
-      media,
-    })
+    result = await withHarnessPage(
+      {
+        harnessUrl,
+        headless: !args.head,
+        ignoreConsoleError: (text) => text.includes('favicon'),
+      },
+      (page) =>
+        page.evaluate((payload) => window.freecut.editProject(payload), {
+          project,
+          ops,
+          media,
+        }),
+    )
   } finally {
-    await browser.close()
     await closeServers()
   }
 

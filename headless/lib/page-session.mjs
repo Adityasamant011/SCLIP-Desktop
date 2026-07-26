@@ -1,3 +1,40 @@
+/**
+ * One-shot harness page for CLI drivers (frame/layout/edit): launches Chrome,
+ * mirrors page errors to stderr, waits for the engine to become ready, runs
+ * `operation(page)` and always tears the browser down. `ignoreConsoleError`
+ * filters known-noisy console errors (media probes, favicon) from the mirror.
+ */
+export async function withHarnessPage(options, operation) {
+  const { chromium } = await import('playwright')
+  const {
+    harnessUrl,
+    headless = true,
+    launchArgs,
+    acceptDownloads = false,
+    ignoreConsoleError = () => false,
+  } = options
+  const browser = await chromium.launch({
+    channel: 'chrome',
+    headless,
+    ...(launchArgs ? { args: launchArgs } : {}),
+  })
+  try {
+    const context = await browser.newContext(acceptDownloads ? { acceptDownloads: true } : {})
+    const page = await context.newPage()
+    page.on('pageerror', (e) => console.error('  [pageerror]', e.message))
+    page.on('console', (m) => {
+      if (m.type() === 'error' && !ignoreConsoleError(m.text())) {
+        console.error('  [page:error]', m.text())
+      }
+    })
+    await page.goto(harnessUrl, { waitUntil: 'load', timeout: 60_000 })
+    await page.waitForFunction(() => Boolean(window.freecut?.ready), { timeout: 30_000 })
+    return await operation(page)
+  } finally {
+    await browser.close().catch(() => {})
+  }
+}
+
 export async function probeGpu(page) {
   return page
     .evaluate(async () => {

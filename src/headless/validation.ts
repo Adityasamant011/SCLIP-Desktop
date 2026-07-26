@@ -61,3 +61,45 @@ export function collectSourceRangeFindings(
   }
   return findings
 }
+
+/** Build the mediaId → metadata lookup from the driver's media list. */
+export function buildMediaMetadataMap(
+  media: Array<{ mediaId: string; metadata?: MediaMetadata }> | undefined,
+): Map<string, MediaMetadata> {
+  const mediaById = new Map<string, MediaMetadata>()
+  for (const m of media ?? []) {
+    if (m.metadata) mediaById.set(m.mediaId, m.metadata)
+  }
+  return mediaById
+}
+
+export function videoCarriesAudio(
+  videoItem: { embeddedAudioMuted?: boolean; mediaId?: string },
+  mediaById: Map<string, MediaMetadata>,
+): boolean {
+  if (videoItem.embeddedAudioMuted) return false
+  const metadata = videoItem.mediaId ? mediaById.get(videoItem.mediaId) : undefined
+  // Without metadata assume the video may carry audio; with it require an audio track.
+  return !metadata || Boolean(metadata.audioCodec)
+}
+
+function itemCanCarryAudio(
+  item: CompositionInputProps['tracks'][number]['items'][number],
+  mediaById: Map<string, MediaMetadata>,
+): boolean {
+  if (item.type === 'audio') return true
+  return item.type === 'video' && videoCarriesAudio(item, mediaById)
+}
+
+/** True when any item on an unmuted, visible track can contribute audio. */
+export function hasAudioCapableItems(
+  tracks: CompositionInputProps['tracks'],
+  mediaById: Map<string, MediaMetadata>,
+): boolean {
+  return tracks.some(
+    (track) =>
+      track.visible !== false &&
+      track.muted !== true &&
+      (track.items ?? []).some((item) => itemCanCarryAudio(item, mediaById)),
+  )
+}
