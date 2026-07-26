@@ -165,6 +165,70 @@ export function collectTransitionFindings(
   })
 }
 
+export interface TransformParentFinding {
+  itemId: string
+  kind: 'parent_not_found' | 'cycle' | 'invalid_type'
+  message: string
+}
+
+const UNPARENTABLE_TYPES = new Set(['audio', 'adjustment'])
+
+type ParentedItem = TimelineItem & { transformParent?: { parentItemId?: string } }
+
+/** Follow the parent chain from `start`; true when it loops back onto itself. */
+function hasParentCycle(start: ParentedItem, itemById: ReadonlyMap<string, TimelineItem>): boolean {
+  const seen = new Set<string>([start.id])
+  let parentId = start.transformParent?.parentItemId
+  while (parentId) {
+    if (seen.has(parentId)) return true
+    seen.add(parentId)
+    parentId = (itemById.get(parentId) as ParentedItem | undefined)?.transformParent?.parentItemId
+  }
+  return false
+}
+
+/**
+ * Transform-parent bindings that silently degrade at render time: a missing
+ * parent renders the child unparented, a cycle falls back to local transforms,
+ * and audio/adjustment items never participate in the hierarchy. The editor
+ * validates these on assignment; raw project.json bypasses those checks.
+ */
+export function collectTransformParentFindings(
+  items: readonly TimelineItem[],
+): TransformParentFinding[] {
+  const itemById = new Map(items.map((item) => [item.id, item]))
+  const findings: TransformParentFinding[] = []
+  for (const item of items as readonly ParentedItem[]) {
+    const parentId = item.transformParent?.parentItemId
+    if (!parentId) continue
+    const parent = itemById.get(parentId)
+    if (!parent) {
+      findings.push({
+        itemId: item.id,
+        kind: 'parent_not_found',
+        message: `Item "${item.id}" is transform-parented to "${parentId}" which does not exist — it renders unparented`,
+      })
+      continue
+    }
+    if (UNPARENTABLE_TYPES.has(parent.type) || UNPARENTABLE_TYPES.has(item.type)) {
+      findings.push({
+        itemId: item.id,
+        kind: 'invalid_type',
+        message: `Item "${item.id}" (${item.type}) is transform-parented to "${parentId}" (${parent.type}) — audio/adjustment items never participate in the transform hierarchy`,
+      })
+      continue
+    }
+    if (hasParentCycle(item, itemById)) {
+      findings.push({
+        itemId: item.id,
+        kind: 'cycle',
+        message: `Item "${item.id}" is part of a transform-parent cycle — the chain silently falls back to local transforms`,
+      })
+    }
+  }
+  return findings
+}
+
 /** Build the mediaId → metadata lookup from the driver's media list. */
 export function buildMediaMetadataMap(
   media: Array<{ mediaId: string; metadata?: MediaMetadata }> | undefined,

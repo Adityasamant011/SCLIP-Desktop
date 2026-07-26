@@ -45,6 +45,8 @@ import {
   addTransition,
   updateTransition,
   removeTransition,
+  setTransformParent,
+  addKeyframes,
   setTracks,
   addKeyframe,
   removeKeyframesForProperty,
@@ -72,6 +74,7 @@ export type EditOperationName =
   | 'addClip'
   | 'addKeyframe'
   | 'removeKeyframes'
+  | 'setTransformParent'
   | 'addEffect'
   | 'removeEffect'
   | 'setTransform'
@@ -148,6 +151,10 @@ function resolveOperationRefs(
   }
   return visit(op) as EditOp
 }
+
+// Canvas of the project being edited (set per editProject call) — transform-parent
+// binds resolve world transforms against it.
+let editCanvas = { width: 1920, height: 1080, fps: 30 }
 
 const asString = (value: unknown, fallback?: string): string | undefined =>
   typeof value === 'string' ? value : fallback
@@ -534,15 +541,51 @@ function applyOp(op: EditOp): unknown {
         throw new Error('addKeyframe requires `itemId`, `property`, `frame`, `value`')
       }
       requireItem(itemId, 'itemId')
-      const keyframeId = addKeyframe(
-        itemId,
-        property as AnimatableProperty,
-        frame,
-        value,
-        asString(op.easing) as EasingType | undefined,
-      )
+      const easing = asString(op.easing) as EasingType | undefined
+      // easingConfig (e.g. custom spring tension/friction/mass) goes through the
+      // batch action — the scalar addKeyframe action does not accept it.
+      const keyframeId = op.easingConfig
+        ? (addKeyframes([
+            {
+              itemId,
+              property: property as AnimatableProperty,
+              frame,
+              value,
+              easing,
+              easingConfig: op.easingConfig as Parameters<
+                typeof addKeyframes
+              >[0][number]['easingConfig'],
+            },
+          ])[0] ?? '')
+        : addKeyframe(itemId, property as AnimatableProperty, frame, value, easing)
       if (!keyframeId) throw new Error(`addKeyframe failed (item ${itemId} @ frame ${frame})`)
       return { keyframeId }
+    }
+    case 'setTransformParent': {
+      const id = asString(op.id)
+      if (!id) throw new Error('setTransformParent requires `id`')
+      const child = requireItem(id)
+      const detach = op.parentItemId === null
+      const parentItemId = detach ? undefined : asString(op.parentItemId)
+      if (!detach && !parentItemId) {
+        throw new Error(
+          'setTransformParent requires `parentItemId` (item id to attach, null to detach)',
+        )
+      }
+      if (parentItemId) requireItem(parentItemId, 'parentItemId')
+      const ok = setTransformParent({
+        childItemId: id,
+        ...(parentItemId ? { parentItemId } : {}),
+        behavior: asString(op.behavior) as Parameters<typeof setTransformParent>[0]['behavior'],
+        frame: asNumber(op.frame) ?? child.from,
+        canvas: editCanvas,
+      })
+      if (!ok) {
+        throw new Error(
+          `setTransformParent failed for "${id}"${parentItemId ? ` -> "${parentItemId}"` : ' (detach)'}`,
+        )
+      }
+      return { id, parentItemId: parentItemId ?? null }
     }
     case 'removeKeyframes': {
       const itemId = asString(op.itemId)
@@ -623,6 +666,11 @@ function applyOpTracked(
 
 export async function editProject(input: HeadlessEditInput): Promise<HeadlessEditResult> {
   const { project: migrated } = migrateProject(input.project)
+  editCanvas = {
+    width: migrated.metadata?.width ?? 1920,
+    height: migrated.metadata?.height ?? 1080,
+    fps: migrated.metadata?.fps ?? 30,
+  }
   await hydrateTimelineStoresFromProject(migrated)
   seedMediaLibrary(input.media)
 

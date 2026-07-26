@@ -352,4 +352,74 @@ describe('editProject', () => {
       }),
     ).rejects.toThrow('transition "ghost" does not exist')
   })
+
+  it('setTransformParent binds via the real action and round-trips the binding', async () => {
+    const result = await editProject({
+      project: baseProject(adjacentVideoTimeline()),
+      media: [{ mediaId: 'm-vid', metadata: videoMedia }],
+      ops: [{ op: 'setTransformParent', id: 'B', parentItemId: 'A' } as EditOp],
+    })
+    const child = result.project.timeline!.items.find((item) => item.id === 'B') as Record<
+      string,
+      unknown
+    >
+    const binding = child.transformParent as {
+      parentItemId?: string
+      parentReference?: { width: number }
+      childLocalReference: { width: number }
+      childWorldReference: { width: number }
+    }
+    expect(binding?.parentItemId).toBe('A')
+    // The action computes bind references from resolved transforms — all present and sane.
+    expect(binding.childLocalReference.width).toBeGreaterThan(0)
+    expect(binding.childWorldReference.width).toBeGreaterThan(0)
+    expect(binding.parentReference?.width).toBeGreaterThan(0)
+
+    const detached = await editProject({
+      project: result.project,
+      media: [{ mediaId: 'm-vid', metadata: videoMedia }],
+      ops: [{ op: 'setTransformParent', id: 'B', parentItemId: null } as EditOp],
+    })
+    const freed = detached.project.timeline!.items.find((item) => item.id === 'B') as {
+      transformParent?: { parentItemId?: string }
+    }
+    // Detach keeps the bind-space record but drops the parent link.
+    expect(freed.transformParent?.parentItemId).toBeUndefined()
+  })
+
+  it('setTransformParent fails loudly on a missing parent', async () => {
+    await expect(
+      editProject({
+        project: baseProject(adjacentVideoTimeline()),
+        ops: [{ op: 'setTransformParent', id: 'A', parentItemId: 'ghost' } as EditOp],
+      }),
+    ).rejects.toThrow('parentItemId: item "ghost" does not exist')
+  })
+
+  it('addKeyframe carries a custom spring easingConfig', async () => {
+    const result = await editProject({
+      project: baseProject(adjacentVideoTimeline()),
+      ops: [
+        {
+          op: 'addKeyframe',
+          itemId: 'A',
+          property: 'rotation',
+          frame: 0,
+          value: 0,
+          easing: 'spring',
+          easingConfig: { type: 'spring', spring: { tension: 300, friction: 10, mass: 1 } },
+        } as EditOp,
+      ],
+    })
+    const group = result.project.timeline!.keyframes!.find(
+      (candidate) => candidate.itemId === 'A',
+    ) as unknown as {
+      properties: Array<{ property: string; keyframes: Array<Record<string, unknown>> }>
+    }
+    const rotation = group.properties.find((candidate) => candidate.property === 'rotation')!
+    expect(rotation.keyframes[0]).toMatchObject({
+      easing: 'spring',
+      easingConfig: { type: 'spring', spring: { tension: 300, friction: 10, mass: 1 } },
+    })
+  })
 })
