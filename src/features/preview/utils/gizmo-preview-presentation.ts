@@ -6,13 +6,12 @@ import type { TimelineItem } from '@/types/timeline'
  * canvas for every pointer update. Forced rendered effects keep canvas ownership.
  */
 export function shouldPreferDomPlayerForGizmo(
-  _forceRenderedOverlay: boolean,
+  forceRenderedOverlay: boolean,
   itemType: TimelineItem['type'] | null | undefined,
 ): boolean {
-  // A continuous GPU overlay may be enabled because the project contains an
-  // effect somewhere else on the timeline. Re-compositing the full frame for
-  // every vector pointer sample makes direct manipulation visibly heavy.
-  // Shape/text content already has a live DOM presentation, so let it own the
-  // interaction and restore the high-fidelity overlay on release.
-  return itemType === 'text' || itemType === 'shape'
+  // Shape/text content has a responsive live DOM presentation, but that path
+  // cannot show effects belonging to any other visible layer. Keep the
+  // composited canvas in charge when rendered content is active; otherwise use
+  // the lightweight DOM path for direct manipulation.
+  return !forceRenderedOverlay && (itemType === 'text' || itemType === 'shape')
 }

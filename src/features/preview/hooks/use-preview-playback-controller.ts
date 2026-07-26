@@ -48,6 +48,7 @@ export function usePreviewPlaybackController({
   const [adaptiveQualityCap, setAdaptiveQualityCap] = useState<PreviewQuality>(1)
 
   usePreviewRuntimeGuards({
+    forceFastScrubOverlay,
     isGizmoInteractingRef,
     preferPlayerForDomGizmoRef,
     setAdaptiveQualityCap,

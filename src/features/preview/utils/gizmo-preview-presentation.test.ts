@@ -9,8 +9,8 @@ describe('shouldPreferDomPlayerForGizmo', () => {
     },
   )
 
-  it('keeps vector drags on the DOM path when effects force the resting overlay', () => {
-    expect(shouldPreferDomPlayerForGizmo(true, 'shape')).toBe(true)
+  it('keeps an effected underlay rendered while a shape transform is previewed', () => {
+    expect(shouldPreferDomPlayerForGizmo(true, 'shape')).toBe(false)
   })
 
   it('does not change presentation for media gizmos', () => {
