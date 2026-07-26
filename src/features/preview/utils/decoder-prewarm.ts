@@ -29,6 +29,7 @@ import {
 
 const log = createLogger('DecoderPrewarm')
 const MAX_CACHED_BITMAPS_PER_SOURCE = 6
+const MAX_CACHED_BITMAP_PIXELS_PER_SOURCE = 12_000_000
 const MAX_CACHED_BITMAP_SOURCES = 4
 const MAX_FALLBACK_BITMAPS_PER_SOURCE = 2
 const MAX_FALLBACK_BITMAP_SOURCES = 4
@@ -103,6 +104,7 @@ const pendingBatchRequests = new Map<
 /** Cache of pre-decoded bitmaps keyed by video source URL. Multiple entries per source. */
 type CachedBitmapEntry = { bitmap: ImageBitmap; timestamp: number }
 const bitmapCache = new Map<string, CachedBitmapEntry[]>()
+const bitmapCacheCapacityBySrc = new Map<string, number>()
 type CachedFallbackBitmapEntry = CachedBitmapEntry & { proxyTimestamp: number }
 const fallbackBitmapCache = new Map<string, CachedFallbackBitmapEntry[]>()
 const unavailableBlobUrls = new Set<string>()
@@ -399,17 +401,29 @@ function findMatchingInflightPreseek(
   return best
 }
 
-function cachePredecodedBitmap(src: string, timestamp: number, bitmap: ImageBitmap): void {
+function cachePredecodedBitmap(
+  src: string,
+  timestamp: number,
+  bitmap: ImageBitmap,
+  requestedCapacity = MAX_CACHED_BITMAPS_PER_SOURCE,
+): void {
   if (!bitmapCache.has(src) && bitmapCache.size >= MAX_CACHED_BITMAP_SOURCES) {
     const oldestSrc = bitmapCache.keys().next().value as string | undefined
     if (oldestSrc) {
       const oldestEntries = bitmapCache.get(oldestSrc)
       bitmapCache.delete(oldestSrc)
+      bitmapCacheCapacityBySrc.delete(oldestSrc)
       for (const entry of oldestEntries ?? []) entry.bitmap.close()
       decoderPrewarmMetrics.cacheSourceEvictions += 1
     }
   }
 
+  const capacity = Math.max(
+    MAX_CACHED_BITMAPS_PER_SOURCE,
+    Math.round(requestedCapacity),
+    bitmapCacheCapacityBySrc.get(src) ?? 0,
+  )
+  bitmapCacheCapacityBySrc.set(src, capacity)
   const entries = bitmapCache.get(src) ?? []
   const duplicateIndex = entries.findIndex(
     (entry) => Math.abs(entry.timestamp - timestamp) <= PRESEEK_REQUEST_REUSE_TOLERANCE_SECONDS,
@@ -419,8 +433,23 @@ function cachePredecodedBitmap(src: string, timestamp: number, bitmap: ImageBitm
     duplicate?.bitmap.close()
   }
   entries.push({ bitmap, timestamp })
-  while (entries.length > MAX_CACHED_BITMAPS_PER_SOURCE) {
+  let cachedPixels = entries.reduce((sum, entry) => {
+    const width = Number(entry.bitmap.width)
+    const height = Number(entry.bitmap.height)
+    return sum + (Number.isFinite(width) && Number.isFinite(height) ? width * height : 0)
+  }, 0)
+  while (
+    entries.length > capacity ||
+    (entries.length > 1 && cachedPixels > MAX_CACHED_BITMAP_PIXELS_PER_SOURCE)
+  ) {
     const old = entries.shift()
+    if (old) {
+      const width = Number(old.bitmap.width)
+      const height = Number(old.bitmap.height)
+      if (Number.isFinite(width) && Number.isFinite(height)) {
+        cachedPixels -= width * height
+      }
+    }
     old?.bitmap.close()
   }
   bitmapCache.delete(src)
@@ -1167,14 +1196,23 @@ function startBackgroundPreseek(
 export function backgroundBatchPreseek(
   src: string,
   timestamps: number[],
-  options: { signal?: AbortSignal } = {},
+  options: {
+    signal?: AbortSignal
+    cacheCapacity?: number
+    maxDimension?: number
+  } = {},
 ): Promise<Map<number, ImageBitmap>> {
-  const { signal } = options
+  const { signal, cacheCapacity, maxDimension } = options
   if (signal?.aborted) return Promise.resolve(new Map())
   const uniqueTimestamps = [...new Set(timestamps)].sort((a, b) => a - b)
   if (uniqueTimestamps.length === 0) return Promise.resolve(new Map())
   // For single timestamps, fall back to the simpler path
-  if (uniqueTimestamps.length === 1 && !signal) {
+  if (
+    uniqueTimestamps.length === 1 &&
+    !signal &&
+    cacheCapacity === undefined &&
+    maxDimension === undefined
+  ) {
     return backgroundPreseek(src, uniqueTimestamps[0]!).then((bitmap) => {
       const map = new Map<number, ImageBitmap>()
       if (bitmap) map.set(uniqueTimestamps[0]!, bitmap)
@@ -1218,7 +1256,7 @@ export function backgroundBatchPreseek(
         for (const bitmap of bitmaps.values()) bitmap.close()
       } else {
         for (const [ts, bitmap] of bitmaps) {
-          cachePredecodedBitmap(src, ts, bitmap)
+          cachePredecodedBitmap(src, ts, bitmap, cacheCapacity)
         }
       }
       settleCaller(requestCancelled ? new Map() : bitmaps)
@@ -1259,6 +1297,7 @@ export function backgroundBatchPreseek(
             keyframeTimestamps,
             blob,
             sourceMetadata,
+            maxDimension,
           }
         : {
             type: 'batch_preseek',
@@ -1267,6 +1306,7 @@ export function backgroundBatchPreseek(
             timestamps: uniqueTimestamps,
             keyframeTimestamps,
             sourceMetadata,
+            maxDimension,
           }
       w.postMessage(msg)
     }
@@ -1390,6 +1430,7 @@ function clearPredecodedCache(src?: string): void {
       for (const entry of entries) entry.bitmap.close()
     }
     bitmapCache.delete(src)
+    bitmapCacheCapacityBySrc.delete(src)
     const fallbackEntries = fallbackBitmapCache.get(src)
     for (const entry of fallbackEntries ?? []) entry.bitmap.close()
     fallbackBitmapCache.delete(src)
@@ -1401,6 +1442,7 @@ function clearPredecodedCache(src?: string): void {
       for (const entry of entries) entry.bitmap.close()
     }
     bitmapCache.clear()
+    bitmapCacheCapacityBySrc.clear()
     for (const entries of fallbackBitmapCache.values()) {
       for (const entry of entries) entry.bitmap.close()
     }

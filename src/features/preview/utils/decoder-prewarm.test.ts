@@ -36,6 +36,7 @@ type MockWorkerMessage = {
     opfsPath: string
     fileSize?: number
   }
+  maxDimension?: number
 }
 
 class MockWorker {
@@ -220,6 +221,28 @@ describe('decoder prewarm', () => {
     await expect(waited).resolves.toBe(mockBitmap)
     await expect(batch).resolves.toEqual(new Map([[3, mockBitmap]]))
   })
+
+  it('passes transient reverse-window sizing to the optimized batch decoder', async () => {
+    registerObjectUrl('blob:reverse-window', new Blob(['reverse-window']))
+
+    await backgroundBatchPreseek('blob:reverse-window', [3, 2, 1], {
+      cacheCapacity: 28,
+      maxDimension: 720,
+    })
+
+    const batchPost = getGeneralWorkers()
+      .flatMap((worker) => worker.postMessage.mock.calls)
+      .map(([message]) => message as MockWorkerMessage)
+      .find((message) => message.type === 'batch_preseek')
+    expect(batchPost).toMatchObject({
+      type: 'batch_preseek',
+      src: 'blob:reverse-window',
+      timestamps: [1, 2, 3],
+      maxDimension: 720,
+    })
+    expect(getDecoderPrewarmMetricsSnapshot().cacheBitmaps).toBe(3)
+  })
+
   it('warmDecoderPrewarmWorkerPool eagerly spawns the pool exactly once', () => {
     warmDecoderPrewarmWorkerPool()
 

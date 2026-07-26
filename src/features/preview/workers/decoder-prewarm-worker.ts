@@ -426,15 +426,30 @@ function getSampleDisplaySize(sample: WorkerSample): { width: number; height: nu
   }
 }
 
-function renderSampleToBitmap(state: ExtractorState, sample: WorkerSample): ImageBitmap | null {
+function renderSampleToBitmap(
+  state: ExtractorState,
+  sample: WorkerSample,
+  maxDimension?: number,
+): ImageBitmap | null {
   const size = getSampleDisplaySize(sample)
   if (!size || typeof sample?.draw !== 'function') {
     return null
   }
 
-  state.canvas.width = size.width
-  state.canvas.height = size.height
-  sample.draw(state.ctx, 0, 0, size.width, size.height)
+  const normalizedMaxDimension =
+    Number.isFinite(maxDimension) && Number(maxDimension) >= 1
+      ? Math.max(1, Math.round(Number(maxDimension)))
+      : null
+  const scale =
+    normalizedMaxDimension === null
+      ? 1
+      : Math.min(1, normalizedMaxDimension / Math.max(size.width, size.height))
+  const outputWidth = Math.max(1, Math.round(size.width * scale))
+  const outputHeight = Math.max(1, Math.round(size.height * scale))
+
+  state.canvas.width = outputWidth
+  state.canvas.height = outputHeight
+  sample.draw(state.ctx, 0, 0, outputWidth, outputHeight)
   return state.canvas.transferToImageBitmap()
 }
 
@@ -552,6 +567,7 @@ async function batchPreseek(
   blob?: Blob,
   sourceMetadata?: ObjectUrlSourceMetadata,
   shouldContinue: () => boolean = () => true,
+  maxDimension?: number,
 ): Promise<Map<number, ImageBitmap>> {
   const results = new Map<number, ImageBitmap>()
   if (!shouldContinue()) return results
@@ -581,7 +597,7 @@ async function batchPreseek(
             // timestamp, but an over-producing iterator must not leak the extra
             // VideoSample while the stream is being torn down.
             if (timestamp === undefined) continue
-            const bitmap = renderSampleToBitmap(state, sample)
+            const bitmap = renderSampleToBitmap(state, sample, maxDimension)
             if (bitmap) results.set(timestamp, bitmap)
           } finally {
             sample.close?.()
@@ -648,6 +664,7 @@ self.onmessage = async (event: MessageEvent) => {
         msg.blob,
         msg.sourceMetadata,
         () => !cancelledBatchRequestIds.has(requestId),
+        msg.maxDimension,
       )
       const wasCancelled = cancelledBatchRequestIds.delete(requestId)
       const transfer: Transferable[] = []

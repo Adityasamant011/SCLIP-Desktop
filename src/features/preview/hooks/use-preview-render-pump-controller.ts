@@ -72,6 +72,10 @@ import {
   shouldRunJumpPreseek,
 } from '../utils/render-pump-preseek'
 import {
+  resolveReversePlaybackWindowPlan,
+  shouldQueueReversePlaybackWindow,
+} from '../utils/reverse-playback-window'
+import {
   beginPlaybackColdStart,
   cancelPlaybackColdStart,
   markPlaybackColdStart,
@@ -1388,6 +1392,26 @@ export function usePreviewRenderPump({
 
     let lastRafPresentedFrame = -1
     let lastReversePreseekFrame = -1
+    let reverseWindowGeneration = 0
+    let reverseWindowRequest: Promise<void> | null = null
+    let reverseWindowAbortController: AbortController | null = null
+    let reverseWindowPreparedLowFrame: number | null = null
+    let reverseWindowPreparedHighFrame: number | null = null
+    let reverseWindowRefillFrame: number | null = null
+    let queuedReverseWindowTargetFrame: number | null = null
+    let reverseWindowRetryAfterMs = 0
+
+    const resetReversePlaybackWindow = () => {
+      reverseWindowGeneration += 1
+      reverseWindowAbortController?.abort()
+      reverseWindowAbortController = null
+      reverseWindowRequest = null
+      reverseWindowPreparedLowFrame = null
+      reverseWindowPreparedHighFrame = null
+      reverseWindowRefillFrame = null
+      queuedReverseWindowTargetFrame = null
+      reverseWindowRetryAfterMs = 0
+    }
 
     // The rAF loop keeps playback aligned to display cadence, but it still
     // preserves the single-owner invariant: it only presents buffered frames
@@ -1494,23 +1518,103 @@ export function usePreviewRenderPump({
     }
 
     function scheduleReversePlaybackPreseek(targetFrame: number) {
-      const bySource = collectVisibleTrackVideoSourceTimesBySrc(combinedTracks, targetFrame, fps, {
-        requireExplicitSourceFps: false,
-        resolveComposition: resolvePreseekComposition,
-        resolveItemSrc: resolvePreseekItemSrc,
+      const playbackState = usePlaybackStore.getState()
+      if (!playbackState.isPlaying || playbackState.playbackRate >= 0) return
+      if (reverseWindowRequest) {
+        queuedReverseWindowTargetFrame = targetFrame
+        return
+      }
+      if (performance.now() < reverseWindowRetryAfterMs) return
+      if (
+        !shouldQueueReversePlaybackWindow({
+          targetFrame,
+          preparedLowFrame: reverseWindowPreparedLowFrame,
+          preparedHighFrame: reverseWindowPreparedHighFrame,
+          refillFrame: reverseWindowRefillFrame,
+          requestInFlight: false,
+        })
+      ) {
+        return
+      }
+
+      const plan = resolveReversePlaybackWindowPlan({
+        targetFrame,
+        fps,
+        playbackRate: playbackState.playbackRate,
       })
-      for (const [src, timestamps] of bySource) {
-        const exactTimestamp = timestamps[0]
-        if (exactTimestamp === undefined) continue
-        scheduleScrubProxyFallback(src, exactTimestamp)
-        // The bounded background pool lets in-flight work finish while its
-        // saturated queue retains only the newest target per source. Restarting
-        // the isolated active-scrub worker at every reverse vsync can starve
-        // long-GOP sources indefinitely, leaving no nearby frame to present.
-        for (const timestamp of timestamps) {
-          void workerBackgroundPreseek(src, timestamp)
+      const bySource = new Map<string, number[]>()
+      for (const frame of plan.targetFrames) {
+        const frameSources = collectVisibleTrackVideoSourceTimesBySrc(
+          combinedTracks,
+          frame,
+          fps,
+          {
+            requireExplicitSourceFps: false,
+            resolveComposition: resolvePreseekComposition,
+            resolveItemSrc: resolvePreseekItemSrc,
+          },
+        )
+        for (const [src, timestamps] of frameSources) {
+          const accumulated = bySource.get(src) ?? []
+          accumulated.push(...timestamps)
+          bySource.set(src, accumulated)
         }
       }
+
+      if (bySource.size === 0) {
+        reverseWindowPreparedLowFrame = plan.lowFrame
+        reverseWindowPreparedHighFrame = plan.highFrame
+        reverseWindowRefillFrame = plan.refillFrame
+        return
+      }
+
+      for (const [src, timestamps] of bySource) {
+        const currentTimestamp = timestamps[0]
+        if (currentTimestamp !== undefined) {
+          scheduleScrubProxyFallback(src, currentTimestamp)
+        }
+      }
+
+      const generation = ++reverseWindowGeneration
+      const controller = new AbortController()
+      reverseWindowAbortController = controller
+      const request = Promise.all(
+        [...bySource].map(([src, timestamps]) =>
+          workerBackgroundBatchPreseek(src, timestamps, {
+            signal: controller.signal,
+            cacheCapacity: 28,
+            // Reverse windows are transient preview proxies. Keeping them
+            // modestly sized yields a much deeper frame runway for the same
+            // memory than full-resolution ImageBitmaps.
+            maxDimension: 720,
+          }),
+        ),
+      )
+        .then((results) => {
+          if (generation !== reverseWindowGeneration || controller.signal.aborted) return
+          const decodedFrameCount = results.reduce((sum, frames) => sum + frames.size, 0)
+          if (decodedFrameCount === 0) {
+            reverseWindowPreparedLowFrame = null
+            reverseWindowPreparedHighFrame = null
+            reverseWindowRefillFrame = null
+            reverseWindowRetryAfterMs = performance.now() + 120
+            return
+          }
+          reverseWindowPreparedLowFrame = plan.lowFrame
+          reverseWindowPreparedHighFrame = plan.highFrame
+          reverseWindowRefillFrame = plan.refillFrame
+        })
+        .finally(() => {
+          if (generation !== reverseWindowGeneration) return
+          reverseWindowRequest = null
+          reverseWindowAbortController = null
+          const queuedTarget = queuedReverseWindowTargetFrame
+          queuedReverseWindowTargetFrame = null
+          if (queuedTarget !== null) {
+            scheduleReversePlaybackPreseek(queuedTarget)
+          }
+        })
+      reverseWindowRequest = request
     }
 
     // Direction-aware preseek: small forward jumps ride mediabunny sequential
@@ -1707,7 +1811,21 @@ export function usePreviewRenderPump({
       const renderedPlaybackActive = usesRenderedPlaybackOverlay(state)
       const renderedPlaybackWasActive = usesRenderedPlaybackOverlay(prev)
 
+      if (
+        state.isPlaying &&
+        prev.isPlaying &&
+        state.playbackRate !== prev.playbackRate &&
+        (state.playbackRate < 0 || prev.playbackRate < 0)
+      ) {
+        resetReversePlaybackWindow()
+        lastReversePreseekFrame = -1
+        if (state.playbackRate < 0) {
+          scheduleReversePlaybackPreseek(state.currentFrame)
+        }
+      }
+
       if (renderedPlaybackActive && !renderedPlaybackWasActive) {
+        resetReversePlaybackWindow()
         transportSettlingUntilMs = performance.now() + 300
         pausedTransportHeldFrame = null
         pausedTransportHoldUntilMs = 0
@@ -1746,7 +1864,7 @@ export function usePreviewRenderPump({
             ),
           )
         } else {
-          scheduleActiveScrubPreseek(frame, -1, performance.now(), false)
+          scheduleReversePlaybackPreseek(frame)
         }
 
         const startPlaybackPump = () => {
@@ -1811,6 +1929,7 @@ export function usePreviewRenderPump({
       }
 
       if (!state.isPlaying && prev.isPlaying) {
+        resetReversePlaybackWindow()
         transportSettlingUntilMs = performance.now() + 300
         if (playbackRafId !== null) {
           cancelAnimationFrame(playbackRafId)
@@ -1854,6 +1973,7 @@ export function usePreviewRenderPump({
       }
 
       if (state.isPlaying && !renderedPlaybackActive && renderedPlaybackWasActive) {
+        resetReversePlaybackWindow()
         if (playbackRafId !== null) {
           cancelAnimationFrame(playbackRafId)
           playbackRafId = null
@@ -2848,6 +2968,7 @@ export function usePreviewRenderPump({
 
     return () => {
       effectDisposed = true
+      resetReversePlaybackWindow()
       scrubMountedRef.current = false
       resetScrubLoopState()
       clearScheduledTransitionPrepare()
