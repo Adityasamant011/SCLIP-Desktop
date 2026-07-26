@@ -3,9 +3,11 @@
 import { describe, expect, it } from 'vite-plus/test'
 import type { TimelineItem } from '@/types/timeline'
 import type { MediaMetadata } from '@/types/storage'
+import type { Transition } from '@/types/transition'
 import {
   buildMediaMetadataMap,
   collectSourceRangeFindings,
+  collectTransitionFindings,
   hasAudioCapableItems,
   videoCarriesAudio,
 } from './validation'
@@ -109,5 +111,92 @@ describe('audio-capability helpers', () => {
     expect(hasAudioCapableItems([track({})], map)).toBe(true)
     expect(hasAudioCapableItems([track({ muted: true })], map)).toBe(false)
     expect(hasAudioCapableItems([track({ visible: false })], map)).toBe(false)
+  })
+})
+
+describe('collectTransitionFindings', () => {
+  const makeTransition = (overrides: Partial<Transition> = {}): Transition =>
+    ({
+      id: 'tr-1',
+      type: 'crossfade',
+      presentation: 'fade',
+      timing: 'linear',
+      leftClipId: 'left',
+      rightClipId: 'right',
+      trackId: 't1',
+      durationInFrames: 10,
+      ...overrides,
+    }) as Transition
+
+  const adjacentPair = (): TimelineItem[] => [
+    makeVideo({ id: 'left', from: 0, durationInFrames: 50 }),
+    makeVideo({ id: 'right', from: 50, durationInFrames: 50 }),
+  ]
+
+  it('accepts touching clips on one track with a presentation', () => {
+    expect(collectTransitionFindings([makeTransition()], adjacentPair())).toEqual([])
+  })
+
+  it('tolerates a 1-frame seam and an overlap (both render)', () => {
+    const oneFrameGap = [
+      makeVideo({ id: 'left', from: 0, durationInFrames: 50 }),
+      makeVideo({ id: 'right', from: 51, durationInFrames: 50 }),
+    ]
+    expect(collectTransitionFindings([makeTransition()], oneFrameGap)).toEqual([])
+    const overlap = [
+      makeVideo({ id: 'left', from: 0, durationInFrames: 60 }),
+      makeVideo({ id: 'right', from: 50, durationInFrames: 50 }),
+    ]
+    expect(collectTransitionFindings([makeTransition()], overlap)).toEqual([])
+  })
+
+  it('flags a missing participant clip', () => {
+    const findings = collectTransitionFindings(
+      [makeTransition({ rightClipId: 'ghost' })],
+      adjacentPair(),
+    )
+    expect(findings).toHaveLength(1)
+    expect(findings[0]).toMatchObject({ transitionId: 'tr-1', kind: 'clip_not_found' })
+    expect(findings[0]!.message).toContain('ghost')
+  })
+
+  it('flags clips on different tracks', () => {
+    const items = [
+      makeVideo({ id: 'left', from: 0, durationInFrames: 50, trackId: 't1' }),
+      makeVideo({ id: 'right', from: 50, durationInFrames: 50, trackId: 't2' }),
+    ]
+    expect(collectTransitionFindings([makeTransition()], items)[0]).toMatchObject({
+      kind: 'cross_track',
+    })
+  })
+
+  it('flags a gap wider than one frame (the planner builds no window)', () => {
+    const items = [
+      makeVideo({ id: 'left', from: 0, durationInFrames: 50 }),
+      makeVideo({ id: 'right', from: 53, durationInFrames: 50 }),
+    ]
+    const findings = collectTransitionFindings([makeTransition()], items)
+    expect(findings[0]).toMatchObject({ kind: 'not_adjacent' })
+    expect(findings[0]!.message).toContain('3 frames apart')
+  })
+
+  it('flags an unknown direction (renders the window black)', () => {
+    const findings = collectTransitionFindings(
+      [makeTransition({ direction: 'left' as Transition['direction'] })],
+      adjacentPair(),
+    )
+    expect(findings[0]).toMatchObject({ kind: 'invalid_direction' })
+    expect(findings[0]!.message).toContain('from-left')
+    expect(
+      collectTransitionFindings([makeTransition({ direction: 'from-left' })], adjacentPair()),
+    ).toEqual([])
+  })
+
+  it('flags a missing presentation (renders as a hard cut)', () => {
+    const transition = makeTransition()
+    delete (transition as unknown as Record<string, unknown>).presentation
+    expect(collectTransitionFindings([transition], adjacentPair())[0]).toMatchObject({
+      kind: 'missing_presentation',
+    })
   })
 })

@@ -226,4 +226,109 @@ describe('editProject', () => {
       mediaId: 'm-img',
     })
   })
+
+  const adjacentVideoTimeline = () => ({
+    items: [
+      {
+        id: 'A',
+        type: 'video',
+        trackId: 't_v',
+        from: 0,
+        durationInFrames: 50,
+        mediaId: 'm-vid',
+        sourceStart: 15,
+        sourceEnd: 75,
+        sourceDuration: 120,
+        speed: 1,
+        label: 'A',
+      },
+      {
+        id: 'B',
+        type: 'video',
+        trackId: 't_v',
+        from: 50,
+        durationInFrames: 50,
+        mediaId: 'm-vid',
+        sourceStart: 55,
+        sourceEnd: 115,
+        sourceDuration: 120,
+        speed: 1,
+        label: 'B',
+      },
+    ] as never,
+  })
+
+  it('addTransition carries GPU presentation, alignment and shader properties', async () => {
+    const result = await editProject({
+      project: baseProject(adjacentVideoTimeline()),
+      media: [{ mediaId: 'm-vid', metadata: videoMedia }],
+      ops: [
+        {
+          op: 'addTransition',
+          leftClipId: 'A',
+          rightClipId: 'B',
+          durationInFrames: 10,
+          presentation: 'glitch',
+          alignment: 0.4,
+          timing: 'ease-in-out',
+          properties: { intensity: 2 },
+          callerId: 'tr',
+        } as EditOp,
+      ],
+    })
+    const transitions = result.project.timeline!.transitions!
+    expect(transitions).toHaveLength(1)
+    expect(transitions[0]).toMatchObject({
+      type: 'crossfade',
+      leftClipId: 'A',
+      rightClipId: 'B',
+      durationInFrames: 10,
+      presentation: 'glitch',
+      alignment: 0.4,
+      timing: 'ease-in-out',
+      properties: { intensity: 2 },
+    })
+    expect((result.results[0]!.detail as { id?: string }).id).toBe(transitions[0]!.id)
+  })
+
+  it('updateTransition and removeTransition round-trip through $ref', async () => {
+    const base = {
+      project: baseProject(adjacentVideoTimeline()),
+      media: [{ mediaId: 'm-vid', metadata: videoMedia }],
+    }
+    const updated = await editProject({
+      ...base,
+      ops: [
+        { op: 'addTransition', leftClipId: 'A', rightClipId: 'B', callerId: 'tr' } as EditOp,
+        {
+          op: 'updateTransition',
+          id: { $ref: 'tr#/detail/id' },
+          presentation: 'wipe',
+          direction: 'from-left',
+        } as EditOp,
+      ],
+    })
+    expect(updated.project.timeline!.transitions![0]).toMatchObject({
+      presentation: 'wipe',
+      direction: 'from-left',
+    })
+
+    const removed = await editProject({
+      ...base,
+      ops: [
+        { op: 'addTransition', leftClipId: 'A', rightClipId: 'B', callerId: 'tr' } as EditOp,
+        { op: 'removeTransition', id: { $ref: 'tr#/detail/id' } } as EditOp,
+      ],
+    })
+    expect(removed.project.timeline!.transitions ?? []).toHaveLength(0)
+  })
+
+  it('removeTransition on an unknown id fails loudly', async () => {
+    await expect(
+      editProject({
+        project: baseProject(adjacentVideoTimeline()),
+        ops: [{ op: 'removeTransition', id: 'ghost' } as EditOp],
+      }),
+    ).rejects.toThrow('transition "ghost" does not exist')
+  })
 })

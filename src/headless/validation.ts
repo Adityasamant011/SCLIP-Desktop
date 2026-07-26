@@ -9,6 +9,7 @@
 import type { TimelineItem } from '@/types/timeline'
 import type { MediaMetadata } from '@/types/storage'
 import type { CompositionInputProps } from '@/types/export'
+import type { Transition } from '@/types/transition'
 
 export interface SourceRangeFinding {
   itemId: string
@@ -66,6 +67,102 @@ export function collectSourceRangeFindings(
     if (finding) findings.push(finding)
   }
   return findings
+}
+
+export interface TransitionFinding {
+  transitionId: string
+  kind:
+    | 'clip_not_found'
+    | 'cross_track'
+    | 'not_adjacent'
+    | 'missing_presentation'
+    | 'invalid_direction'
+  message: string
+}
+
+/** The engine renders a directional transition with an unknown direction as a BLACK frame. */
+const VALID_TRANSITION_DIRECTIONS = new Set(['from-left', 'from-right', 'from-top', 'from-bottom'])
+
+/**
+ * Find transitions that will silently do nothing (or degrade to a hard cut)
+ * at render time. The planner only builds a transition window when the two
+ * clips touch (|leftEnd - rightStart| <= 1 frame) or overlap; a transition
+ * whose clips are missing, on different tracks, or separated by a gap simply
+ * never renders — no error, no warning from the engine itself.
+ */
+/** A window-killing structural problem: the planner never builds a window for these. */
+function structuralTransitionFinding(
+  transition: Transition,
+  itemById: ReadonlyMap<string, TimelineItem>,
+): TransitionFinding | null {
+  const left = itemById.get(transition.leftClipId)
+  const right = itemById.get(transition.rightClipId)
+  if (!left || !right) {
+    const missing = [
+      ...(left ? [] : [`leftClipId "${transition.leftClipId}"`]),
+      ...(right ? [] : [`rightClipId "${transition.rightClipId}"`]),
+    ].join(' and ')
+    return {
+      transitionId: transition.id,
+      kind: 'clip_not_found',
+      message: `Transition "${transition.id}" references ${missing} which does not exist — it will never render`,
+    }
+  }
+  if (left.trackId !== right.trackId) {
+    return {
+      transitionId: transition.id,
+      kind: 'cross_track',
+      message:
+        `Transition "${transition.id}" spans clips on different tracks ` +
+        `("${left.trackId}" vs "${right.trackId}") — it will never render`,
+    }
+  }
+  const leftEnd = left.from + left.durationInFrames
+  const gap = right.from - leftEnd
+  if (gap > 1) {
+    return {
+      transitionId: transition.id,
+      kind: 'not_adjacent',
+      message:
+        `Transition "${transition.id}" clips are ${gap} frames apart ` +
+        `(left ends at ${leftEnd}, right starts at ${right.from}) — ` +
+        `clips must touch within 1 frame or the transition never renders`,
+    }
+  }
+  return null
+}
+
+/** Problems that keep the window but visibly degrade it (hard cut / black frames). */
+function degradationTransitionFindings(transition: Transition): TransitionFinding[] {
+  const findings: TransitionFinding[] = []
+  if (!transition.presentation) {
+    findings.push({
+      transitionId: transition.id,
+      kind: 'missing_presentation',
+      message: `Transition "${transition.id}" has no \`presentation\` — it renders as a hard cut instead of a transition`,
+    })
+  }
+  if (transition.direction && !VALID_TRANSITION_DIRECTIONS.has(transition.direction)) {
+    findings.push({
+      transitionId: transition.id,
+      kind: 'invalid_direction',
+      message:
+        `Transition "${transition.id}" has unknown direction "${transition.direction}" — ` +
+        `the window renders BLACK; valid: ${[...VALID_TRANSITION_DIRECTIONS].join(', ')}`,
+    })
+  }
+  return findings
+}
+
+export function collectTransitionFindings(
+  transitions: readonly Transition[],
+  items: readonly TimelineItem[],
+): TransitionFinding[] {
+  const itemById = new Map(items.map((item) => [item.id, item]))
+  return transitions.flatMap((transition) => {
+    const structural = structuralTransitionFinding(transition, itemById)
+    return structural ? [structural] : degradationTransitionFindings(transition)
+  })
 }
 
 /** Build the mediaId → metadata lookup from the driver's media list. */

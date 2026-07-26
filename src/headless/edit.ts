@@ -17,6 +17,7 @@ import type {
   ImageItem,
 } from '@/types/timeline'
 import type { MediaMetadata } from '@/types/storage'
+import type { Transition } from '@/types/transition'
 import type { AnimatableProperty, EasingType } from '@/types/keyframe'
 import type { VisualEffect } from '@/types/effects'
 import type { TransformProperties } from '@/types/transform'
@@ -28,6 +29,7 @@ import {
   buildTimelineFromStores,
 } from '@/features/timeline/stores/timeline-persistence'
 import { useItemsStore } from '@/features/timeline/stores/items-store'
+import { useTransitionsStore } from '@/features/timeline/stores/transitions-store'
 import { useTimelineSettingsStore } from '@/features/timeline/stores/timeline-settings-store'
 import { useMediaLibraryStore } from '@/features/media-library/stores/media-library-store'
 import { createClassicTrack } from '@/features/timeline/utils/classic-tracks'
@@ -41,6 +43,8 @@ import {
   trimItemStart,
   trimItemEnd,
   addTransition,
+  updateTransition,
+  removeTransition,
   setTracks,
   addKeyframe,
   removeKeyframesForProperty,
@@ -62,6 +66,8 @@ export type EditOperationName =
   | 'trimStart'
   | 'trimEnd'
   | 'addTransition'
+  | 'updateTransition'
+  | 'removeTransition'
   | 'addTrack'
   | 'addClip'
   | 'addKeyframe'
@@ -156,6 +162,12 @@ function requireItem(id: string, field = 'id'): TimelineItem {
   const item = useItemsStore.getState().itemById[id]
   if (!item) throw new Error(`${field}: item "${id}" does not exist`)
   return item
+}
+
+function requireTransition(id: string, field = 'id'): Transition {
+  const transition = useTransitionsStore.getState().transitions.find((t) => t.id === id)
+  if (!transition) throw new Error(`${field}: transition "${id}" does not exist`)
+  return transition
 }
 
 function requireTrack(id: string, field = 'trackId'): TimelineTrack {
@@ -321,9 +333,58 @@ function applyOp(op: EditOp): unknown {
         right,
         asString(op.type) as Parameters<typeof addTransition>[2],
         asNumber(op.durationInFrames),
+        asString(op.presentation) as Parameters<typeof addTransition>[4],
+        asString(op.direction) as Parameters<typeof addTransition>[5],
+        asNumber(op.alignment) ?? 0.5,
       )
       if (!added) throw new Error(`addTransition failed for clips "${left}" and "${right}"`)
-      return { added }
+      const created = useTransitionsStore
+        .getState()
+        .transitions.filter((t) => t.leftClipId === left && t.rightClipId === right)
+        .at(-1)
+      if (created && (op.timing !== undefined || op.properties !== undefined)) {
+        updateTransition(created.id, {
+          ...(op.timing !== undefined
+            ? { timing: asString(op.timing) as Transition['timing'] }
+            : {}),
+          ...(op.properties !== undefined
+            ? { properties: op.properties as Transition['properties'] }
+            : {}),
+        })
+      }
+      return { added, id: created?.id, presentation: created?.presentation }
+    }
+    case 'updateTransition': {
+      const id = asString(op.id)
+      if (!id) throw new Error('updateTransition requires `id`')
+      requireTransition(id)
+      const updates: Parameters<typeof updateTransition>[1] = {
+        ...(op.durationInFrames !== undefined
+          ? { durationInFrames: asNumber(op.durationInFrames) }
+          : {}),
+        ...(op.presentation !== undefined
+          ? { presentation: asString(op.presentation) as Transition['presentation'] }
+          : {}),
+        ...(op.direction !== undefined
+          ? { direction: asString(op.direction) as Transition['direction'] }
+          : {}),
+        ...(op.timing !== undefined ? { timing: asString(op.timing) as Transition['timing'] } : {}),
+        ...(op.alignment !== undefined ? { alignment: asNumber(op.alignment) } : {}),
+        ...(op.properties !== undefined
+          ? { properties: op.properties as Transition['properties'] }
+          : {}),
+      }
+      if (Object.keys(updates).length === 0)
+        throw new Error('updateTransition requires at least one field to change')
+      updateTransition(id, updates)
+      return { id }
+    }
+    case 'removeTransition': {
+      const id = asString(op.id)
+      if (!id) throw new Error('removeTransition requires `id`')
+      requireTransition(id)
+      removeTransition(id)
+      return { id }
     }
     case 'addTrack': {
       const kind = op.kind === 'audio' ? 'audio' : 'video'
@@ -499,6 +560,32 @@ function applyOp(op: EditOp): unknown {
   }
 }
 
+/** Apply one op, record its result (success or failure), and rethrow on failure. */
+function applyOpTracked(
+  rawOp: EditOp,
+  prior: Map<string, HeadlessEditResult['results'][number]>,
+  results: HeadlessEditResult['results'],
+): void {
+  const callerId = asString(rawOp.callerId)
+  const op = resolveOperationRefs(rawOp, prior)
+  try {
+    const detail = applyOp(op)
+    const result = { ...(callerId ? { callerId } : {}), op: op.op, ok: true as const, detail }
+    results.push(result)
+    if (callerId) prior.set(callerId, result)
+  } catch (error) {
+    results.push({
+      ...(callerId ? { callerId } : {}),
+      op: op.op,
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    throw new Error(
+      `Edit op "${op.op}" failed: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+}
+
 export async function editProject(input: HeadlessEditInput): Promise<HeadlessEditResult> {
   const { project: migrated } = migrateProject(input.project)
   await hydrateTimelineStoresFromProject(migrated)
@@ -510,26 +597,7 @@ export async function editProject(input: HeadlessEditInput): Promise<HeadlessEdi
   const prior = new Map<string, HeadlessEditResult['results'][number]>()
   const callerIds = input.ops.map((op) => asString(op.callerId)).filter(Boolean) as string[]
   if (new Set(callerIds).size !== callerIds.length) throw new Error('Duplicate edit callerId')
-  for (const rawOp of input.ops) {
-    const callerId = asString(rawOp.callerId)
-    const op = resolveOperationRefs(rawOp, prior)
-    try {
-      const detail = applyOp(op)
-      const result = { ...(callerId ? { callerId } : {}), op: op.op, ok: true as const, detail }
-      results.push(result)
-      if (callerId) prior.set(callerId, result)
-    } catch (error) {
-      results.push({
-        ...(callerId ? { callerId } : {}),
-        op: op.op,
-        ok: false,
-        error: error instanceof Error ? error.message : String(error),
-      })
-      throw new Error(
-        `Edit op "${op.op}" failed: ${error instanceof Error ? error.message : String(error)}`,
-      )
-    }
-  }
+  for (const rawOp of input.ops) applyOpTracked(rawOp, prior, results)
 
   const timeline = buildTimelineFromStores()
   log.info('Headless edit complete', { applied: results.length })

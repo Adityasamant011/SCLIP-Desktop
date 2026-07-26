@@ -3,6 +3,8 @@ import { z } from 'zod'
 export const HEADLESS_API_VERSION = 1
 
 const id = z.string().min(1)
+// Unknown direction values render the transition window BLACK — reject at the wire.
+const transitionDirection = z.enum(['from-left', 'from-right', 'from-top', 'from-bottom'])
 const portableIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/)
 const revisionSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/)
 const finite = z.number().finite()
@@ -184,8 +186,26 @@ const opSchemas = [
       rightClipId: id,
       type: z.literal('crossfade').optional(),
       durationInFrames: positiveFrames.optional(),
+      presentation: id.optional(),
+      direction: transitionDirection.optional(),
+      timing: id.optional(),
+      alignment: z.number().min(0).max(1).optional(),
+      properties: z.record(z.string(), z.unknown()).optional(),
     })
     .strict(),
+  z
+    .object({
+      op: z.literal('updateTransition'),
+      id,
+      durationInFrames: positiveFrames.optional(),
+      presentation: id.optional(),
+      direction: transitionDirection.optional(),
+      timing: id.optional(),
+      alignment: z.number().min(0).max(1).optional(),
+      properties: z.record(z.string(), z.unknown()).optional(),
+    })
+    .strict(),
+  z.object({ op: z.literal('removeTransition'), id }).strict(),
   z
     .object({
       op: z.literal('addTrack'),
@@ -247,6 +267,8 @@ export const EDIT_OPERATION_NAMES = [
   'trimStart',
   'trimEnd',
   'addTransition',
+  'updateTransition',
+  'removeTransition',
   'addTrack',
   'addClip',
   'addKeyframe',
@@ -270,6 +292,8 @@ function samplesDescription(name) {
     trimStart: 'Trim frames from an item start',
     trimEnd: 'Trim frames from an item end',
     addTransition: 'Add a transition between clips',
+    updateTransition: 'Update an existing transition',
+    removeTransition: 'Remove an existing transition',
     addTrack: 'Add a video or audio track',
     addClip: 'Add workspace media as a clip',
     addKeyframe: 'Add a property keyframe',
