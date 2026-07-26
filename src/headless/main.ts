@@ -16,7 +16,7 @@
  * layer being present.
  */
 import type { Project } from '@/types/project'
-import type { TimelineTrack, TimelineItem } from '@/types/timeline'
+import type { TimelineTrack, TimelineItem, TextItem } from '@/types/timeline'
 import type { Transition } from '@/types/transition'
 import type { ItemKeyframes } from '@/types/keyframe'
 import type { AudioEqSettings } from '@/types/audio'
@@ -70,6 +70,10 @@ import {
   collectVisibleTextFontFamilies,
   resolveTrackRenderState,
 } from '@/runtime/composition-runtime/utils/scene-assembly'
+import { expandTextTransformToFitContent } from '@/runtime/composition-runtime/utils/text-layout'
+import { layoutTextBlock, lineInkWidth } from '@/shared/typography/text-block-layout'
+import { createCanvasTextMeasurer } from '@/shared/typography/text-measurer'
+import { resolveAnimatedTextItem } from '@/features/keyframes/utils/animated-text-item'
 
 const log = createLogger('Headless')
 
@@ -733,6 +737,47 @@ interface HeadlessLayoutInput {
   strict?: boolean
 }
 
+/** One styled sub-range of an inline-flowed line, in canvas coordinates. */
+interface TextLayoutSpan {
+  text: string
+  x: number
+  width: number
+  color: string
+}
+
+interface TextLayoutLine {
+  text: string
+  /** Canvas-space left edge of the occupied line box. */
+  x: number
+  /** Canvas-space top of the line box. */
+  y: number
+  /** Canvas-space alphabetic baseline. */
+  baseline: number
+  /** Advance width incl. trailing letter-spacing. */
+  width: number
+  /** Visible ink width (excludes trailing letter-spacing). */
+  inkWidth: number
+  height: number
+  color: string
+  fontSize: number
+  letterSpacing: number
+  /** Present only for `spanLayout: 'inline'` items. */
+  spans?: TextLayoutSpan[]
+}
+
+/**
+ * True rendered geometry of a text item at the requested frame — the same
+ * `layoutTextBlock` output the Canvas/GPU renderers draw from, mapped into
+ * canvas coordinates. Lets callers position companion graphics (underlines,
+ * plates) pixel-exactly instead of estimating glyph widths.
+ */
+interface TextLayoutInfo {
+  /** The auto-expanded text box (canvas-space). */
+  box: { x: number; y: number; width: number; height: number }
+  lines: TextLayoutLine[]
+  background?: { x: number; y: number; width: number; height: number; radius: number }
+}
+
 interface LayoutBox {
   id: string
   type: TimelineItem['type']
@@ -742,7 +787,7 @@ interface LayoutBox {
   /** Canvas-space top-left corner (px), origin at canvas top-left. */
   x: number
   y: number
-  /** Bounding-box size (px). For text this is the (auto-expanded) text box. */
+  /** Bounding-box size (px). For text this is the auto-expanded text box. */
   width: number
   height: number
   opacity: number
@@ -756,6 +801,7 @@ interface LayoutBox {
   textAlign?: string
   verticalAlign?: string
   fontSize?: number
+  textLayout?: TextLayoutInfo
 }
 
 interface HeadlessLayoutResult {
@@ -905,6 +951,81 @@ function round1(n: number): number {
   return Math.round(n * 10) / 10
 }
 
+let layoutMeasureCtx: OffscreenCanvasRenderingContext2D | null | undefined
+/** Shared 1×1 measuring context — same canvas measurer the render paths use. */
+function getLayoutMeasureCtx(): OffscreenCanvasRenderingContext2D | null {
+  if (layoutMeasureCtx === undefined) {
+    layoutMeasureCtx = new OffscreenCanvas(1, 1).getContext('2d')
+  }
+  return layoutMeasureCtx
+}
+
+/**
+ * Dry-run the exact text layout the renderers draw from, mapped to canvas
+ * coordinates. Mirrors the render path: resolve animated text properties,
+ * auto-expand the box (baselines depend on box height for middle/bottom
+ * vertical align), then `layoutTextBlock`.
+ */
+function computeTextLayout(
+  item: TextItem,
+  itemKeyframes: ItemKeyframes | undefined,
+  frame: number,
+  canvas: { width: number; height: number; fps: number },
+  transform: ReturnType<typeof getAnimatedTransform>,
+): { textLayout: TextLayoutInfo; expanded: { width: number; height: number } } | null {
+  const ctx = getLayoutMeasureCtx()
+  if (!ctx) return null
+  const resolvedItem = resolveAnimatedTextItem(item, itemKeyframes, frame - item.from, canvas)
+  const expanded = expandTextTransformToFitContent(resolvedItem, transform)
+  const left = canvas.width / 2 + expanded.x - expanded.width / 2
+  const top = canvas.height / 2 + expanded.y - expanded.height / 2
+  const block = layoutTextBlock(
+    resolvedItem,
+    expanded.width,
+    expanded.height,
+    createCanvasTextMeasurer(ctx),
+  )
+  return {
+    expanded: { width: expanded.width, height: expanded.height },
+    textLayout: {
+      box: { x: left, y: top, width: expanded.width, height: expanded.height },
+      lines: block.lines.map((line) => ({
+        text: line.text,
+        x: left + line.startX,
+        y: top + line.top,
+        baseline: top + line.baselineY,
+        width: line.width,
+        inkWidth: lineInkWidth(line),
+        height: line.lineHeightPx,
+        color: line.color,
+        fontSize: line.fontSize,
+        letterSpacing: line.letterSpacing,
+        ...(line.runs
+          ? {
+              spans: line.runs.map((run) => ({
+                text: run.text,
+                x: left + line.startX + run.offsetX,
+                width: run.width,
+                color: run.color,
+              })),
+            }
+          : {}),
+      })),
+      ...(block.background
+        ? {
+            background: {
+              x: left + block.background.x,
+              y: top + block.background.y,
+              width: block.background.width,
+              height: block.background.height,
+              radius: block.background.radius,
+            },
+          }
+        : {}),
+    },
+  }
+}
+
 /**
  * Dump the computed on-canvas bounding box of every visible item at a frame,
  * WITHOUT rendering. Reuses the exact transform resolver the export path uses
@@ -942,6 +1063,9 @@ async function dumpLayout(input: HeadlessLayoutInput): Promise<HeadlessLayoutRes
   const warnings = await prepareFonts(composition.tracks)
   const canvas = { width: view.width, height: view.height, fps: view.fps }
   const keyframesMap = buildKeyframesMap(composition.keyframes)
+  // Text geometry must be measured with the REAL fonts — without this every
+  // width/wrap point comes from Chrome's fallback sans-serif.
+  await ensureFontsLoaded(collectVisibleTextFontFamilies(composition.tracks), HEADLESS_FONT_WEIGHTS)
 
   // Track visibility comes from the SAME resolver the render path uses, so a
   // soloed track set makes `visible` agree with what a render would actually
@@ -984,6 +1108,15 @@ async function dumpLayout(input: HeadlessLayoutInput): Promise<HeadlessLayoutRes
         box.textAlign = item.textAlign
         box.verticalAlign = item.verticalAlign
         box.fontSize = item.fontSize
+        const measured = computeTextLayout(item, keyframesMap.get(item.id), frame, canvas, t)
+        if (measured) {
+          box.textLayout = measured.textLayout
+          // Report the box the render actually uses (auto-expanded to fit content).
+          box.x = round1(measured.textLayout.box.x)
+          box.y = round1(measured.textLayout.box.y)
+          box.width = round1(measured.expanded.width)
+          box.height = round1(measured.expanded.height)
+        }
       }
       items.push(box)
     }
