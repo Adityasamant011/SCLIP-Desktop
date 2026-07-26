@@ -7,6 +7,7 @@ import { useGizmoStore } from '../stores/gizmo-store'
 import { shouldPreferDomPlayerForGizmo } from '../utils/gizmo-preview-presentation'
 
 interface UsePreviewRuntimeGuardsParams {
+  forceFastScrubOverlay: boolean
   isGizmoInteractingRef: MutableRefObject<boolean>
   preferPlayerForDomGizmoRef: MutableRefObject<boolean>
   setAdaptiveQualityCap: Dispatch<SetStateAction<PreviewQuality>>
@@ -25,6 +26,7 @@ function clearPreviewFramePreservingViewedFrame() {
 }
 
 export function usePreviewRuntimeGuards({
+  forceFastScrubOverlay,
   isGizmoInteractingRef,
   preferPlayerForDomGizmoRef,
   setAdaptiveQualityCap,
@@ -42,7 +44,8 @@ export function usePreviewRuntimeGuards({
       const isInteracting = activeGizmo !== null
       isGizmoInteractingRef.current = isInteracting
       preferPlayerForDomGizmoRef.current =
-        isInteracting && shouldPreferDomPlayerForGizmo(false, activeGizmo?.itemType)
+        isInteracting &&
+        shouldPreferDomPlayerForGizmo(forceFastScrubOverlay, activeGizmo?.itemType)
 
       if (isInteracting && !wasInteracting) {
         // Clear stale hover-scrub state without rerendering the large preview
@@ -54,7 +57,7 @@ export function usePreviewRuntimeGuards({
 
     syncGizmoState(useGizmoStore.getState())
     return useGizmoStore.subscribe(syncGizmoState)
-  }, [isGizmoInteractingRef, preferPlayerForDomGizmoRef])
+  }, [forceFastScrubOverlay, isGizmoInteractingRef, preferPlayerForDomGizmoRef])
 
   useEffect(() => {
     if (!ADAPTIVE_PREVIEW_QUALITY_ENABLED) {
