@@ -129,6 +129,49 @@ describe('playback-store', () => {
       usePlaybackStore.getState().setPlaybackRate(0.5)
       expect(usePlaybackStore.getState().playbackRate).toBe(0.5)
     })
+
+    it('applies J/L shuttle transitions atomically and resets on pause', () => {
+      const listener = vi.fn()
+      const unsubscribe = usePlaybackStore.subscribe(listener)
+
+      usePlaybackStore.getState().shuttleForward()
+      expect(usePlaybackStore.getState()).toMatchObject({
+        isPlaying: true,
+        playbackRate: 1,
+      })
+      expect(listener).toHaveBeenCalledTimes(1)
+
+      listener.mockClear()
+      usePlaybackStore.getState().shuttleForward()
+      expect(usePlaybackStore.getState().playbackRate).toBe(2)
+      expect(listener).toHaveBeenCalledTimes(1)
+
+      listener.mockClear()
+      usePlaybackStore.getState().shuttleReverse()
+      expect(usePlaybackStore.getState()).toMatchObject({
+        isPlaying: true,
+        playbackRate: -1,
+      })
+      expect(listener).toHaveBeenCalledTimes(1)
+
+      listener.mockClear()
+      usePlaybackStore.getState().pause()
+      expect(usePlaybackStore.getState()).toMatchObject({
+        isPlaying: false,
+        playbackRate: 1,
+      })
+      expect(listener).toHaveBeenCalledTimes(1)
+      unsubscribe()
+    })
+
+    it('keeps shuttle rate out of persisted playback settings', () => {
+      usePlaybackStore.getState().shuttleReverse()
+      const options = usePlaybackStore.persist.getOptions()
+      const persisted = options.partialize?.(usePlaybackStore.getState())
+
+      expect(persisted).not.toHaveProperty('playbackRate')
+      expect(persisted).not.toHaveProperty('isPlaying')
+    })
   })
 
   describe('loop', () => {

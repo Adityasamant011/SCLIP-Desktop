@@ -17,6 +17,7 @@ import {
   shouldRejectBlankTransportHandoff,
   shouldRecoverFailedActivePreseekSchedule,
   shouldRestoreCommittedPreviewSnapshot,
+  shouldUseRenderedPlaybackOverlay,
   type RenderPumpFrameState,
 } from './render-pump-frame-plan'
 
@@ -31,6 +32,36 @@ function makeState(overrides: Partial<RenderPumpFrameState> = {}): RenderPumpFra
 }
 
 describe('render pump frame plan', () => {
+  it('routes reverse shuttle through the rendered playback overlay', () => {
+    expect(
+      shouldUseRenderedPlaybackOverlay(
+        {
+          isPlaying: true,
+          playbackRate: -4,
+        },
+        false,
+      ),
+    ).toBe(true)
+    expect(
+      shouldUseRenderedPlaybackOverlay(
+        {
+          isPlaying: true,
+          playbackRate: 4,
+        },
+        false,
+      ),
+    ).toBe(false)
+    expect(
+      shouldUseRenderedPlaybackOverlay(
+        {
+          isPlaying: false,
+          playbackRate: -1,
+        },
+        true,
+      ),
+    ).toBe(false)
+  })
+
   it('preserves the authoritative paused transport frame from delayed repaint', () => {
     expect(
       shouldPreservePausedTransportPresentation({

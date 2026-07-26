@@ -145,7 +145,10 @@ export function usePreviewPlaybackController({
 
   const handlePlayStateChange = useCallback((playing: boolean) => {
     if (playing) {
-      usePlaybackStore.getState().play()
+      const playback = usePlaybackStore.getState()
+      if (!playback.isPlaying) {
+        playback.play()
+      }
     } else {
       usePlaybackStore.getState().pause()
     }

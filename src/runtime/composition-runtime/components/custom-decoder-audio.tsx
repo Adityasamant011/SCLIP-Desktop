@@ -10,6 +10,7 @@ import { createLogger } from '@/shared/logging/logger'
 import { getAudioTargetTimeSeconds } from '../utils/video-timing'
 import { useAudioPlaybackState } from './hooks/use-audio-playback-state'
 import { useGizmoStore } from '@/runtime/composition-runtime/deps/stores'
+import { useClockPlaybackRate } from '@/runtime/composition-runtime/deps/player'
 import {
   hasAudioPitchOverride,
   isAudioPitchShiftActive,
@@ -23,6 +24,7 @@ const PARTIAL_WAV_EXTENSION_TRIGGER_SECONDS = 1.25
 const PARTIAL_WAV_EXTENSION_READY_SECONDS = 3
 const BACKGROUND_FULL_DECODE_DELAY_MS = 1500
 const BACKGROUND_FULL_DECODE_BACKSTOP_MS = 4000
+const REVERSE_SHUTTLE_PREROLL_SECONDS = 4
 
 interface CustomDecoderAudioProps extends AudioPlaybackProps {
   src: string
@@ -181,7 +183,13 @@ const CustomDecoderPitchPreservedAudio: React.FC<CustomDecoderAudioProps> = ({
   crossfadeFadeOut,
   volumeMultiplier = 1,
 }) => {
-  const { frame, fps, playing, isPreviewScrubbing } = useAudioPlaybackState({
+  const {
+    frame,
+    fps,
+    playing,
+    transportPlaybackRate,
+    isPreviewScrubbing,
+  } = useAudioPlaybackState({
     itemId,
     liveGainItemIds,
     volume,
@@ -208,6 +216,9 @@ const CustomDecoderPitchPreservedAudio: React.FC<CustomDecoderAudioProps> = ({
   })
   const [decodedSource, setDecodedSource] = useState<DecodedPitchSource | null>(null)
   const pendingExtensionKeyRef = useRef<string | null>(null)
+  const frameRef = useRef(frame)
+  frameRef.current = frame
+  const isReverseShuttle = transportPlaybackRate < 0
 
   useEffect(() => {
     if (!mediaId || !src || isPreviewScrubbing) return
@@ -217,8 +228,19 @@ const CustomDecoderPitchPreservedAudio: React.FC<CustomDecoderAudioProps> = ({
     let scheduledFullDecodeAtMs = Number.POSITIVE_INFINITY
     let fullDecodeTimer: ReturnType<typeof setTimeout> | null = null
     const effectiveSourceFps = sourceFps ?? 30
-    const seedSourceFrames =
-      isReversed && reverseSourceEnd !== undefined ? reverseSourceEnd : trimBefore
+    const seedSourceFrames = isReverseShuttle
+      ? getAudioTargetTimeSeconds(
+          trimBefore,
+          effectiveSourceFps,
+          frameRef.current,
+          playbackRate,
+          fps,
+          isReversed,
+          reverseSourceEnd,
+        ) * effectiveSourceFps
+      : isReversed && reverseSourceEnd !== undefined
+        ? reverseSourceEnd
+        : trimBefore
     const clipStartTime = Math.max(0, seedSourceFrames / effectiveSourceFps)
     const clearScheduledFullDecode = () => {
       scheduledFullDecodeAtMs = Number.POSITIVE_INFINITY
@@ -270,6 +292,9 @@ const CustomDecoderPitchPreservedAudio: React.FC<CustomDecoderAudioProps> = ({
       minReadySeconds: PARTIAL_WAV_READY_SECONDS,
       waitTimeoutMs: PARTIAL_WAV_WAIT_TIMEOUT_MS,
       targetTimeSeconds: clipStartTime,
+      ...(isReverseShuttle
+        ? { preRollSeconds: REVERSE_SHUTTLE_PREROLL_SECONDS }
+        : {}),
     })
       .then((slice) => {
         if (cancelled) return
@@ -305,7 +330,18 @@ const CustomDecoderPitchPreservedAudio: React.FC<CustomDecoderAudioProps> = ({
       cancelled = true
       clearScheduledFullDecode()
     }
-  }, [isPreviewScrubbing, isReversed, mediaId, reverseSourceEnd, sourceFps, src, trimBefore])
+  }, [
+    fps,
+    isPreviewScrubbing,
+    isReversed,
+    isReverseShuttle,
+    mediaId,
+    playbackRate,
+    reverseSourceEnd,
+    sourceFps,
+    src,
+    trimBefore,
+  ])
 
   useEffect(() => {
     const currentSource = decodedSource
@@ -324,7 +360,9 @@ const CustomDecoderPitchPreservedAudio: React.FC<CustomDecoderAudioProps> = ({
       isReversed,
       reverseSourceEnd,
     )
-    const remainingCoverage = currentSource.coverageEndSec - targetTime
+    const remainingCoverage = isReverseShuttle
+      ? targetTime - currentSource.sourceStartOffsetSec
+      : currentSource.coverageEndSec - targetTime
     const targetOutsideSource =
       targetTime < currentSource.sourceStartOffsetSec || targetTime >= currentSource.coverageEndSec
 
@@ -343,6 +381,9 @@ const CustomDecoderPitchPreservedAudio: React.FC<CustomDecoderAudioProps> = ({
       minReadySeconds: PARTIAL_WAV_EXTENSION_READY_SECONDS,
       waitTimeoutMs: PARTIAL_WAV_WAIT_TIMEOUT_MS,
       targetTimeSeconds: Math.max(0, targetTime),
+      ...(isReverseShuttle
+        ? { preRollSeconds: REVERSE_SHUTTLE_PREROLL_SECONDS }
+        : {}),
     })
       .then((slice) => {
         if (cancelled) return
@@ -385,6 +426,7 @@ const CustomDecoderPitchPreservedAudio: React.FC<CustomDecoderAudioProps> = ({
     fps,
     frame,
     isReversed,
+    isReverseShuttle,
     mediaId,
     playbackRate,
     playing,
@@ -500,6 +542,7 @@ const CustomDecoderPitchPreservedAudio: React.FC<CustomDecoderAudioProps> = ({
  */
 export const CustomDecoderAudio: React.FC<CustomDecoderAudioProps> = React.memo((props) => {
   const playbackRate = props.playbackRate ?? 1
+  const isReverseShuttle = useClockPlaybackRate() < 0
   const itemPreview = useGizmoStore(
     useCallback((state) => state.preview?.[props.itemId], [props.itemId]),
   )
@@ -516,6 +559,7 @@ export const CustomDecoderAudio: React.FC<CustomDecoderAudioProps> = React.memo(
   const hasActivePitchPreview = hasAudioPitchOverride(itemPreview?.properties)
   const shouldUseBufferedPlayback =
     props.isReversed !== true &&
+    !isReverseShuttle &&
     Math.abs(playbackRate - 1) <= 0.0001 &&
     !hasActivePitchPreview &&
     !isAudioPitchShiftActive(resolvedPitchShiftSemitones)

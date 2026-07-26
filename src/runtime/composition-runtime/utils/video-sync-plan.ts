@@ -280,3 +280,15 @@ export function planVideoFrameCallbackCorrection(input: {
     playbackRate: input.nominalRate,
   }
 }
+export function shouldIssueCoalescedReverseVideoSeek(options: {
+  seeking: boolean
+  seekInFlight: boolean
+  currentTime: number
+  targetTime: number
+}): boolean {
+  return (
+    !options.seeking &&
+    !options.seekInFlight &&
+    Math.abs(options.currentTime - options.targetTime) > 0.001
+  )
+}

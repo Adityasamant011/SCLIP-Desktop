@@ -57,7 +57,12 @@ export function usePlayer(
   const { loop: _loop = false, onEnded: _onEnded } = options
 
   // Get context values
-  const { playing: isPlayingState, imperativePlaying, playbackRate } = useBridgedTimelineContext()
+  const {
+    playing: isPlayingState,
+    imperativePlaying,
+    playbackRate,
+    setPlaybackRate: setClockPlaybackRate,
+  } = useBridgedTimelineContext()
   const { setPlaying } = useBridgedSetTimelineContext()
   const setTimelineFrame = useBridgedSetTimelineFrame()
   const emitter = usePlayerEmitter()
@@ -178,9 +183,10 @@ export function usePlayer(
    */
   const setPlaybackRate = useCallback(
     (rate: number) => {
+      setClockPlaybackRate(rate)
       emitter.dispatchRateChange(rate)
     },
-    [emitter],
+    [emitter, setClockPlaybackRate],
   )
 
   /**

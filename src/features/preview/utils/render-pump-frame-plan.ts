@@ -25,6 +25,8 @@ export type PreviewPresentationHandoffState = Pick<
   'currentFrame' | 'previewFrame' | 'isPlaying'
 >
 
+export type RenderedPlaybackState = Pick<PlaybackState, 'isPlaying' | 'playbackRate'>
+
 type ScrubDirection = -1 | 0 | 1
 
 interface ResolveRenderPumpTargetFrameParams {
@@ -93,6 +95,18 @@ interface ShouldRecoverFailedActivePreseekScheduleParams {
   isPlaying: boolean
   currentTarget: number
   targetFrame: number
+}
+
+/**
+ * Browser media elements cannot sustain negative playback rates. Reverse
+ * shuttle therefore shares the display-cadenced composition render lane used
+ * by workspaces that always require the rendered overlay.
+ */
+export function shouldUseRenderedPlaybackOverlay(
+  state: RenderedPlaybackState,
+  forceFastScrubOverlay: boolean,
+): boolean {
+  return state.isPlaying && (forceFastScrubOverlay || state.playbackRate < 0)
 }
 
 /**

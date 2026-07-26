@@ -6,6 +6,12 @@ const audioDecodeMocks = vi.hoisted(() => ({
   getOrDecodeAudio: vi.fn(),
   getOrDecodeAudioSliceForPlayback: vi.fn(),
 }))
+const clockRateMocks = vi.hoisted(() => ({ current: 1 }))
+
+vi.mock('@/runtime/composition-runtime/deps/player', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/runtime/composition-runtime/deps/player')>()),
+  useClockPlaybackRate: () => clockRateMocks.current,
+}))
 
 const playbackStateMocks = vi.hoisted(() => ({
   current: {
@@ -19,6 +25,7 @@ const playbackStateMocks = vi.hoisted(() => ({
     frame: number
     fps: number
     playing: boolean
+    transportPlaybackRate?: number
     isPreviewScrubbing?: boolean
     resolvedVolume: number
     resolvedPitchShiftSemitones: number
@@ -105,6 +112,7 @@ function makeAudioBuffer(durationSeconds = 8): AudioBuffer {
 describe('CustomDecoderAudio', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    clockRateMocks.current = 1
     playbackStateMocks.current = {
       frame: 0,
       fps: 30,

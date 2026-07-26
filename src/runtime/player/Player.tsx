@@ -89,6 +89,8 @@ export interface PlayerRef {
   seekTo: (frame: number) => void
   getCurrentFrame: () => number
   isPlaying: () => boolean
+  getPlaybackRate: () => number
+  setPlaybackRate: (rate: number) => void
   addEventListener: <E extends PlayerEventTypes>(event: E, callback: CallbackListener<E>) => void
   removeEventListener: <E extends PlayerEventTypes>(event: E, callback: CallbackListener<E>) => void
 }
@@ -465,6 +467,8 @@ const PlayerInner = forwardRef<PlayerRef, PlayerProps>(
         seekTo: (frame: number) => player.seek(frame),
         getCurrentFrame: () => player.getCurrentFrame(),
         isPlaying: () => player.isPlaying(),
+        getPlaybackRate: () => player.getPlaybackRate(),
+        setPlaybackRate: (rate: number) => player.setPlaybackRate(rate),
         addEventListener: (event, callback) => {
           emitter.addEventListener(event, callback)
         },

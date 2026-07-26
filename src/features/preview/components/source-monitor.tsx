@@ -54,6 +54,7 @@ import { useItemsStore } from '@/features/preview/deps/timeline-store'
 import { useSettingsStore } from '@/features/preview/deps/settings'
 import { useEditorStore } from '@/shared/state/editor'
 import { useSourcePlayerStore } from '@/shared/state/source-player'
+import { getNextShuttleRate } from '@/shared/state/playback/shuttle'
 import { useSelectionStore } from '@/shared/state/selection'
 import { EDITOR_LAYOUT_CSS_VALUES, getEditorLayout } from '@/config/editor-layout'
 import { createScrubThrottleState, shouldCommitScrubFrame } from '../deps/timeline-utils'
@@ -641,10 +642,31 @@ function SourcePlaybackControls({
         if (previewFrame !== null) {
           commitSourceSeek(previewFrame)
         }
-        player.toggle()
+        if (player.isPlaying()) {
+          player.pause()
+        } else {
+          player.setPlaybackRate(1)
+          player.play()
+        }
       },
       pause: () => {
         player.pause()
+        player.setPlaybackRate(1)
+      },
+      isPlaying: () => player.isPlaying(),
+      shuttleForward: () => {
+        const nextRate = player.isPlaying()
+          ? getNextShuttleRate(player.getPlaybackRate(), 1)
+          : 1
+        player.setPlaybackRate(nextRate)
+        player.play()
+      },
+      shuttleReverse: () => {
+        const nextRate = player.isPlaying()
+          ? getNextShuttleRate(player.getPlaybackRate(), -1)
+          : -1
+        player.setPlaybackRate(nextRate)
+        player.play()
       },
       seek: (frame) => {
         commitSourceSeek(frame)

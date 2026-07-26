@@ -727,6 +727,7 @@ export async function createCompositionRenderer(
   let lastRenderAborted = false
   let activePreviewFramePending = false
   let activePreviewFallbackUsed = false
+  let nonBlockingVideoFrameToleranceSeconds: number | undefined
   let liveDomVideoPlaybackActive = Boolean(domVideoElementProvider)
   let scrubbingFrameCacheActive = shouldUseScrubbingFrameCache(
     Boolean(scrubbingCache),
@@ -738,7 +739,7 @@ export async function createCompositionRenderer(
     // GPU copies compete with the next frame's effects/composite work and retain
     // textures that playback is unlikely to revisit immediately. Paused seeks
     // still populate all cache tiers as before.
-    if (!scrubbingCache || !scrubbingFrameCacheActive) {
+    if (!scrubbingCache || !scrubbingFrameCacheActive || activePreviewFallbackUsed) {
       return
     }
 
@@ -1990,10 +1991,12 @@ export async function createCompositionRenderer(
       })
       itemRenderContext.captureDecodedVideoFrames =
         Boolean(scrubbingCache && scrubbingFrameCacheActive) && renderedFrameCacheMode !== 'skip'
-      itemRenderContext.workerPredecodeWaitMs = resolveWorkerPredecodeWaitMs(
-        rendererMode,
-        renderedFrameCacheMode,
-      )
+      itemRenderContext.nonBlockingVideoFrameToleranceSeconds =
+        nonBlockingVideoFrameToleranceSeconds
+      itemRenderContext.workerPredecodeWaitMs =
+        nonBlockingVideoFrameToleranceSeconds === undefined
+          ? resolveWorkerPredecodeWaitMs(rendererMode, renderedFrameCacheMode)
+          : 0
 
       // Refresh sub-comp render data so edits inside compound clips (effects,
       // items, keyframes) show up during playback. Reference-equality keeps
@@ -2698,6 +2701,13 @@ export async function createCompositionRenderer(
         Boolean(scrubbingCache),
         liveDomVideoPlaybackActive,
       )
+    },
+
+    setNonBlockingVideoFrameTolerance(toleranceSeconds: number | undefined) {
+      nonBlockingVideoFrameToleranceSeconds =
+        toleranceSeconds === undefined
+          ? undefined
+          : Math.max(1 / Math.max(1, fps), Math.min(0.5, toleranceSeconds))
     },
 
     /**

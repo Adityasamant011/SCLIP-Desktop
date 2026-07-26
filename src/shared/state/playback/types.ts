@@ -78,6 +78,8 @@ export interface PlaybackActions {
   play: () => void
   pause: () => void
   togglePlayPause: () => void
+  shuttleForward: () => void
+  shuttleReverse: () => void
   setPlaybackRate: (rate: number) => void
   toggleLoop: () => void
   setVolume: (volume: number) => void

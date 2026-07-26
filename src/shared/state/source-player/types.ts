@@ -8,6 +8,9 @@ export interface SourcePlayerMethods {
    * element still decoding the old frame.
    */
   pause: () => void
+  isPlaying: () => boolean
+  shuttleForward: () => void
+  shuttleReverse: () => void
   seek: (frame: number) => void
   frameBack: (frames: number) => void
   frameForward: (frames: number) => void

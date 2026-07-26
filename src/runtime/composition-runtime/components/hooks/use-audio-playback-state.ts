@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo } from 'react'
-import { useSequenceContext } from '@/runtime/composition-runtime/deps/player'
+import {
+  useClockPlaybackRate,
+  useSequenceContext,
+} from '@/runtime/composition-runtime/deps/player'
 import { useVideoConfig, useIsPlaying } from '../../hooks/use-player-compat'
 import { useGizmoStore } from '@/runtime/composition-runtime/deps/stores'
 import { usePlaybackStore } from '@/runtime/composition-runtime/deps/stores'
@@ -20,6 +23,7 @@ interface AudioPlaybackState {
   frame: number
   fps: number
   playing: boolean
+  transportPlaybackRate: number
   isPreviewScrubbing: boolean
   resolvedVolume: number
   resolvedPitchShiftSemitones: number
@@ -55,6 +59,7 @@ export function useAudioPlaybackState({
   const frame = sequenceContext?.localFrame ?? 0
   const { fps } = useVideoConfig()
   const playing = useIsPlaying()
+  const transportPlaybackRate = useClockPlaybackRate()
   // Subscribe to the scrub lifecycle, not the changing preview frame itself.
   // Audio is silent while the pointer is down, so adapters can defer decode and
   // graph allocation until the scrub settles on its final frame.
@@ -144,6 +149,7 @@ export function useAudioPlaybackState({
     frame,
     fps,
     playing,
+    transportPlaybackRate,
     isPreviewScrubbing,
     resolvedVolume:
       itemVolume *

@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { PlaybackState, PlaybackActions, PreviewQuality } from './types'
+import { getNextShuttleRate } from './shuttle'
 
 function normalizeFrame(frame: number): number {
   if (!Number.isFinite(frame)) return 0
@@ -28,6 +29,30 @@ function enterPlayback(state: PlaybackState & PlaybackActions) {
     previewItemId: null,
     previewFrameEpoch: nextEpoch,
     frameUpdateEpoch: nextEpoch,
+  }
+}
+
+function enterNormalPlayback(state: PlaybackState & PlaybackActions) {
+  const playbackState = enterPlayback(state)
+  if (playbackState === state) {
+    return state.playbackRate === 1 ? state : { playbackRate: 1 }
+  }
+  return {
+    ...playbackState,
+    playbackRate: 1,
+  }
+}
+
+function enterShuttlePlayback(
+  state: PlaybackState & PlaybackActions,
+  direction: -1 | 1,
+) {
+  const playbackState = enterPlayback(state)
+  return {
+    ...(playbackState === state ? {} : playbackState),
+    playbackRate: state.isPlaying
+      ? getNextShuttleRate(state.playbackRate, direction)
+      : direction,
   }
 }
 
@@ -121,10 +146,21 @@ export const usePlaybackStore = create<PlaybackState & PlaybackActions>()(
             compositionVisualFrozen: false,
           }
         }),
-      play: () => set(enterPlayback),
-      pause: () => set((state) => (state.isPlaying ? { isPlaying: false } : state)),
+      play: () => set(enterNormalPlayback),
+      pause: () =>
+        set((state) =>
+          state.isPlaying || state.playbackRate !== 1
+            ? { isPlaying: false, playbackRate: 1 }
+            : state,
+        ),
       togglePlayPause: () =>
-        set((state) => (state.isPlaying ? { isPlaying: false } : enterPlayback(state))),
+        set((state) =>
+          state.isPlaying
+            ? { isPlaying: false, playbackRate: 1 }
+            : enterNormalPlayback(state),
+        ),
+      shuttleForward: () => set((state) => enterShuttlePlayback(state, 1)),
+      shuttleReverse: () => set((state) => enterShuttlePlayback(state, -1)),
       setPlaybackRate: (rate) => set({ playbackRate: rate }),
       toggleLoop: () => set((state) => ({ loop: !state.loop })),
       setVolume: (volume) => set({ volume }),
@@ -168,10 +204,15 @@ export const usePlaybackStore = create<PlaybackState & PlaybackActions>()(
         zoom: state.zoom,
         volume: state.volume,
         muted: state.muted,
-        playbackRate: state.playbackRate,
         loop: state.loop,
         useProxy: state.useProxy,
         previewQuality: state.previewQuality,
+      }),
+      merge: (persistedState, currentState) => ({
+        ...currentState,
+        ...(persistedState as Partial<PlaybackState>),
+        isPlaying: false,
+        playbackRate: 1,
       }),
     },
   ),

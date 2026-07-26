@@ -61,9 +61,13 @@ class SoundTouchPreviewProcessor extends AudioWorkletProcessor {
         })
         break
       }
-      case 'seek':
-        this.filter.sourcePosition = Math.max(0, Math.floor(message.frame))
+      case 'seek': {
+        const frame = Math.max(0, Math.floor(message.frame))
+        const direction = message.direction === -1 ? -1 : 1
+        this.source.setReadDirection(direction, frame)
+        this.filter.sourcePosition = direction < 0 ? 0 : frame
         break
+      }
       case 'set-tempo':
         this.tempo = message.tempo
         this.applySettings()

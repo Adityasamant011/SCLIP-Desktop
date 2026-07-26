@@ -8,7 +8,9 @@ import {
 } from '../utils/audio-decode-cache'
 import { createLogger } from '@/shared/logging/logger'
 import type { AudioPlaybackProps } from './audio-playback-props'
+import { getBrowserMediaPlaybackRate } from '@/shared/state/playback/shuttle'
 import { useAudioPlaybackState } from './hooks/use-audio-playback-state'
+import { useReverseShuttleAudio } from './hooks/use-reverse-shuttle-audio'
 import {
   createPreviewClipAudioGraph,
   PREVIEW_AUDIO_GAIN_RAMP_SECONDS,
@@ -131,6 +133,7 @@ export const CustomDecoderBufferedAudio: React.FC<CustomDecoderBufferedAudioProp
       fps,
       playing,
       isPreviewScrubbing,
+      transportPlaybackRate,
       resolvedVolume: audioVolume,
       resolvedAudioEqStages,
     } = useAudioPlaybackState({
@@ -155,6 +158,11 @@ export const CustomDecoderBufferedAudio: React.FC<CustomDecoderBufferedAudioProp
       crossfadeFadeOut,
       volumeMultiplier,
     })
+    const mediaPlaybackRate = getBrowserMediaPlaybackRate(
+      playbackRate,
+      transportPlaybackRate,
+    )
+    const isReverseShuttle = transportPlaybackRate < 0
 
     const [audioSlice, setAudioSlice] = useState<PlaybackAudioSlice | null>(null)
 
@@ -170,7 +178,7 @@ export const CustomDecoderBufferedAudio: React.FC<CustomDecoderBufferedAudioProp
 
     const lastSyncContextTimeRef = useRef<number>(0)
     const lastStartOffsetRef = useRef<number>(0)
-    const lastStartRateRef = useRef<number>(playbackRate)
+    const lastStartRateRef = useRef<number>(mediaPlaybackRate)
     const lastBufferStartTimeRef = useRef<number>(0)
     const needsInitialSyncRef = useRef<boolean>(true)
     const pendingExtensionKeyRef = useRef<string | null>(null)
@@ -748,6 +756,19 @@ export const CustomDecoderBufferedAudio: React.FC<CustomDecoderBufferedAudioProp
       rampPreviewClipEq(graph, resolvedAudioEqStages)
     }, [resolvedAudioEqStages])
 
+    useReverseShuttleAudio({
+      graphRef,
+      buffer: audioSlice?.buffer ?? null,
+      bufferStartTimeSeconds: audioSlice?.startTime ?? 0,
+      frameRef,
+      fps,
+      trimBefore,
+      sourceFps,
+      authoredPlaybackRate: playbackRate,
+      playing,
+      transportPlaybackRate,
+    })
+
     const clearQueuedSource = useCallback(() => {
       const queuedSource = queuedSourceRef.current
       if (!queuedSource) {
@@ -847,7 +868,7 @@ export const CustomDecoderBufferedAudio: React.FC<CustomDecoderBufferedAudioProp
 
         const nextSource = ctx.createBufferSource()
         nextSource.buffer = nextSlice.buffer
-        nextSource.playbackRate.value = playbackRate
+        nextSource.playbackRate.value = mediaPlaybackRate
         nextSource.connect(graph.sourceInputNode)
 
         const scheduledSource: QueuedPreviewSource = {
@@ -857,7 +878,7 @@ export const CustomDecoderBufferedAudio: React.FC<CustomDecoderBufferedAudioProp
           startOffset,
           bufferStartTime: nextSlice.startTime,
           coverageEndTime: nextCoverageEndTime,
-          playbackRate,
+          playbackRate: mediaPlaybackRate,
         }
         queuedSourceRef.current = scheduledSource
 
@@ -895,7 +916,7 @@ export const CustomDecoderBufferedAudio: React.FC<CustomDecoderBufferedAudioProp
           return false
         }
       },
-      [clearQueuedSource, mediaId, playbackRate],
+      [clearQueuedSource, mediaId, mediaPlaybackRate],
     )
 
     useEffect(() => {
@@ -933,7 +954,7 @@ export const CustomDecoderBufferedAudio: React.FC<CustomDecoderBufferedAudioProp
         return
       }
 
-      if (playing) {
+      if (playing && !isReverseShuttle) {
         let shouldStart = false
         const currentSource = sourceRef.current
 
@@ -941,7 +962,7 @@ export const CustomDecoderBufferedAudio: React.FC<CustomDecoderBufferedAudioProp
           shouldStart = true
         } else if (!currentSource) {
           shouldStart = true
-        } else if (Math.abs(playbackRate - lastStartRateRef.current) > 0.0001) {
+        } else if (Math.abs(mediaPlaybackRate - lastStartRateRef.current) > 0.0001) {
           shouldStart = true
         } else if (!shouldIgnoreBackgroundResync && Math.abs(frameDelta) > frameSeekJumpThreshold) {
           // Treat large frame jumps as explicit seeks and re-sync immediately.
@@ -1004,7 +1025,7 @@ export const CustomDecoderBufferedAudio: React.FC<CustomDecoderBufferedAudioProp
 
               const source = ctx.createBufferSource()
               source.buffer = audioBuffer
-              source.playbackRate.value = playbackRate
+              source.playbackRate.value = mediaPlaybackRate
               source.connect(liveGraph.sourceInputNode)
               source.onended = () => {
                 source.disconnect()
@@ -1043,7 +1064,7 @@ export const CustomDecoderBufferedAudio: React.FC<CustomDecoderBufferedAudioProp
 
               lastSyncContextTimeRef.current = startAt
               lastStartOffsetRef.current = clampedOffset
-              lastStartRateRef.current = playbackRate
+              lastStartRateRef.current = mediaPlaybackRate
               lastBufferStartTimeRef.current = audioStartTime
               needsInitialSyncRef.current = false
             })
@@ -1054,6 +1075,15 @@ export const CustomDecoderBufferedAudio: React.FC<CustomDecoderBufferedAudioProp
               })
             })
         }
+      } else if (playing && isReverseShuttle) {
+        // The forward AudioBufferSource shares this graph with the reverse
+        // grain scheduler. Stop only that source; fading the graph itself to
+        // zero would also mute every reverse grain.
+        if (sourceRef.current) {
+          stopSource(false)
+        }
+        rampPreviewClipGain(graph, audioVolumeRef.current)
+        needsInitialSyncRef.current = true
       } else {
         stopSource()
         needsInitialSyncRef.current = true
@@ -1067,7 +1097,9 @@ export const CustomDecoderBufferedAudio: React.FC<CustomDecoderBufferedAudioProp
       frame,
       fps,
       playing,
+      mediaPlaybackRate,
       playbackRate,
+      isReverseShuttle,
       trimBefore,
       mediaId,
       scheduleQueuedSource,

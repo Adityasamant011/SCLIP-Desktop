@@ -1,5 +1,8 @@
 import React, { useState, useCallback, useRef, useEffect, useLayoutEffect } from 'react'
-import { useSequenceContext } from '@/runtime/composition-runtime/deps/player'
+import {
+  useClockPlaybackRate,
+  useSequenceContext,
+} from '@/runtime/composition-runtime/deps/player'
 import { usePlaybackStore } from '@/runtime/composition-runtime/deps/stores'
 import { useGizmoStore } from '@/runtime/composition-runtime/deps/stores'
 import { useMediaLibraryStore } from '@/runtime/composition-runtime/deps/stores'
@@ -20,6 +23,7 @@ import {
   planPlayingVideoInitialSync,
   planPremountedVideoSync,
   planVideoFrameCallbackCorrection,
+  shouldIssueCoalescedReverseVideoSeek,
   shouldReactOwnPlaybackRate,
 } from '../utils/video-sync-plan'
 import {
@@ -35,6 +39,7 @@ import {
   videoAudioContexts,
   ensureAudioContextResumed,
 } from './video-audio-context'
+import { getBrowserMediaPlaybackRate } from '@/shared/state/playback/shuttle'
 
 const videoLog = createLogger('NativePreviewVideo')
 const contentLog = createLogger('VideoContent')
@@ -206,6 +211,8 @@ const NativePreviewVideo: React.FC<{
   const lastSeekTimeRef = useRef<number>(0)
   const needsInitialSyncRef = useRef<boolean>(true)
   const lastFrameRef = useRef<number>(-1)
+  const reverseSeekInFlightRef = useRef(false)
+  const latestReverseSeekTargetRef = useRef<number | null>(null)
   const registeredElementRef = useRef<HTMLVideoElement | null>(null)
   const registeredItemIdRef = useRef<string | null>(null)
   const forceCssCompositeRef = useRef(forceCssComposite)
@@ -216,11 +223,19 @@ const NativePreviewVideo: React.FC<{
 
   // Clock instance for imperative access in rVFC callback
   const clock = useClock()
+  const transportPlaybackRate = useClockPlaybackRate()
+  const isReverseShuttle = transportPlaybackRate < 0
+  const mediaPlaybackRate = getBrowserMediaPlaybackRate(
+    playbackRate,
+    transportPlaybackRate,
+  )
   const sequenceFromRef = useRef(0)
   // Stable refs for rVFC callback (avoids stale closures)
   const safeTrimBeforeRef = useRef(safeTrimBefore)
   const sourceFpsRef = useRef(sourceFps)
   const playbackRateRef = useRef(playbackRate)
+  const transportPlaybackRateRef = useRef(transportPlaybackRate)
+  const mediaPlaybackRateRef = useRef(mediaPlaybackRate)
   const isReversedRef = useRef(isReversed)
   const reverseSourceEndRef = useRef(reverseSourceEnd)
   const fpsRef = useRef(fps)
@@ -228,6 +243,8 @@ const NativePreviewVideo: React.FC<{
   safeTrimBeforeRef.current = safeTrimBefore
   sourceFpsRef.current = sourceFps
   playbackRateRef.current = playbackRate
+  transportPlaybackRateRef.current = transportPlaybackRate
+  mediaPlaybackRateRef.current = mediaPlaybackRate
   isReversedRef.current = isReversed
   reverseSourceEndRef.current = reverseSourceEnd
   fpsRef.current = fps
@@ -359,7 +376,10 @@ const NativePreviewVideo: React.FC<{
     const initialSourceFps = sourceFpsRef.current
     const initialFrame = frameRef.current
     const initialPlaybackRate = playbackRateRef.current
+    const initialMediaPlaybackRate = mediaPlaybackRateRef.current
     const initialIsReversed = isReversedRef.current
+    const initialRequiresVisualSeek =
+      initialIsReversed || transportPlaybackRateRef.current < 0
     const initialReverseSourceEnd = reverseSourceEndRef.current
     const initialFps = fpsRef.current
     const initialSequenceFrameOffset = sequenceFrameOffsetRef.current
@@ -377,13 +397,16 @@ const NativePreviewVideo: React.FC<{
     const currentlyPlaying = usePlaybackStore.getState().isPlaying
     const isNearTarget = Math.abs(element.currentTime - clampedInitial) < 0.2
     const isContinuousPlayback =
-      !initialIsReversed && currentlyPlaying && isNearTarget && element.readyState >= 2
+      !initialRequiresVisualSeek &&
+      currentlyPlaying &&
+      isNearTarget &&
+      element.readyState >= 2
 
     elementRef.current = element
     syncRegisteredVideoElement(itemIdRef.current, element)
     applyVideoElementAudioState(element, audioVolumeRef.current, audioEqStagesRef.current)
 
-    if (initialIsReversed) {
+    if (initialRequiresVisualSeek) {
       element.pause()
       element.playbackRate = 1
       element.currentTime = clampedInitial
@@ -392,7 +415,7 @@ const NativePreviewVideo: React.FC<{
       // Split boundary during playback: element was just paused by cleanup
       // but is at the right position. Resume immediately to minimize the
       // decode pipeline interruption (pause→play in same synchronous batch).
-      element.playbackRate = initialPlaybackRate
+      element.playbackRate = initialMediaPlaybackRate
       element.play().catch(() => {})
       needsInitialSyncRef.current = false
     } else if (currentlyPlaying) {
@@ -400,7 +423,7 @@ const NativePreviewVideo: React.FC<{
       // shadow mount, or resume near a boundary). Seek and play immediately
       // instead of pausing and waiting for the sync effect next frame.
       // This eliminates ~16-50ms of React scheduling + readyState gate delay.
-      element.playbackRate = initialPlaybackRate
+      element.playbackRate = initialMediaPlaybackRate
       element.currentTime = clampedInitial
       if (element.readyState >= 2) {
         element.play().catch(() => {})
@@ -436,11 +459,11 @@ const NativePreviewVideo: React.FC<{
             // Seek failed - element may still be stabilizing.
           }
         }
-        if (isReversedRef.current) {
+        if (isReversedRef.current || transportPlaybackRateRef.current < 0) {
           element.pause()
           element.playbackRate = 1
         } else {
-          element.playbackRate = playbackRateRef.current
+          element.playbackRate = mediaPlaybackRateRef.current
           element.play().catch(() => {})
         }
         needsInitialSyncRef.current = false
@@ -451,6 +474,7 @@ const NativePreviewVideo: React.FC<{
       }
     }
     const handleSeeked = () => {
+      reverseSeekInFlightRef.current = false
       videoLog.debug(`[${shortId}] seeked:`, element.currentTime)
     }
     const handleError = () => {
@@ -562,6 +586,8 @@ const NativePreviewVideo: React.FC<{
         preWarmTimerRef.current = null
       }
       preWarmInFlightRef.current = false
+      reverseSeekInFlightRef.current = false
+      latestReverseSeekTargetRef.current = null
       if (stallTimerId !== null) {
         clearTimeout(stallTimerId)
         stallTimerId = null
@@ -621,7 +647,7 @@ const NativePreviewVideo: React.FC<{
         sharedTransitionSync,
       })
     ) {
-      video.playbackRate = playbackRate
+      video.playbackRate = mediaPlaybackRate
     }
 
     const syncContext = getVideoSyncTargetContext({
@@ -663,6 +689,7 @@ const NativePreviewVideo: React.FC<{
     frame,
     isPlaying,
     isReversed,
+    mediaPlaybackRate,
     playbackRate,
     reverseSourceEnd,
     safeTrimBefore,
@@ -684,7 +711,7 @@ const NativePreviewVideo: React.FC<{
         sharedTransitionSync,
       })
     ) {
-      video.playbackRate = playbackRate
+      video.playbackRate = mediaPlaybackRate
     }
 
     // Update sequenceFrom for rVFC callback.
@@ -724,17 +751,24 @@ const NativePreviewVideo: React.FC<{
       })
     }
 
-    if (isReversed && isPlaying) {
+    if ((isReversed || isReverseShuttle) && isPlaying) {
       if (!video.paused) {
         video.pause()
       }
       video.playbackRate = 1
+      latestReverseSeekTargetRef.current = syncContext.clampedTargetTime
       if (
         syncContext.canSeek &&
-        Math.abs(video.currentTime - syncContext.clampedTargetTime) > 0.001
+        shouldIssueCoalescedReverseVideoSeek({
+          seeking: video.seeking,
+          seekInFlight: reverseSeekInFlightRef.current,
+          currentTime: video.currentTime,
+          targetTime: latestReverseSeekTargetRef.current,
+        })
       ) {
         try {
-          video.currentTime = syncContext.clampedTargetTime
+          video.currentTime = latestReverseSeekTargetRef.current
+          reverseSeekInFlightRef.current = true
           lastSyncTimeRef.current = Date.now()
           needsInitialSyncRef.current = false
         } catch {
@@ -743,6 +777,8 @@ const NativePreviewVideo: React.FC<{
       }
       return
     }
+    reverseSeekInFlightRef.current = false
+    latestReverseSeekTargetRef.current = null
 
     // During premount, always pause - don't play until clip is actually visible.
     // Exception: if the element is held by a transition session (marked via
@@ -866,6 +902,8 @@ const NativePreviewVideo: React.FC<{
     fps,
     isPlaying,
     isReversed,
+    isReverseShuttle,
+    mediaPlaybackRate,
     playbackRate,
     reverseSourceEnd,
     safeTrimBefore,
@@ -896,14 +934,22 @@ const NativePreviewVideo: React.FC<{
   // jitter pattern that hard-seek-only correction causes.
   useEffect(() => {
     const video = elementRef.current
-    if (!video || !isPlaying || isReversed || !supportsRVFC || sharedTransitionSync) return
+    if (
+      !video ||
+      !isPlaying ||
+      isReversed ||
+      isReverseShuttle ||
+      !supportsRVFC ||
+      sharedTransitionSync
+    )
+      return
 
     // Pre-resume AudioContext so audio starts immediately with video.
     // Without this, suspended AudioContext adds 50-100ms audio delay on cold resume.
     ensureAudioContextResumed()
 
     // Set initial playbackRate when RVFC takes over
-    video.playbackRate = playbackRateRef.current
+    video.playbackRate = mediaPlaybackRateRef.current
 
     let handle: number
     const onVideoFrame = () => {
@@ -921,7 +967,7 @@ const NativePreviewVideo: React.FC<{
         return
       }
 
-      const nominalRate = playbackRateRef.current
+      const nominalRate = mediaPlaybackRateRef.current
       const timelineFps = fpsRef.current
       const clipSourceFps = sourceFpsRef.current
       const trim = safeTrimBeforeRef.current
@@ -929,7 +975,7 @@ const NativePreviewVideo: React.FC<{
         trim,
         clipSourceFps,
         localFrame,
-        nominalRate,
+        playbackRateRef.current,
         timelineFps,
         sequenceFrameOffsetRef.current,
         isReversedRef.current,
@@ -967,10 +1013,10 @@ const NativePreviewVideo: React.FC<{
       video.cancelVideoFrameCallback(handle)
       // Reset to nominal rate when RVFC stops managing
       if (elementRef.current) {
-        elementRef.current.playbackRate = playbackRateRef.current
+        elementRef.current.playbackRate = mediaPlaybackRateRef.current
       }
     }
-  }, [clock, isPlaying, isReversed, poolClipId, sharedTransitionSync])
+  }, [clock, isPlaying, isReversed, isReverseShuttle, poolClipId, sharedTransitionSync])
 
   // Keep volume/gain in sync for pooled element.
   useEffect(() => {
