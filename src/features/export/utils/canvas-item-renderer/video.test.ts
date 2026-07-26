@@ -426,6 +426,56 @@ describe('renderVideoItem', () => {
     expect(markActivePreviewFramePending).toHaveBeenCalledOnce()
   })
 
+  it('prefers a nearby worker frame over a nested DOM seek during reverse delivery', async () => {
+    const nearbyWorkerBitmap = { width: 480, height: 270 } as ImageBitmap
+    const staleDomVideo = {
+      readyState: 4,
+      videoWidth: 1920,
+      videoHeight: 1080,
+      currentTime: 0.5,
+      dataset: {},
+    } as HTMLVideoElement
+    const getCachedPredecodedBitmap = vi.fn(
+      (_src: string, _sourceTime: number, toleranceSeconds: number) =>
+        toleranceSeconds >= 0.5 ? nearbyWorkerBitmap : null,
+    )
+    const extractor = {
+      drawFrame: vi.fn(async () => true),
+      drawFrameWithCapture: vi.fn(),
+      getLastFailureKind: vi.fn(() => 'none' as const),
+      getDimensions: vi.fn(() => ({ width: 1920, height: 1080 })),
+      getDuration: vi.fn(() => 1),
+    }
+    const ctx = createCanvasContext()
+    const renderContext = createRenderContext({
+      domVideoElementProvider: vi.fn(() => staleDomVideo),
+      nonBlockingVideoFrameToleranceSeconds: 0.5,
+      videoExtractors: new Map([[item.id, extractor]]),
+      useMediabunny: new Set([item.id]),
+      getCachedPredecodedBitmap,
+      waitForInflightPredecodedBitmap: vi.fn(async () => null),
+      workerPredecodeWaitMs: 0,
+    } as unknown as Partial<ItemRenderContext>)
+
+    await expect(renderVideoItem(ctx, item, transform, 12, renderContext)).resolves.toBe(true)
+
+    expect(ctx.drawImage).toHaveBeenCalledWith(
+      nearbyWorkerBitmap,
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+    )
+    expect(ctx.drawImage).not.toHaveBeenCalledWith(
+      staleDomVideo,
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+    )
+    expect(extractor.drawFrame).not.toHaveBeenCalled()
+  })
+
   it('holds the front buffer when an active video item temporarily has no source target', async () => {
     const markActivePreviewFramePending = vi.fn()
     const renderContext = createRenderContext({

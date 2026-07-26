@@ -351,6 +351,52 @@ export async function renderVideoItem(
     )
     if (drewActiveBitmap) return true
   }
+  if (isPreviewMode && nonBlockingToleranceSeconds !== undefined) {
+    // Reverse playback has a decoded-frame runway prepared off-thread. Prefer
+    // its nearest display-cadence frame before consulting an asynchronously
+    // seeking DOM video. Mixing the two sources makes nested compounds visibly
+    // jump when a late browser seek lands between monotonic worker frames.
+    const drewNearbyWorkerBitmap = await tryDrawWorkerPredecodedBitmap(
+      ctx,
+      item,
+      transform,
+      canvasSettings,
+      rctx,
+      frame,
+      sourceTime,
+      nonBlockingToleranceSeconds,
+      true,
+    )
+    if (drewNearbyWorkerBitmap) {
+      rctx.markActivePreviewFallbackUsed?.()
+      return true
+    }
+
+    if (scrubbingCache && extractor) {
+      const dims = extractor.getDimensions()
+      const cachedEntry = scrubbingCache.getVideoFrameEntry(
+        item.id,
+        sourceTime,
+        nonBlockingToleranceSeconds,
+      )
+      if (
+        cachedEntry &&
+        drawTier2VideoFrame(
+          ctx,
+          cachedEntry.frame,
+          dims.width,
+          dims.height,
+          transform,
+          canvasSettings,
+          item.crop,
+          rctx.canvasPool,
+        )
+      ) {
+        rctx.markActivePreviewFallbackUsed?.()
+        return true
+      }
+    }
+  }
   const domVideoElementProvider = rctx.domVideoElementProvider
   // During transitions, frame can lie outside item's natural span (the
   // participant's renderSpan is extended to cover the transition zone), and
@@ -618,49 +664,6 @@ export async function renderVideoItem(
   }
 
   if (isPreviewMode && nonBlockingToleranceSeconds !== undefined) {
-    const drewNearbyWorkerBitmap = await tryDrawWorkerPredecodedBitmap(
-      ctx,
-      item,
-      transform,
-      canvasSettings,
-      rctx,
-      frame,
-      sourceTime,
-      nonBlockingToleranceSeconds,
-      true,
-    )
-    if (drewNearbyWorkerBitmap) {
-      // This keeps reverse motion responsive while the exact latest-target
-      // decode catches up, but it must not be cached as the exact root frame.
-      rctx.markActivePreviewFallbackUsed?.()
-      return true
-    }
-
-    if (scrubbingCache && extractor) {
-      const dims = extractor.getDimensions()
-      const cachedEntry = scrubbingCache.getVideoFrameEntry(
-        item.id,
-        sourceTime,
-        nonBlockingToleranceSeconds,
-      )
-      if (
-        cachedEntry &&
-        drawTier2VideoFrame(
-          ctx,
-          cachedEntry.frame,
-          dims.width,
-          dims.height,
-          transform,
-          canvasSettings,
-          item.crop,
-          rctx.canvasPool,
-        )
-      ) {
-        rctx.markActivePreviewFallbackUsed?.()
-        return true
-      }
-    }
-
     // The display keeps its last valid pixels while the cancellable worker
     // lane decodes the newest reverse target. Never fall through to a
     // main-thread MediaBunny seek for this transient transport mode.

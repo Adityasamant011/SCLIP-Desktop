@@ -358,6 +358,13 @@ export function renderPreviewVideoGpuEffectsToCanvas(
     recordFastPath('no-dom-provider')
     return null
   }
+  if (rctx.nonBlockingVideoFrameToleranceSeconds !== undefined) {
+    // Reverse playback should use the full item path so decoded worker frames
+    // remain the preferred source. The DOM-only fast path can otherwise splice
+    // a late nested seek between monotonic worker frames.
+    recordFastPath('non-blocking-frame-delivery')
+    return null
+  }
   if (item.crop) {
     recordFastPath('crop')
     return null
