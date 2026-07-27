@@ -264,10 +264,17 @@ layer.
 
 ## Contributing
 
-FreeCut is open source but not open contribution. Pull requests are not accepted at this time.
+FreeCut welcomes contributions that match the current priorities.
 
-- **Report bugs:** open an issue
-- **Suggest features:** start a discussion
+Current development priorities, in order:
+
+1. Bug fixes across FreeCut.
+2. Performance improvements for the live editor and playback, plus faster exports.
+3. New features that have been discussed first.
+
+- **Report bugs:** [open an issue](https://github.com/walterlow/freecut/issues/new?template=bug_report.yml) with reproducible steps, your browser version, and screenshots or recordings
+- **Report performance problems:** include the editing or export workflow, source media details, project size, and when the slowdown begins
+- **Discuss feature ideas:** join the [FreeCut Discord](https://discord.gg/aQtQ7NyUBd) or [start a GitHub Discussion](https://github.com/walterlow/freecut/discussions) before implementation. New features may be considered, but bug fixes and performance work take priority
 
 ## License
 
