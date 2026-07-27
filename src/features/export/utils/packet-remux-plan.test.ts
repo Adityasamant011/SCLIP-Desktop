@@ -4,7 +4,13 @@ import { describe, it, expect } from 'vite-plus/test'
 import type { CompositionInputProps } from '@/types/export'
 import type { TimelineTrack, VideoItem } from '@/types/timeline'
 import type { ClientExportSettings } from './client-renderer'
-import { getPacketRemuxPlan, isIdentityTransform } from './packet-remux-plan'
+import {
+  clipBlocksRemux,
+  getPacketRemuxPlan,
+  isIdentityTransform,
+  isRemuxEligibleComposition,
+  resolveRemuxTrimBounds,
+} from './packet-remux-plan'
 
 const FPS = 30
 const DURATION = 300
@@ -169,6 +175,63 @@ describe('getPacketRemuxPlan', () => {
     const plan = getPacketRemuxPlan(makeSettings(), composition)
     expect(plan?.trimStartSeconds).toBe(0)
     expect(plan?.trimEndSeconds).toBeCloseTo(DURATION / FPS, 10)
+  })
+})
+
+describe('isRemuxEligibleComposition', () => {
+  it.each([
+    { name: 'video export of an animation-free composition', changes: {}, expected: true },
+    { name: 'audio export mode', changes: { mode: 'audio' }, expected: false },
+    { name: 'zero duration', changes: { durationInFrames: 0 }, expected: false },
+    { name: 'transitions', changes: { transitions: [{ id: 't1' }] }, expected: false },
+    { name: 'keyframes', changes: { keyframes: [{ itemId: 'clip-1' }] }, expected: false },
+  ])('$name -> $expected', ({ changes, expected }) => {
+    const { mode, ...compositionChanges } = changes as { mode?: string } & Record<string, unknown>
+    expect(
+      isRemuxEligibleComposition(
+        makeSettings((mode ? { mode } : {}) as Partial<ClientExportSettings>),
+        makeComposition(compositionChanges as Partial<CompositionInputProps>),
+      ),
+    ).toBe(expected)
+  })
+})
+
+describe('clipBlocksRemux', () => {
+  it('passes an untouched full-length clip', () => {
+    expect(clipBlocksRemux(makeVideoItem(), makeComposition())).toBe(false)
+  })
+
+  it.each([
+    { name: 'missing src', item: { src: '' } },
+    { name: 'reversed playback', item: { isReversed: true } },
+    { name: 'delayed start', item: { from: 1 } },
+    { name: 'shorter than composition', item: { durationInFrames: DURATION - 1 } },
+    { name: 'effects', item: { effects: [{ id: 'fx' }] as VideoItem['effects'] } },
+    { name: 'transform', item: { transform: { rotation: 45 } } },
+    { name: 'speed change', item: { speed: 2 } },
+    { name: 'visual fades', item: { fadeIn: 0.2 } },
+  ])('blocks on $name', ({ item }) => {
+    expect(clipBlocksRemux(makeVideoItem(item), makeComposition())).toBe(true)
+  })
+})
+
+describe('resolveRemuxTrimBounds', () => {
+  it('maps a full-length clip to [0, duration] seconds', () => {
+    expect(resolveRemuxTrimBounds(makeVideoItem(), makeComposition(), makeSettings())).toEqual({
+      trimStartSeconds: 0,
+      trimEndSeconds: 10,
+    })
+  })
+
+  it.each([
+    { name: 'non-finite source fps', item: { sourceFps: Number.NaN }, settings: {} },
+    { name: 'negative source fps', item: { sourceFps: -30 }, settings: {} },
+    { name: 'export fps mismatch', item: {}, settings: { fps: 25 } },
+    { name: 'clip trimmed from the middle', item: { sourceStart: 5 }, settings: {} },
+  ])('returns null for $name', ({ item, settings }) => {
+    expect(
+      resolveRemuxTrimBounds(makeVideoItem(item), makeComposition(), makeSettings(settings)),
+    ).toBeNull()
   })
 })
 

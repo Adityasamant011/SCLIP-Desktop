@@ -36,15 +36,21 @@ export function isIdentityTransform(item: VideoItem): boolean {
   return true
 }
 
-export function getPacketRemuxPlan(
+export function isRemuxEligibleComposition(
   settings: ClientExportSettings,
   composition: CompositionInputProps,
-): PacketRemuxPlan | null {
-  if (settings.mode !== 'video') return null
-  if (composition.durationInFrames === undefined || composition.durationInFrames <= 0) return null
-  if ((composition.transitions?.length ?? 0) > 0) return null
-  if ((composition.keyframes?.length ?? 0) > 0) return null
+): boolean {
+  if (settings.mode !== 'video') return false
+  if (composition.durationInFrames === undefined || composition.durationInFrames <= 0) return false
+  if ((composition.transitions?.length ?? 0) > 0) return false
+  if ((composition.keyframes?.length ?? 0) > 0) return false
+  return true
+}
 
+/** The single renderable clip on the visible tracks, or null if there isn't exactly one. */
+function findSingleRemuxCandidate(
+  composition: CompositionInputProps,
+): { item: TimelineItem; track: TimelineTrack } | null {
   const tracks: TimelineTrack[] = (composition.tracks ?? []).filter(
     (track) => track.visible !== false,
   )
@@ -58,35 +64,37 @@ export function getPacketRemuxPlan(
     }
   }
 
-  if (items.length !== 1) return null
+  return items.length === 1 ? items[0]! : null
+}
 
-  const { item, track } = items[0]!
-  if (item.type !== 'video') return null
-
-  const videoItem = item as VideoItem
-  if (!videoItem.src) return null
-  if (videoItem.isReversed === true) return null
-  if (videoItem.from !== 0) return null
-  if (videoItem.durationInFrames !== composition.durationInFrames) return null
-  if ((videoItem.effects?.length ?? 0) > 0) return null
-  if (!isIdentityTransform(videoItem)) return null
+/** True when the clip has edits that force frame-by-frame rendering. */
+export function clipBlocksRemux(videoItem: VideoItem, composition: CompositionInputProps): boolean {
+  if (!videoItem.src) return true
+  if (videoItem.isReversed === true) return true
+  if (videoItem.from !== 0) return true
+  if (videoItem.durationInFrames !== composition.durationInFrames) return true
+  if ((videoItem.effects?.length ?? 0) > 0) return true
+  if (!isIdentityTransform(videoItem)) return true
 
   const speed = videoItem.speed ?? 1
-  if (Math.abs(speed - 1) > EPSILON) return null
+  if (Math.abs(speed - 1) > EPSILON) return true
 
-  const hasVisualFades =
-    Math.abs(videoItem.fadeIn ?? 0) > EPSILON || Math.abs(videoItem.fadeOut ?? 0) > EPSILON
-  if (hasVisualFades) return null
+  return Math.abs(videoItem.fadeIn ?? 0) > EPSILON || Math.abs(videoItem.fadeOut ?? 0) > EPSILON
+}
 
-  const includeAudio = track.muted !== true
-  if (includeAudio) {
-    const hasAudioAdjustments =
-      Math.abs(videoItem.volume ?? 0) > EPSILON ||
-      Math.abs(videoItem.audioFadeIn ?? 0) > EPSILON ||
-      Math.abs(videoItem.audioFadeOut ?? 0) > EPSILON
-    if (hasAudioAdjustments) return null
-  }
+function hasRemuxBlockingAudioAdjustments(videoItem: VideoItem): boolean {
+  return (
+    Math.abs(videoItem.volume ?? 0) > EPSILON ||
+    Math.abs(videoItem.audioFadeIn ?? 0) > EPSILON ||
+    Math.abs(videoItem.audioFadeOut ?? 0) > EPSILON
+  )
+}
 
+export function resolveRemuxTrimBounds(
+  videoItem: VideoItem,
+  composition: CompositionInputProps,
+  settings: ClientExportSettings,
+): { trimStartSeconds: number; trimEndSeconds: number } | null {
   const sourceFps = videoItem.sourceFps ?? composition.fps
   if (!Number.isFinite(sourceFps) || sourceFps <= 0) return null
   if (Math.abs((settings.fps ?? composition.fps) - composition.fps) > EPSILON) return null
@@ -102,10 +110,31 @@ export function getPacketRemuxPlan(
   const trimEndSeconds = trimStartSeconds + clipDurationSeconds
   if (!Number.isFinite(trimEndSeconds) || trimEndSeconds <= trimStartSeconds) return null
 
+  return { trimStartSeconds, trimEndSeconds }
+}
+
+export function getPacketRemuxPlan(
+  settings: ClientExportSettings,
+  composition: CompositionInputProps,
+): PacketRemuxPlan | null {
+  if (!isRemuxEligibleComposition(settings, composition)) return null
+
+  const candidate = findSingleRemuxCandidate(composition)
+  if (!candidate || candidate.item.type !== 'video') return null
+
+  const videoItem = candidate.item as VideoItem
+  if (clipBlocksRemux(videoItem, composition)) return null
+
+  const includeAudio = candidate.track.muted !== true
+  if (includeAudio && hasRemuxBlockingAudioAdjustments(videoItem)) return null
+
+  const trim = resolveRemuxTrimBounds(videoItem, composition, settings)
+  if (!trim) return null
+
   return {
     src: videoItem.src,
-    trimStartSeconds,
-    trimEndSeconds,
+    trimStartSeconds: trim.trimStartSeconds,
+    trimEndSeconds: trim.trimEndSeconds,
     includeAudio,
   }
 }
