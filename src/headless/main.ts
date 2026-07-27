@@ -67,6 +67,79 @@ const log = createLogger('Headless')
 // headless harness mounts none of those, so we must load fonts explicitly here.
 const HEADLESS_FONT_WEIGHTS = [400, 500, 600, 700, 800]
 
+/**
+ * Block until the requested families are actually being APPLIED by the canvas
+ * text renderer, not merely until their FontFace promises settled.
+ *
+ * Why this exists. `ensureFontsLoaded` awaits `document.fonts.load(...)`, and
+ * that is not sufficient: Chrome resolves those promises a beat before the
+ * export canvas starts picking the face up, so the first frames rasterise with
+ * the fallback family. It is silent — no error, no warning, correct-looking
+ * output — and it only shows up as geometry.
+ *
+ * Measured on the channel opener (2026-07-27): `dumpLayout` reported the word
+ * "ИИ АГЕНТЫ" at 549.8px, while the render drew it at 575px for the first ~45
+ * frames and 551px afterwards, i.e. 4.6% wider glyphs for the first 1.8s. The
+ * switch frame MOVED WITH RENDER SPEED (frame 45 at --quality high, frame 29 at
+ * --quality low), which is what proves it is a race rather than a fixed offset.
+ *
+ * Detection is by metrics, because that is the only thing that reflects what the
+ * canvas will really draw: a loaded-but-not-yet-applied family measures exactly
+ * like the generic fallback it is stacked on. We compare against two different
+ * generics so a family that happens to match one of them cannot fool the check.
+ */
+async function awaitFontsApplied(
+  families: readonly string[],
+  weights: readonly number[],
+  timeoutMs = 8000,
+): Promise<string[]> {
+  const unresolved: string[] = []
+  if (families.length === 0 || typeof document === 'undefined') return unresolved
+
+  const canvas = document.createElement('canvas')
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return unresolved
+
+  // Glyph-rich probe: Latin + Cyrillic + digits, so a family that only ships a
+  // partial subset cannot pass on a handful of shared glyphs.
+  const PROBE = 'HAMBURGEFONTSIVЖЯЦЩ0123456789'
+  const GENERICS = ['monospace', 'serif'] as const
+  const deadline = Date.now() + timeoutMs
+
+  const measure = (font: string): number => {
+    ctx.font = font
+    return ctx.measureText(PROBE).width
+  }
+
+  // Two consecutive passes, not one. A single pass flips true the moment the
+  // face lands in the font cache, while the raster path can still be a beat
+  // behind — measured as the switch merely MOVING EARLIER (frame 44 -> ~22)
+  // rather than disappearing. Requiring the metric to hold across a gap is what
+  // makes the wait cover the raster path too.
+  const STABLE_PASSES = 2
+  for (const family of new Set(families)) {
+    const bare = family.replace(/^["']|["']$/g, '')
+    for (const weight of weights) {
+      let streak = 0
+      while (Date.now() < deadline && streak < STABLE_PASSES) {
+        // A family still falling back measures identically to the generic it is
+        // stacked on. Differing from BOTH generics means the face is really in use.
+        const applied = GENERICS.every(
+          (generic) =>
+            measure(`${weight} 100px "${bare}", ${generic}`) !==
+            measure(`${weight} 100px ${generic}`),
+        )
+        streak = applied ? streak + 1 : 0
+        if (streak < STABLE_PASSES) await new Promise((resolve) => setTimeout(resolve, 60))
+      }
+      if (streak < STABLE_PASSES) unresolved.push(`${bare}:${weight}`)
+    }
+  }
+  // Let the compositor settle one frame before the first rasterisation.
+  await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)))
+  return unresolved
+}
+
 interface HeadlessMediaSource {
   mediaId: string
   /** Same-origin (or CORS+CORP) URL the harness can fetch the full media bytes from. */
@@ -129,7 +202,7 @@ interface HeadlessRenderSummary {
 }
 
 interface HeadlessRenderWarning {
-  code: 'CODEC_FALLBACK' | 'WEBGPU_TRANSITION_FALLBACK'
+  code: 'CODEC_FALLBACK' | 'WEBGPU_TRANSITION_FALLBACK' | 'FONTS_NOT_APPLIED'
   message: string
   details?: Record<string, unknown>
 }
@@ -349,6 +422,23 @@ async function renderTimeline(input: HeadlessTimelineInput): Promise<HeadlessRen
   // the Canvas text renderer draws with an unregistered family and Chrome silently
   // falls back to generic sans-serif (only the default resembled Inter). No-ops offline.
   await ensureFontsLoaded(collectVisibleTextFontFamilies(composition.tracks), HEADLESS_FONT_WEIGHTS)
+  // ...and until they are really being applied — see awaitFontsApplied. Without
+  // this the opening seconds rasterise with the fallback family, silently.
+  {
+    const unresolved = await awaitFontsApplied(
+      collectVisibleTextFontFamilies(composition.tracks),
+      HEADLESS_FONT_WEIGHTS,
+    )
+    if (unresolved.length > 0) {
+      warnings.push({
+        code: 'FONTS_NOT_APPLIED',
+        message:
+          `Fonts never became active within the budget: ${unresolved.join(', ')} — ` +
+          'text is rasterised with a fallback family and its geometry will not match dumpLayout',
+        details: { unresolved },
+      })
+    }
+  }
 
   // Fail loudly if the project needs WebGPU (effects) but it isn't available.
   warnings.push(...(await assertGpuForComposition(composition, compositions)))
@@ -570,6 +660,7 @@ async function renderFrame(input: HeadlessFrameInput): Promise<HeadlessFrameSumm
   const composition = buildComposition(view)
   // Same font preload as the full render — single frame grabs must match font fidelity.
   await ensureFontsLoaded(collectVisibleTextFontFamilies(composition.tracks), HEADLESS_FONT_WEIGHTS)
+  await awaitFontsApplied(collectVisibleTextFontFamilies(composition.tracks), HEADLESS_FONT_WEIGHTS)
   await assertGpuForComposition(composition, view.compositions)
   composition.tracks = await resolveMediaUrls(composition.tracks, { useProxy: false })
 
