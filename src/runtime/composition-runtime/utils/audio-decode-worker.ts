@@ -200,6 +200,17 @@ async function decode(
  * main-thread decodeAudioWindow but uses AudioSampleSink (AudioBuffer is not
  * available in workers) and returns Float32 stereo for direct playback.
  */
+function getDecodeSampleEndTime(sample: DecodeSampleData): number | null {
+  if (
+    !Number.isFinite(sample.timestamp) ||
+    !Number.isFinite(sample.duration) ||
+    Number(sample.duration) <= 0
+  ) {
+    return null
+  }
+  return Number(sample.timestamp) + Number(sample.duration)
+}
+
 async function decodeWindow(
   message: Extract<AudioDecodeWorkerMessage, { type: 'decode-window' }>,
 ): Promise<void> {
@@ -280,23 +291,14 @@ async function decodeWindow(
     if (initialSample) {
       try {
         append(initialSample)
-        if (
-          Number.isFinite(initialSample.timestamp) &&
-          Number.isFinite(initialSample.duration) &&
-          Number(initialSample.duration) > 0
-        ) {
-          initialSampleEndTime =
-            Number(initialSample.timestamp) + Number(initialSample.duration)
-        }
+        initialSampleEndTime = getDecodeSampleEndTime(initialSample)
       } finally {
         initialSample.close()
       }
     }
 
     const iteratorStartTime =
-      initialSampleEndTime === null
-        ? safeStartTime
-        : Math.max(safeStartTime, initialSampleEndTime)
+      initialSampleEndTime === null ? safeStartTime : Math.max(safeStartTime, initialSampleEndTime)
     if (coverageEndTime < targetCoverageEndTime) {
       for await (const sample of sink.samples(
         iteratorStartTime,

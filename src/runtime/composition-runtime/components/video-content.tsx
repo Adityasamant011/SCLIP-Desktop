@@ -1,8 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect, useLayoutEffect } from 'react'
-import {
-  useClockPlaybackRate,
-  useSequenceContext,
-} from '@/runtime/composition-runtime/deps/player'
+import { useClockPlaybackRate, useSequenceContext } from '@/runtime/composition-runtime/deps/player'
 import { usePlaybackStore } from '@/runtime/composition-runtime/deps/stores'
 import { useGizmoStore } from '@/runtime/composition-runtime/deps/stores'
 import { useMediaLibraryStore } from '@/runtime/composition-runtime/deps/stores'
@@ -226,10 +223,7 @@ const NativePreviewVideo: React.FC<{
   const clock = useClock()
   const transportPlaybackRate = useClockPlaybackRate()
   const isReverseShuttle = transportPlaybackRate < 0
-  const mediaPlaybackRate = getBrowserMediaPlaybackRate(
-    playbackRate,
-    transportPlaybackRate,
-  )
+  const mediaPlaybackRate = getBrowserMediaPlaybackRate(playbackRate, transportPlaybackRate)
   const sequenceFromRef = useRef(0)
   // Stable refs for rVFC callback (avoids stale closures)
   const safeTrimBeforeRef = useRef(safeTrimBefore)
@@ -379,8 +373,7 @@ const NativePreviewVideo: React.FC<{
     const initialPlaybackRate = playbackRateRef.current
     const initialMediaPlaybackRate = mediaPlaybackRateRef.current
     const initialIsReversed = isReversedRef.current
-    const initialRequiresVisualSeek =
-      initialIsReversed || transportPlaybackRateRef.current < 0
+    const initialRequiresVisualSeek = initialIsReversed || transportPlaybackRateRef.current < 0
     const initialReverseSourceEnd = reverseSourceEndRef.current
     const initialFps = fpsRef.current
     const initialSequenceFrameOffset = sequenceFrameOffsetRef.current
@@ -398,10 +391,7 @@ const NativePreviewVideo: React.FC<{
     const currentlyPlaying = usePlaybackStore.getState().isPlaying
     const isNearTarget = Math.abs(element.currentTime - clampedInitial) < 0.2
     const isContinuousPlayback =
-      !initialRequiresVisualSeek &&
-      currentlyPlaying &&
-      isNearTarget &&
-      element.readyState >= 2
+      !initialRequiresVisualSeek && currentlyPlaying && isNearTarget && element.readyState >= 2
 
     elementRef.current = element
     syncRegisteredVideoElement(itemIdRef.current, element)
@@ -436,37 +426,42 @@ const NativePreviewVideo: React.FC<{
     }
 
     // Set up event listeners
+    const syncCanPlayTarget = () => {
+      const liveTargetTime = getVideoTargetTimeSeconds(
+        safeTrimBeforeRef.current,
+        sourceFpsRef.current,
+        frameRef.current,
+        playbackRateRef.current,
+        fpsRef.current,
+        sequenceFrameOffsetRef.current,
+        isReversedRef.current,
+        reverseSourceEndRef.current,
+      )
+      const clampedLiveTargetTime = Math.min(
+        Math.max(0, liveTargetTime),
+        (element.duration || Infinity) - 0.05,
+      )
+      if (Math.abs(element.currentTime - clampedLiveTargetTime) <= 0.016) return
+      try {
+        element.currentTime = clampedLiveTargetTime
+      } catch {
+        // Seek failed - element may still be stabilizing.
+      }
+    }
+    const applyCanPlayTransport = () => {
+      if (isReversedRef.current || transportPlaybackRateRef.current < 0) {
+        element.pause()
+        element.playbackRate = 1
+        return
+      }
+      element.playbackRate = mediaPlaybackRateRef.current
+      element.play().catch(() => {})
+    }
     const handleCanPlay = () => {
       videoLog.debug(`[${shortId}] canplay:`, element.readyState)
       if (usePlaybackStore.getState().isPlaying && element.paused && element.readyState >= 2) {
-        const liveTargetTime = getVideoTargetTimeSeconds(
-          safeTrimBeforeRef.current,
-          sourceFpsRef.current,
-          frameRef.current,
-          playbackRateRef.current,
-          fpsRef.current,
-          sequenceFrameOffsetRef.current,
-          isReversedRef.current,
-          reverseSourceEndRef.current,
-        )
-        const clampedLiveTargetTime = Math.min(
-          Math.max(0, liveTargetTime),
-          (element.duration || Infinity) - 0.05,
-        )
-        if (Math.abs(element.currentTime - clampedLiveTargetTime) > 0.016) {
-          try {
-            element.currentTime = clampedLiveTargetTime
-          } catch {
-            // Seek failed - element may still be stabilizing.
-          }
-        }
-        if (isReversedRef.current || transportPlaybackRateRef.current < 0) {
-          element.pause()
-          element.playbackRate = 1
-        } else {
-          element.playbackRate = mediaPlaybackRateRef.current
-          element.play().catch(() => {})
-        }
+        syncCanPlayTarget()
+        applyCanPlayTransport()
         needsInitialSyncRef.current = false
       } else if (!usePlaybackStore.getState().isPlaying) {
         // The first warm can run before HAVE_CURRENT_DATA and return. Re-arm
@@ -691,25 +686,25 @@ const NativePreviewVideo: React.FC<{
       video.pause()
     }
 
-    if (layoutPlan.seekTo !== null) {
+    const applyLayoutSeek = (seekTo: number) => {
       try {
         if (!isPlaying) {
-          latestPausedSeekTargetRef.current = layoutPlan.seekTo
+          latestPausedSeekTargetRef.current = seekTo
           if (
             shouldIssueCoalescedReverseVideoSeek({
               seeking: video.seeking,
               seekInFlight: pausedSeekInFlightRef.current,
               currentTime: video.currentTime,
-              targetTime: layoutPlan.seekTo,
+              targetTime: seekTo,
             })
           ) {
-            video.currentTime = layoutPlan.seekTo
+            video.currentTime = seekTo
             pausedSeekInFlightRef.current = true
           }
         } else {
-          video.currentTime = layoutPlan.seekTo
+          video.currentTime = seekTo
         }
-        if (video.currentTime === layoutPlan.seekTo || isPlaying) {
+        if (video.currentTime === seekTo || isPlaying) {
           lastSyncTimeRef.current = Date.now()
           if (layoutPlan.shouldMarkInitialSyncComplete) {
             needsInitialSyncRef.current = false
@@ -719,6 +714,7 @@ const NativePreviewVideo: React.FC<{
         // Seek failed - element may still be initializing
       }
     }
+    if (layoutPlan.seekTo !== null) applyLayoutSeek(layoutPlan.seekTo)
   }, [
     frame,
     isPlaying,

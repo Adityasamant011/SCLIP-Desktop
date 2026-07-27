@@ -101,16 +101,12 @@ export const SoundTouchWorkletAudio: React.FC<SoundTouchWorkletAudioProps> = Rea
       volumeMultiplier,
     })
     const isReverseShuttle = transportPlaybackRate < 0
-    const mediaPlaybackRate = getBrowserMediaPlaybackRate(
-      playbackRate,
-      transportPlaybackRate,
-    )
+    const mediaPlaybackRate = getBrowserMediaPlaybackRate(playbackRate, transportPlaybackRate)
     const timeStretchTempo = Math.max(
       0.0625,
       Math.min(16, playbackRate * Math.abs(transportPlaybackRate)),
     )
-    const sourceDirection: -1 | 1 =
-      (isReversed ? -1 : 1) * (isReverseShuttle ? -1 : 1) < 0 ? -1 : 1
+    const sourceDirection: -1 | 1 = (isReversed ? -1 : 1) * (isReverseShuttle ? -1 : 1) < 0 ? -1 : 1
 
     const graphRef = useRef<PreviewClipAudioGraph | null>(null)
     const nodeRef = useRef<AudioWorkletNode | null>(null)
@@ -134,11 +130,7 @@ export const SoundTouchWorkletAudio: React.FC<SoundTouchWorkletAudioProps> = Rea
       nodeRef.current?.port.postMessage(message)
     }
 
-    const postSeekSeconds = (
-      seconds: number,
-      sampleRate: number,
-      direction: -1 | 1 = 1,
-    ): void => {
+    const postSeekSeconds = (seconds: number, sampleRate: number, direction: -1 | 1 = 1): void => {
       postMessage({
         type: 'seek',
         frame: Math.max(0, Math.floor(seconds * sampleRate)),
@@ -335,20 +327,22 @@ export const SoundTouchWorkletAudio: React.FC<SoundTouchWorkletAudioProps> = Rea
       const frameChanged = frame !== lastFrameRef.current
       lastFrameRef.current = frame
 
-      if (isPremounted) {
-        if (lastPostedPlayingRef.current !== false) {
-          postMessage({ type: 'set-playing', playing: false })
-          lastPostedPlayingRef.current = false
-        }
+      const postPlayingState = (nextPlaying: boolean) => {
+        if (lastPostedPlayingRef.current === nextPlaying) return
+        postMessage({ type: 'set-playing', playing: nextPlaying })
+        lastPostedPlayingRef.current = nextPlaying
+      }
+
+      const syncPremountedFrame = () => {
+        postPlayingState(false)
         if (Math.abs(lastStartOffsetRef.current - clipStartTimeSeconds) > SEEK_TOLERANCE_SECONDS) {
           postSeekSeconds(clipStartTimeSeconds, graph.context.sampleRate, sourceDirection)
           lastStartOffsetRef.current = clipStartTimeSeconds
         }
         needsInitialSyncRef.current = true
-        return
       }
 
-      if (playing) {
+      const syncPlayingFrame = () => {
         if (graph.context.state === 'suspended') {
           void graph.context.resume().catch(() => undefined)
         }
@@ -361,10 +355,8 @@ export const SoundTouchWorkletAudio: React.FC<SoundTouchWorkletAudioProps> = Rea
             sourceDirection
         const drift = expectedOffset - clampedTargetTime
         const timeSinceLastSync = Date.now() - lastSyncWallClockRef.current
-        const audioBehind =
-          drift * sourceDirection < DRIFT_RESYNC_BEHIND_THRESHOLD_SECONDS
-        const audioFarAhead =
-          drift * sourceDirection > DRIFT_RESYNC_AHEAD_THRESHOLD_SECONDS
+        const audioBehind = drift * sourceDirection < DRIFT_RESYNC_BEHIND_THRESHOLD_SECONDS
+        const audioFarAhead = drift * sourceDirection > DRIFT_RESYNC_AHEAD_THRESHOLD_SECONDS
         const needsSync =
           needsInitialSyncRef.current || audioFarAhead || (audioBehind && timeSinceLastSync > 500)
 
@@ -377,16 +369,11 @@ export const SoundTouchWorkletAudio: React.FC<SoundTouchWorkletAudioProps> = Rea
           needsInitialSyncRef.current = false
         }
 
-        if (lastPostedPlayingRef.current !== true) {
-          postMessage({ type: 'set-playing', playing: true })
-          lastPostedPlayingRef.current = true
-        }
-      } else {
-        if (lastPostedPlayingRef.current !== false) {
-          postMessage({ type: 'set-playing', playing: false })
-          lastPostedPlayingRef.current = false
-        }
+        postPlayingState(true)
+      }
 
+      const syncPausedFrame = () => {
+        postPlayingState(false)
         const playbackState = usePlaybackStore.getState()
         const isPreviewScrubbing =
           !playbackState.isPlaying &&
@@ -400,6 +387,13 @@ export const SoundTouchWorkletAudio: React.FC<SoundTouchWorkletAudioProps> = Rea
 
         needsInitialSyncRef.current = true
       }
+
+      if (isPremounted) {
+        syncPremountedFrame()
+        return
+      }
+      if (playing) syncPlayingFrame()
+      else syncPausedFrame()
     }, [
       fps,
       frame,

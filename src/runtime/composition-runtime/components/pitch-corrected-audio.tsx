@@ -6,6 +6,7 @@ import { getOrDecodeAudio, getOrDecodeAudioSliceForPlayback } from '../utils/aud
 import { audioBufferToWavBlob } from '../utils/audio-buffer-wav'
 import { createReversedAudioBuffer } from '../utils/audio-buffer-utils'
 import { getAudioTargetTimeSeconds } from '../utils/video-timing'
+import { needsDecodedPitchSourceExtension } from '../utils/decoded-pitch-source'
 import {
   acquirePreviewAudioElement,
   markPreviewAudioElementUsesWebAudio,
@@ -169,10 +170,7 @@ export const NativePitchCorrectedAudio: React.FC<PitchCorrectedAudioProps> = Rea
       volumeMultiplier,
     })
     const isReverseShuttle = transportPlaybackRate < 0
-    const mediaPlaybackRate = getBrowserMediaPlaybackRate(
-      playbackRate,
-      transportPlaybackRate,
-    )
+    const mediaPlaybackRate = getBrowserMediaPlaybackRate(playbackRate, transportPlaybackRate)
 
     const audioRef = useRef<HTMLAudioElement | null>(null)
     const graphRef = useRef<PreviewClipAudioGraph | null>(null)
@@ -466,34 +464,29 @@ const DecodedPitchCorrectedAudio: React.FC<DecodedPitchCorrectedAudioProps> = Re
       volumeMultiplier = 1,
     } = props
 
-    const {
-      frame,
-      fps,
-      playing,
-      transportPlaybackRate,
-      isPreviewScrubbing,
-    } = useAudioPlaybackState({
-      itemId,
-      liveGainItemIds,
-      volume,
-      muted,
-      durationInFrames,
-      audioFadeIn,
-      audioFadeOut,
-      audioFadeInCurve,
-      audioFadeOutCurve,
-      audioFadeInCurveX,
-      audioFadeOutCurveX,
-      audioEqStages,
-      clipFadeSpans,
-      contentStartOffsetFrames,
-      contentEndOffsetFrames,
-      fadeInDelayFrames,
-      fadeOutLeadFrames,
-      crossfadeFadeIn,
-      crossfadeFadeOut,
-      volumeMultiplier,
-    })
+    const { frame, fps, playing, transportPlaybackRate, isPreviewScrubbing } =
+      useAudioPlaybackState({
+        itemId,
+        liveGainItemIds,
+        volume,
+        muted,
+        durationInFrames,
+        audioFadeIn,
+        audioFadeOut,
+        audioFadeInCurve,
+        audioFadeOutCurve,
+        audioFadeInCurveX,
+        audioFadeOutCurveX,
+        audioEqStages,
+        clipFadeSpans,
+        contentStartOffsetFrames,
+        contentEndOffsetFrames,
+        fadeInDelayFrames,
+        fadeOutLeadFrames,
+        crossfadeFadeIn,
+        crossfadeFadeOut,
+        volumeMultiplier,
+      })
 
     const [decodedSource, setDecodedSource] = useState<DecodedPitchSource | null>(null)
     const pendingExtensionKeyRef = useRef<string | null>(null)
@@ -531,9 +524,7 @@ const DecodedPitchCorrectedAudio: React.FC<DecodedPitchCorrectedAudioProps> = Re
         minReadySeconds: PARTIAL_PITCH_READY_SECONDS,
         waitTimeoutMs: PARTIAL_PITCH_WAIT_TIMEOUT_MS,
         targetTimeSeconds: clipStartTime,
-        ...(isReverseShuttle
-          ? { preRollSeconds: REVERSE_SHUTTLE_PREROLL_SECONDS }
-          : {}),
+        ...(isReverseShuttle ? { preRollSeconds: REVERSE_SHUTTLE_PREROLL_SECONDS } : {}),
       })
         .then((slice) => {
           if (cancelled) return
@@ -597,11 +588,6 @@ const DecodedPitchCorrectedAudio: React.FC<DecodedPitchCorrectedAudioProps> = Re
 
     useEffect(() => {
       const currentSource = decodedSource
-      if (!currentSource || currentSource.isComplete || !playing) {
-        pendingExtensionKeyRef.current = null
-        return
-      }
-
       const effectiveSourceFps = sourceFps ?? fps
       const targetTime = Math.max(
         0,
@@ -615,14 +601,16 @@ const DecodedPitchCorrectedAudio: React.FC<DecodedPitchCorrectedAudioProps> = Re
           reverseSourceEnd,
         ) - sourceStartOffsetSec,
       )
-      const remainingCoverage = isReverseShuttle
-        ? targetTime - currentSource.sourceStartOffsetSec
-        : currentSource.coverageEndSec - targetTime
-      const targetOutsideSource =
-        targetTime < currentSource.sourceStartOffsetSec ||
-        targetTime >= currentSource.coverageEndSec
-
-      if (!targetOutsideSource && remainingCoverage > PARTIAL_PITCH_EXTENSION_TRIGGER_SECONDS) {
+      if (
+        !needsDecodedPitchSourceExtension(
+          currentSource,
+          playing,
+          targetTime,
+          isReverseShuttle,
+          PARTIAL_PITCH_EXTENSION_TRIGGER_SECONDS,
+        )
+      ) {
+        pendingExtensionKeyRef.current = null
         return
       }
 
@@ -637,9 +625,7 @@ const DecodedPitchCorrectedAudio: React.FC<DecodedPitchCorrectedAudioProps> = Re
         minReadySeconds: PARTIAL_PITCH_EXTENSION_READY_SECONDS,
         waitTimeoutMs: PARTIAL_PITCH_WAIT_TIMEOUT_MS,
         targetTimeSeconds: targetTime,
-        ...(isReverseShuttle
-          ? { preRollSeconds: REVERSE_SHUTTLE_PREROLL_SECONDS }
-          : {}),
+        ...(isReverseShuttle ? { preRollSeconds: REVERSE_SHUTTLE_PREROLL_SECONDS } : {}),
       })
         .then((slice) => {
           if (cancelled) return

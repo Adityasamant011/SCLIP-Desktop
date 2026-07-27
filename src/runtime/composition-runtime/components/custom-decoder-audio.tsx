@@ -8,6 +8,7 @@ import { audioBufferToWavBlob } from '../utils/audio-buffer-wav'
 import { createReversedAudioBuffer } from '../utils/audio-buffer-utils'
 import { createLogger } from '@/shared/logging/logger'
 import { getAudioTargetTimeSeconds } from '../utils/video-timing'
+import { needsDecodedPitchSourceExtension } from '../utils/decoded-pitch-source'
 import { useAudioPlaybackState } from './hooks/use-audio-playback-state'
 import { useGizmoStore } from '@/runtime/composition-runtime/deps/stores'
 import { useClockPlaybackRate } from '@/runtime/composition-runtime/deps/player'
@@ -337,11 +338,6 @@ const CustomDecoderPitchPreservedAudio: React.FC<CustomDecoderAudioProps> = ({
 
   useEffect(() => {
     const currentSource = decodedSource
-    if (!currentSource || currentSource.isComplete || !playing) {
-      pendingExtensionKeyRef.current = null
-      return
-    }
-
     const effectiveSourceFps = sourceFps ?? fps
     const targetTime = getAudioTargetTimeSeconds(
       trimBefore,
@@ -352,13 +348,16 @@ const CustomDecoderPitchPreservedAudio: React.FC<CustomDecoderAudioProps> = ({
       isReversed,
       reverseSourceEnd,
     )
-    const remainingCoverage = isReverseShuttle
-      ? targetTime - currentSource.sourceStartOffsetSec
-      : currentSource.coverageEndSec - targetTime
-    const targetOutsideSource =
-      targetTime < currentSource.sourceStartOffsetSec || targetTime >= currentSource.coverageEndSec
-
-    if (!targetOutsideSource && remainingCoverage > PARTIAL_WAV_EXTENSION_TRIGGER_SECONDS) {
+    if (
+      !needsDecodedPitchSourceExtension(
+        currentSource,
+        playing,
+        targetTime,
+        isReverseShuttle,
+        PARTIAL_WAV_EXTENSION_TRIGGER_SECONDS,
+      )
+    ) {
+      pendingExtensionKeyRef.current = null
       return
     }
 

@@ -1,6 +1,4 @@
 export { usePlaybackStore } from './store'
 export { getResolvedPlaybackFrame } from './frame-resolution'
 export { commitPreviewFrameToCurrentFrame } from './preview-handoff'
-export { getBrowserMediaPlaybackRate, getNextShuttleRate, SHUTTLE_RATES } from './shuttle'
-export type { CaptureOptions, PlaybackTransportMode, PreviewQuality } from './types'
-export type { ShuttleDirection } from './shuttle'
+export type { CaptureOptions, PreviewQuality } from './types'

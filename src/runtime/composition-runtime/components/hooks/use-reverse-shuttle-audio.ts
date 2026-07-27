@@ -6,6 +6,7 @@ import {
   REVERSE_SHUTTLE_GRAIN_OUTPUT_SECONDS,
   REVERSE_SHUTTLE_LOOKAHEAD_SECONDS,
   resolveReverseShuttleGrainPlan,
+  type ReverseShuttleGrainPlan,
 } from '../../utils/reverse-shuttle-audio'
 import type { PreviewClipAudioGraph } from '../../utils/preview-audio-graph'
 
@@ -26,6 +27,41 @@ interface UseReverseShuttleAudioParams {
   reverseSourceEnd?: number
   playing: boolean
   transportPlaybackRate: number
+}
+
+function createShuttleGrainBuffer(
+  context: AudioContext,
+  buffer: AudioBuffer,
+  bufferStartTimeSeconds: number,
+  plan: ReverseShuttleGrainPlan,
+): AudioBuffer {
+  const sourceStartInBuffer = plan.sourceStartSeconds - bufferStartTimeSeconds
+  const sourceFrameCount = Math.max(1, Math.round(plan.sourceDurationSeconds * buffer.sampleRate))
+  const sourceStartSample = Math.max(
+    0,
+    Math.min(buffer.length - sourceFrameCount, Math.round(sourceStartInBuffer * buffer.sampleRate)),
+  )
+  const grainBuffer = context.createBuffer(
+    buffer.numberOfChannels,
+    sourceFrameCount,
+    buffer.sampleRate,
+  )
+  for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
+    copyShuttleGrainSamples(
+      buffer.getChannelData(channel),
+      grainBuffer.getChannelData(channel),
+      sourceStartSample,
+      plan.reverseSamples,
+    )
+  }
+  return grainBuffer
+}
+
+function calculatePcmRms(samples: Float32Array): number {
+  if (samples.length === 0) return 0
+  let sumSquares = 0
+  for (const sample of samples) sumSquares += sample * sample
+  return Math.sqrt(sumSquares / samples.length)
 }
 
 /**
@@ -133,36 +169,10 @@ export function useReverseShuttleAudio({
         })
         if (!plan) break
 
-        const sourceStartInBuffer = plan.sourceStartSeconds - bufferStartTimeSeconds
-        const sourceFrameCount = Math.max(
-          1,
-          Math.round(plan.sourceDurationSeconds * buffer.sampleRate),
-        )
-        const sourceStartSample = Math.max(
-          0,
-          Math.min(buffer.length - sourceFrameCount, Math.round(sourceStartInBuffer * buffer.sampleRate)),
-        )
-        const grainBuffer = context.createBuffer(
-          buffer.numberOfChannels,
-          sourceFrameCount,
-          buffer.sampleRate,
-        )
-        for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
-          copyShuttleGrainSamples(
-            buffer.getChannelData(channel),
-            grainBuffer.getChannelData(channel),
-            sourceStartSample,
-            plan.reverseSamples,
-          )
-        }
+        const grainBuffer = createShuttleGrainBuffer(context, buffer, bufferStartTimeSeconds, plan)
         if (devStats) {
           const samples = grainBuffer.getChannelData(0)
-          let sumSquares = 0
-          for (let index = 0; index < samples.length; index += 1) {
-            const sample = samples[index] ?? 0
-            sumSquares += sample * sample
-          }
-          devStats.lastPcmRms = samples.length > 0 ? Math.sqrt(sumSquares / samples.length) : 0
+          devStats.lastPcmRms = calculatePcmRms(samples)
           devStats.outputGain = graph.outputGainNode.gain.value
           devStats.scheduledGrains += 1
         }
@@ -176,7 +186,10 @@ export function useReverseShuttleAudio({
         const endAt = startAt + outputDuration
         envelope.gain.setValueAtTime(0, startAt)
         envelope.gain.linearRampToValueAtTime(1, startAt + REVERSE_SHUTTLE_GRAIN_FADE_SECONDS)
-        envelope.gain.setValueAtTime(1, Math.max(startAt, endAt - REVERSE_SHUTTLE_GRAIN_FADE_SECONDS))
+        envelope.gain.setValueAtTime(
+          1,
+          Math.max(startAt, endAt - REVERSE_SHUTTLE_GRAIN_FADE_SECONDS),
+        )
         envelope.gain.linearRampToValueAtTime(0, endAt)
         source.connect(envelope)
         envelope.connect(graph.sourceInputNode)

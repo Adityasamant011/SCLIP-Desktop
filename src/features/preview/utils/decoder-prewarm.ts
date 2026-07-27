@@ -403,22 +403,74 @@ function findMatchingInflightPreseek(
   return best
 }
 
+function getBitmapPixelCount(bitmap: ImageBitmap): number {
+  const width = Number(bitmap.width)
+  const height = Number(bitmap.height)
+  return Number.isFinite(width) && Number.isFinite(height) ? width * height : 0
+}
+
+function trimCachedBitmapEntries(entries: CachedBitmapEntry[], capacity: number): void {
+  let cachedPixels = entries.reduce((sum, entry) => sum + getBitmapPixelCount(entry.bitmap), 0)
+  while (
+    entries.length > capacity ||
+    (entries.length > 1 && cachedPixels > MAX_CACHED_BITMAP_PIXELS_PER_SOURCE)
+  ) {
+    const old = entries.shift()
+    if (!old) continue
+    cachedPixels -= getBitmapPixelCount(old.bitmap)
+    old.bitmap.close()
+  }
+}
+
+function removeMatchingFallbackBitmaps(src: string, timestamp: number): void {
+  const fallbackEntries = fallbackBitmapCache.get(src)
+  if (!fallbackEntries) return
+
+  const retained: CachedFallbackBitmapEntry[] = []
+  for (const entry of fallbackEntries) {
+    if (Math.abs(entry.timestamp - timestamp) <= PRESEEK_REQUEST_REUSE_TOLERANCE_SECONDS) {
+      entry.bitmap.close()
+      decoderPrewarmMetrics.exactFallbackReplacements += 1
+    } else {
+      retained.push(entry)
+    }
+  }
+  if (retained.length > 0) fallbackBitmapCache.set(src, retained)
+  else fallbackBitmapCache.delete(src)
+  decoderPrewarmMetrics.fallbackBitmaps = [...fallbackBitmapCache.values()].reduce(
+    (sum, sourceEntries) => sum + sourceEntries.length,
+    0,
+  )
+}
+
+function ensureBitmapCacheSourceCapacity(src: string): void {
+  if (bitmapCache.has(src) || bitmapCache.size < MAX_CACHED_BITMAP_SOURCES) return
+  const oldestSrc = bitmapCache.keys().next().value as string | undefined
+  if (!oldestSrc) return
+
+  const oldestEntries = bitmapCache.get(oldestSrc)
+  bitmapCache.delete(oldestSrc)
+  bitmapCacheCapacityBySrc.delete(oldestSrc)
+  for (const entry of oldestEntries ?? []) entry.bitmap.close()
+  decoderPrewarmMetrics.cacheSourceEvictions += 1
+}
+
+function replaceDuplicateCachedBitmap(entries: CachedBitmapEntry[], timestamp: number): void {
+  const duplicateIndex = entries.findIndex(
+    (entry) => Math.abs(entry.timestamp - timestamp) <= PRESEEK_REQUEST_REUSE_TOLERANCE_SECONDS,
+  )
+  if (duplicateIndex < 0) return
+  const [duplicate] = entries.splice(duplicateIndex, 1)
+  duplicate?.bitmap.close()
+}
+
 function cachePredecodedBitmap(
   src: string,
   timestamp: number,
   bitmap: ImageBitmap,
   requestedCapacity = MAX_CACHED_BITMAPS_PER_SOURCE,
 ): void {
-  if (!bitmapCache.has(src) && bitmapCache.size >= MAX_CACHED_BITMAP_SOURCES) {
-    const oldestSrc = bitmapCache.keys().next().value as string | undefined
-    if (oldestSrc) {
-      const oldestEntries = bitmapCache.get(oldestSrc)
-      bitmapCache.delete(oldestSrc)
-      bitmapCacheCapacityBySrc.delete(oldestSrc)
-      for (const entry of oldestEntries ?? []) entry.bitmap.close()
-      decoderPrewarmMetrics.cacheSourceEvictions += 1
-    }
-  }
+  ensureBitmapCacheSourceCapacity(src)
 
   const capacity = Math.max(
     MAX_CACHED_BITMAPS_PER_SOURCE,
@@ -427,53 +479,12 @@ function cachePredecodedBitmap(
   )
   bitmapCacheCapacityBySrc.set(src, capacity)
   const entries = bitmapCache.get(src) ?? []
-  const duplicateIndex = entries.findIndex(
-    (entry) => Math.abs(entry.timestamp - timestamp) <= PRESEEK_REQUEST_REUSE_TOLERANCE_SECONDS,
-  )
-  if (duplicateIndex >= 0) {
-    const [duplicate] = entries.splice(duplicateIndex, 1)
-    duplicate?.bitmap.close()
-  }
+  replaceDuplicateCachedBitmap(entries, timestamp)
   entries.push({ bitmap, timestamp })
-  let cachedPixels = entries.reduce((sum, entry) => {
-    const width = Number(entry.bitmap.width)
-    const height = Number(entry.bitmap.height)
-    return sum + (Number.isFinite(width) && Number.isFinite(height) ? width * height : 0)
-  }, 0)
-  while (
-    entries.length > capacity ||
-    (entries.length > 1 && cachedPixels > MAX_CACHED_BITMAP_PIXELS_PER_SOURCE)
-  ) {
-    const old = entries.shift()
-    if (old) {
-      const width = Number(old.bitmap.width)
-      const height = Number(old.bitmap.height)
-      if (Number.isFinite(width) && Number.isFinite(height)) {
-        cachedPixels -= width * height
-      }
-    }
-    old?.bitmap.close()
-  }
+  trimCachedBitmapEntries(entries, capacity)
   bitmapCache.delete(src)
   bitmapCache.set(src, entries)
-  const fallbackEntries = fallbackBitmapCache.get(src)
-  if (fallbackEntries) {
-    const retained: CachedFallbackBitmapEntry[] = []
-    for (const entry of fallbackEntries) {
-      if (Math.abs(entry.timestamp - timestamp) <= PRESEEK_REQUEST_REUSE_TOLERANCE_SECONDS) {
-        entry.bitmap.close()
-        decoderPrewarmMetrics.exactFallbackReplacements += 1
-      } else {
-        retained.push(entry)
-      }
-    }
-    if (retained.length > 0) fallbackBitmapCache.set(src, retained)
-    else fallbackBitmapCache.delete(src)
-    decoderPrewarmMetrics.fallbackBitmaps = [...fallbackBitmapCache.values()].reduce(
-      (sum, sourceEntries) => sum + sourceEntries.length,
-      0,
-    )
-  }
+  removeMatchingFallbackBitmaps(src, timestamp)
   decoderPrewarmMetrics.cacheSources = bitmapCache.size
   decoderPrewarmMetrics.cacheBitmaps = [...bitmapCache.values()].reduce(
     (sum, sourceEntries) => sum + sourceEntries.length,
@@ -938,8 +949,7 @@ export function activePreviewPreseek(
     if (
       !inflight.cancelled &&
       inflight.src === request.src &&
-      Math.abs(inflight.timestamp - request.timestamp) <=
-        PRESEEK_REQUEST_REUSE_TOLERANCE_SECONDS
+      Math.abs(inflight.timestamp - request.timestamp) <= PRESEEK_REQUEST_REUSE_TOLERANCE_SECONDS
     ) {
       decoderPrewarmMetrics.inflightReuses += 1
       return inflight.promise
