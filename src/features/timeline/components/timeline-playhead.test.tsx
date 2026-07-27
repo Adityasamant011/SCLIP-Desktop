@@ -157,9 +157,6 @@ describe('TimelinePlayhead', () => {
     })
     expect(mainTimelineScrubActiveRef.current).toBe(true)
 
-    // The Player acknowledges the store pause through the same action. That
-    // echo must not erase the transport waiting to resume on release.
-    usePlaybackStore.getState().pause()
     fireEvent.mouseMove(document, { clientX: 120, clientY: 8 })
     fireEvent.mouseUp(document, { clientX: 120, clientY: 8 })
 

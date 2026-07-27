@@ -10,6 +10,7 @@ describe('playback-store', () => {
       isPlaying: false,
       playbackRate: 1,
       transportMode: 'normal',
+      playbackScrubResumeTransport: null,
       loop: false,
       volume: 1,
       muted: false,
@@ -93,6 +94,54 @@ describe('playback-store', () => {
       usePlaybackStore.getState().play() // already playing
       const stateD = usePlaybackStore.getState()
       expect(stateC).toBe(stateD)
+    })
+
+    it.each([
+      {
+        command: 'play',
+        run: () => usePlaybackStore.getState().play(),
+        expected: { isPlaying: true, playbackRate: 1, transportMode: 'normal' },
+      },
+      {
+        command: 'play/pause',
+        run: () => usePlaybackStore.getState().togglePlayPause(),
+        expected: { isPlaying: true, playbackRate: 1, transportMode: 'normal' },
+      },
+      {
+        command: 'forward shuttle',
+        run: () => usePlaybackStore.getState().shuttleForward(),
+        expected: { isPlaying: true, playbackRate: 1, transportMode: 'shuttle' },
+      },
+      {
+        command: 'reverse shuttle',
+        run: () => usePlaybackStore.getState().shuttleReverse(),
+        expected: { isPlaying: true, playbackRate: -1, transportMode: 'shuttle' },
+      },
+      {
+        command: 'pause',
+        run: () => usePlaybackStore.getState().pause(),
+        expected: { isPlaying: false, playbackRate: 1, transportMode: 'normal' },
+      },
+      {
+        command: 'rate change',
+        run: () => usePlaybackStore.getState().setPlaybackRate(2),
+        expected: { isPlaying: false, playbackRate: 2, transportMode: 'normal' },
+      },
+    ])('keeps a newer $command command after scrub release', ({ run, expected }) => {
+      usePlaybackStore.setState({
+        isPlaying: true,
+        playbackRate: 4,
+        transportMode: 'shuttle',
+      })
+      usePlaybackStore.getState().beginPlaybackScrub()
+
+      run()
+      usePlaybackStore.getState().resumePlaybackAfterScrub()
+
+      expect(usePlaybackStore.getState()).toMatchObject({
+        ...expected,
+        playbackScrubResumeTransport: null,
+      })
     })
 
     it('clears active skimming atomically when playback starts', () => {
