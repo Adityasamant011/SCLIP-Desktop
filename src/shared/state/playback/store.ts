@@ -101,6 +101,7 @@ export const usePlaybackStore = create<PlaybackState & PlaybackActions>()(
       isPlaying: false,
       playbackRate: 1,
       transportMode: 'normal',
+      playbackScrubResumeTransport: null,
       loop: false,
       volume: 1,
       muted: false,
@@ -151,11 +152,44 @@ export const usePlaybackStore = create<PlaybackState & PlaybackActions>()(
             compositionVisualFrozen: false,
           }
         }),
+      beginPlaybackScrub: () =>
+        set((state) => ({
+          isPlaying: false,
+          playbackRate: 1,
+          transportMode: 'normal',
+          playbackScrubResumeTransport: state.isPlaying
+            ? {
+                playbackRate: state.playbackRate,
+                transportMode: state.transportMode,
+              }
+            : null,
+        })),
+      resumePlaybackAfterScrub: () =>
+        set((state) => {
+          const resumeTransport = state.playbackScrubResumeTransport
+          if (!resumeTransport) return state
+          return {
+            isPlaying: true,
+            playbackRate: resumeTransport.playbackRate,
+            transportMode: resumeTransport.transportMode,
+            playbackScrubResumeTransport: null,
+          }
+        }),
+      cancelPlaybackScrubResume: () =>
+        set((state) =>
+          state.playbackScrubResumeTransport === null
+            ? state
+            : { playbackScrubResumeTransport: null },
+        ),
       play: () => set(enterNormalPlayback),
       pause: () =>
         set((state) =>
           state.isPlaying || state.playbackRate !== 1 || state.transportMode !== 'normal'
-            ? { isPlaying: false, playbackRate: 1, transportMode: 'normal' }
+            ? {
+                isPlaying: false,
+                playbackRate: 1,
+                transportMode: 'normal',
+              }
             : state,
         ),
       togglePlayPause: () =>

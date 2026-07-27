@@ -221,6 +221,33 @@ describe('TimelineContent playback selection behavior', () => {
     })
   })
 
+  it('pages the navigator viewport when a playing playhead reaches the edge', () => {
+    const { container } = render(<TimelineContent duration={30} tracks={[VIDEO_TRACK]} />)
+    const scrollContainer = container.querySelector('[data-timeline-scroll-container]')
+    if (!(scrollContainer instanceof HTMLDivElement)) {
+      throw new Error('Expected timeline scroll container')
+    }
+
+    Object.defineProperty(scrollContainer, 'clientWidth', { configurable: true, value: 400 })
+    Object.defineProperty(scrollContainer, 'scrollWidth', { configurable: true, value: 3000 })
+    const liveScroll = vi.fn()
+    scrollContainer.addEventListener(TIMELINE_LIVE_SCROLL_EVENT, liveScroll)
+
+    act(() => {
+      usePlaybackStore.getState().setCurrentFrame(150)
+    })
+    expect(scrollContainer.scrollLeft).toBe(0)
+
+    act(() => {
+      usePlaybackStore.getState().play()
+      usePlaybackStore.getState().setCurrentFrame(151)
+    })
+
+    expect(scrollContainer.scrollLeft).toBeCloseTo(151 / 30 * 100 - 400 * 0.2)
+    expect(useTimelineViewportStore.getState().scrollLeft).toBeCloseTo(scrollContainer.scrollLeft)
+    expect(liveScroll).toHaveBeenCalledOnce()
+  })
+
   it('does not re-render the full timeline tree for live gesture zoom', () => {
     const onMetricsChange = vi.fn()
     render(
