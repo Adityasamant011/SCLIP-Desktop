@@ -7,6 +7,7 @@ export { ColorVideoPreview, VideoPreview } from '@/features/preview/components/v
 export { PlaybackControls } from '@/features/preview/components/playback-controls'
 export { AlignmentToolbar } from '@/features/preview/components/alignment-hud'
 export { TimecodeDisplay } from '@/features/preview/components/timecode-display'
+export { ShuttleIndicator } from '@/features/preview/components/shuttle-indicator'
 export { PreviewZoomControls } from '@/features/preview/components/preview-zoom-controls'
 
 export const importSourceMonitor = () => import('@/features/preview/components/source-monitor')

@@ -35,11 +35,14 @@ function enterPlayback(state: PlaybackState & PlaybackActions) {
 function enterNormalPlayback(state: PlaybackState & PlaybackActions) {
   const playbackState = enterPlayback(state)
   if (playbackState === state) {
-    return state.playbackRate === 1 ? state : { playbackRate: 1 }
+    return state.playbackRate === 1 && state.transportMode === 'normal'
+      ? state
+      : { playbackRate: 1, transportMode: 'normal' as const }
   }
   return {
     ...playbackState,
     playbackRate: 1,
+    transportMode: 'normal' as const,
   }
 }
 
@@ -53,6 +56,7 @@ function enterShuttlePlayback(
     playbackRate: state.isPlaying
       ? getNextShuttleRate(state.playbackRate, direction)
       : direction,
+    transportMode: 'shuttle' as const,
   }
 }
 
@@ -96,6 +100,7 @@ export const usePlaybackStore = create<PlaybackState & PlaybackActions>()(
       currentFrameEpoch: 0,
       isPlaying: false,
       playbackRate: 1,
+      transportMode: 'normal',
       loop: false,
       volume: 1,
       muted: false,
@@ -149,14 +154,14 @@ export const usePlaybackStore = create<PlaybackState & PlaybackActions>()(
       play: () => set(enterNormalPlayback),
       pause: () =>
         set((state) =>
-          state.isPlaying || state.playbackRate !== 1
-            ? { isPlaying: false, playbackRate: 1 }
+          state.isPlaying || state.playbackRate !== 1 || state.transportMode !== 'normal'
+            ? { isPlaying: false, playbackRate: 1, transportMode: 'normal' }
             : state,
         ),
       togglePlayPause: () =>
         set((state) =>
           state.isPlaying
-            ? { isPlaying: false, playbackRate: 1 }
+            ? { isPlaying: false, playbackRate: 1, transportMode: 'normal' }
             : enterNormalPlayback(state),
         ),
       shuttleForward: () => set((state) => enterShuttlePlayback(state, 1)),
@@ -213,6 +218,7 @@ export const usePlaybackStore = create<PlaybackState & PlaybackActions>()(
         ...(persistedState as Partial<PlaybackState>),
         isPlaying: false,
         playbackRate: 1,
+        transportMode: 'normal',
       }),
     },
   ),

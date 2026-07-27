@@ -9,6 +9,7 @@ describe('playback-store', () => {
       currentFrameEpoch: 0,
       isPlaying: false,
       playbackRate: 1,
+      transportMode: 'normal',
       loop: false,
       volume: 1,
       muted: false,
@@ -138,6 +139,7 @@ describe('playback-store', () => {
       expect(usePlaybackStore.getState()).toMatchObject({
         isPlaying: true,
         playbackRate: 1,
+        transportMode: 'shuttle',
       })
       expect(listener).toHaveBeenCalledTimes(1)
 
@@ -151,6 +153,7 @@ describe('playback-store', () => {
       expect(usePlaybackStore.getState()).toMatchObject({
         isPlaying: true,
         playbackRate: -1,
+        transportMode: 'shuttle',
       })
       expect(listener).toHaveBeenCalledTimes(1)
 
@@ -159,6 +162,7 @@ describe('playback-store', () => {
       expect(usePlaybackStore.getState()).toMatchObject({
         isPlaying: false,
         playbackRate: 1,
+        transportMode: 'normal',
       })
       expect(listener).toHaveBeenCalledTimes(1)
       unsubscribe()
@@ -171,6 +175,7 @@ describe('playback-store', () => {
 
       expect(persisted).not.toHaveProperty('playbackRate')
       expect(persisted).not.toHaveProperty('isPlaying')
+      expect(persisted).not.toHaveProperty('transportMode')
     })
   })
 

@@ -21,8 +21,9 @@ export function TimecodeDisplay({ fps, totalFrames }: TimecodeDisplayProps) {
   const [showFrames, setShowFrames] = useState(false)
   const currentTimeRef = useRef<HTMLSpanElement>(null)
   const frameDigits = Math.max(totalFrames.toString().length, 1)
-  const reservedCharWidth = Math.max(frameDigits, 8)
   const lastFrame = Math.max(0, totalFrames - 1)
+  const timecodeDigits = formatTimecodeCompact(lastFrame, fps).length
+  const reservedCharWidth = Math.max(frameDigits, timecodeDigits)
   const reservedDisplayWidth = `calc(${reservedCharWidth * 2 + 1}ch + 0.75rem)`
 
   // Use refs for values accessed in subscription to avoid stale closures

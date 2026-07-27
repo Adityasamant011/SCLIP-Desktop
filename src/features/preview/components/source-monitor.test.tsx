@@ -60,6 +60,7 @@ const playerMethodsState = vi.hoisted(() => ({
 const clockState = vi.hoisted(() => ({
   currentFrame: 0,
   isPlaying: false,
+  playbackRate: 1,
 }))
 
 vi.mock('@/features/preview/deps/player-context', () => ({
@@ -72,6 +73,7 @@ vi.mock('@/features/preview/deps/player-context', () => ({
     onFrameChange: () => () => {},
   }),
   useClockIsPlaying: () => clockState.isPlaying,
+  useClockPlaybackRate: () => clockState.playbackRate,
   usePlayer: () => playerMethodsState,
 }))
 

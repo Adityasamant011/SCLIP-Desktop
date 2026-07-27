@@ -22,6 +22,7 @@ export interface CaptureOptions {
 }
 
 export type PreviewQuality = 1 | 0.5 | 0.33 | 0.25
+export type PlaybackTransportMode = 'normal' | 'shuttle'
 
 export interface PlaybackState {
   currentFrame: number
@@ -29,6 +30,8 @@ export interface PlaybackState {
   currentFrameEpoch: number
   isPlaying: boolean
   playbackRate: number
+  /** Transient transport intent used to distinguish L at 1x from normal playback. */
+  transportMode: PlaybackTransportMode
   loop: boolean
   /**
    * Per-device monitor gain (linear, 1 = unity). Persisted to localStorage,

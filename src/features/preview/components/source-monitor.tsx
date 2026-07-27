@@ -36,10 +36,12 @@ import {
   ClockBridgeProvider,
   useClock,
   useClockIsPlaying,
+  useClockPlaybackRate,
   VideoConfigProvider,
   usePlayer,
 } from '@/features/preview/deps/player-context'
 import { SourceComposition } from './source-composition'
+import { ShuttleIndicator } from './shuttle-indicator'
 import { resolveMediaUrl } from '../utils/media-resolver'
 import {
   clampDraggedSourceInPoint,
@@ -567,6 +569,8 @@ function SourcePlaybackControls({
   const clock = useClock()
   const player = usePlayer(durationInFrames)
   const playing = useClockIsPlaying()
+  const playbackRate = useClockPlaybackRate()
+  const shuttleActiveRef = useRef(false)
   const lastFrame = Math.max(0, durationInFrames - 1)
   const tracks = useItemsStore((s) => s.tracks)
   const activeTrackId = useSelectionStore((s) => s.activeTrackId)
@@ -638,6 +642,7 @@ function SourcePlaybackControls({
     const setPlayerMethods = useSourcePlayerStore.getState().setPlayerMethods
     setPlayerMethods({
       toggle: () => {
+        shuttleActiveRef.current = false
         const previewFrame = useSourcePlayerStore.getState().previewSourceFrame
         if (previewFrame !== null) {
           commitSourceSeek(previewFrame)
@@ -650,11 +655,13 @@ function SourcePlaybackControls({
         }
       },
       pause: () => {
+        shuttleActiveRef.current = false
         player.pause()
         player.setPlaybackRate(1)
       },
       isPlaying: () => player.isPlaying(),
       shuttleForward: () => {
+        shuttleActiveRef.current = true
         const nextRate = player.isPlaying()
           ? getNextShuttleRate(player.getPlaybackRate(), 1)
           : 1
@@ -662,6 +669,7 @@ function SourcePlaybackControls({
         player.play()
       },
       shuttleReverse: () => {
+        shuttleActiveRef.current = true
         const nextRate = player.isPlaying()
           ? getNextShuttleRate(player.getPlaybackRate(), -1)
           : -1
@@ -718,7 +726,11 @@ function SourcePlaybackControls({
       store.setPendingSeekFrame(null)
       const shouldPlay = store.pendingPlay
       store.setPendingPlay(false)
-      if (shouldPlay) player.play()
+      if (shouldPlay) {
+        shuttleActiveRef.current = false
+        player.setPlaybackRate(1)
+        player.play()
+      }
     }
   }, [commitSourceSeek, interactive, pendingSeekFrame, player])
 
@@ -1032,6 +1044,8 @@ function SourcePlaybackControls({
   const handleReplaySegment = useCallback(() => {
     const { inPoint: ip, outPoint: op } = useSourcePlayerStore.getState()
     if (ip === null && op === null) return
+    shuttleActiveRef.current = false
+    player.setPlaybackRate(1)
     replayingRef.current = true
     commitSourceSeek(ip ?? 0)
     player.play()
@@ -1047,11 +1061,18 @@ function SourcePlaybackControls({
   }, [clearPreviewSourceFrame, player])
 
   const handleTogglePlayback = useCallback(() => {
+    shuttleActiveRef.current = false
     const previewFrame = useSourcePlayerStore.getState().previewSourceFrame
     if (previewFrame !== null) {
       commitSourceSeek(previewFrame)
     }
-    player.toggle()
+    if (player.isPlaying()) {
+      player.pause()
+      player.setPlaybackRate(1)
+    } else {
+      player.setPlaybackRate(1)
+      player.play()
+    }
   }, [commitSourceSeek, player])
 
   const handleStepForward = useCallback(() => {
@@ -1322,17 +1343,23 @@ function SourcePlaybackControls({
         className="border-t border-border panel-header flex items-center justify-between px-4 shrink-0"
         style={{ height: EDITOR_LAYOUT_CSS_VALUES.previewControlsHeight }}
       >
-        <button
-          type="button"
-          className="inline-flex items-center gap-1.5 bg-transparent p-0 font-mono text-[11px] tabular-nums text-left transition-colors select-none text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-sm shrink-0"
-          onClick={() => setShowFrames((prev) => !prev)}
-        >
-          <span ref={currentTimeRef} className="text-primary font-semibold">
-            {formatTime(clock.currentFrame)}
-          </span>
-          <span className="text-muted-foreground">/</span>
-          <span>{formatTime(lastFrame)}</span>
-        </button>
+        <div className="flex min-w-0 shrink-0 items-center gap-2">
+          <button
+            type="button"
+            className="inline-flex items-center gap-1.5 bg-transparent p-0 font-mono text-[11px] tabular-nums text-left transition-colors select-none text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-sm shrink-0"
+            onClick={() => setShowFrames((prev) => !prev)}
+          >
+            <span ref={currentTimeRef} className="text-primary font-semibold">
+              {formatTime(clock.currentFrame)}
+            </span>
+            <span className="text-muted-foreground">/</span>
+            <span>{formatTime(lastFrame)}</span>
+          </button>
+          <ShuttleIndicator
+            active={playing && shuttleActiveRef.current}
+            playbackRate={playbackRate}
+          />
+        </div>
         <span className="text-[11px] font-mono text-primary/70 shrink-0 hidden @min-[480px]:inline">
           {ioDuration ? `[${ioDuration}]` : ''}
         </span>
