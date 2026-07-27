@@ -7,6 +7,8 @@ import type { SubtitleSegmentItem, TimelineTrack } from '@/types/timeline'
 import {
   buildTranscriptSubtitleWebVtt,
   omitTranscriptSubtitleItemsForSoftSubtitleExport,
+  resolveSubtitleExportPlan,
+  type SubtitleExportPlan,
 } from './embedded-subtitle-export'
 
 function makeTrack(items: TimelineTrack['items']): TimelineTrack {
@@ -98,5 +100,74 @@ describe('embedded transcript subtitle export', () => {
     })
 
     expect(buildTranscriptSubtitleWebVtt(makeComposition([embeddedSubtitle]))).toBeNull()
+  })
+})
+
+describe('resolveSubtitleExportPlan', () => {
+  const plan = (
+    subtitleMode: Parameters<typeof resolveSubtitleExportPlan>[0]['subtitleMode'],
+    container: string,
+    { supportsWebVttSubtitles = true, hasTranscriptVtt = true } = {},
+  ) =>
+    resolveSubtitleExportPlan({
+      subtitleMode,
+      container,
+      supportsWebVttSubtitles,
+      hasTranscriptVtt,
+    })
+
+  it('burn mode keeps transcript items in the render and embeds nothing', () => {
+    expect(plan('burn', 'mp4')).toEqual<SubtitleExportPlan>({
+      embedTranscriptSubtitles: false,
+      burnInSubtitles: true,
+      fallbackToBurnIn: false,
+    })
+  })
+
+  it.each(['off', 'sidecar'] as const)('%s mode drops transcript items entirely', (mode) => {
+    expect(plan(mode, 'mp4')).toEqual<SubtitleExportPlan>({
+      embedTranscriptSubtitles: false,
+      burnInSubtitles: false,
+      fallbackToBurnIn: false,
+    })
+  })
+
+  it.each(['webm', 'mkv'] as const)('embedded mode muxes a soft track for %s', (container) => {
+    expect(plan('embedded', container)).toEqual<SubtitleExportPlan>({
+      embedTranscriptSubtitles: true,
+      burnInSubtitles: false,
+      fallbackToBurnIn: false,
+    })
+  })
+
+  // mediabunny never starts its ISOBMFF subtitle auxWriter — WebVTT-into-MP4/MOV
+  // asserts via an uncatchable floating rejection, so we burn in instead.
+  it.each(['mp4', 'mov'] as const)(
+    'embedded mode falls back to burn-in for ISOBMFF container %s',
+    (container) => {
+      expect(plan('embedded', container)).toEqual<SubtitleExportPlan>({
+        embedTranscriptSubtitles: false,
+        burnInSubtitles: true,
+        fallbackToBurnIn: true,
+      })
+    },
+  )
+
+  it('embedded mode falls back to burn-in when the format lacks WebVTT support', () => {
+    expect(
+      plan('embedded', 'webm', { supportsWebVttSubtitles: false }),
+    ).toEqual<SubtitleExportPlan>({
+      embedTranscriptSubtitles: false,
+      burnInSubtitles: true,
+      fallbackToBurnIn: true,
+    })
+  })
+
+  it('embedded mode without any transcript burns nothing and warns nothing', () => {
+    expect(plan('embedded', 'webm', { hasTranscriptVtt: false })).toEqual<SubtitleExportPlan>({
+      embedTranscriptSubtitles: false,
+      burnInSubtitles: true,
+      fallbackToBurnIn: false,
+    })
   })
 })
