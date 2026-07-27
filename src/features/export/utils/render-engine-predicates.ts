@@ -7,10 +7,39 @@
  * focused on orchestration and these remain independently testable.
  */
 
-import type { TimelineItem, ImageItem } from '@/types/timeline'
+import type { TimelineItem, ImageItem, ShapeItem } from '@/types/timeline'
 import type { ItemEffect } from '@/types/effects'
 import { isGifUrl, isWebpUrl } from '@/shared/utils/media-utils'
 import { type SubCompRenderData } from './canvas-item-renderer'
+
+/**
+ * Whether a (live-resolved) item renders pixels at this frame. Moved verbatim
+ * from `renderFrame`'s inline `shouldRenderItem` closure; the caller resolves
+ * live-item substitution (`getCurrentItem`) before calling.
+ */
+export function shouldRenderResolvedItemAtFrame(
+  item: TimelineItem,
+  frame: number,
+  transitionClipIds: ReadonlySet<string>,
+): boolean {
+  // Skip items not visible at this frame
+  if (frame < item.from || frame >= item.from + item.durationInFrames) {
+    return false
+  }
+  // Skip items being handled by transitions
+  if (transitionClipIds.has(item.id)) {
+    return false
+  }
+  // Skip audio items (handled separately)
+  if (item.type === 'audio') return false
+  // Skip adjustment items (they apply effects, not render content)
+  if (item.type === 'adjustment') return false
+  // Null/controller layers drive transforms but never render pixels.
+  if (item.type === 'controller') return false
+  // Skip mask shapes (handled by mask system)
+  if (item.type === 'shape' && (item as ShapeItem).isMask) return false
+  return true
+}
 
 function hasEnabledGpuEffect(effects: TimelineItem['effects']): boolean {
   return effects?.some((e) => e.enabled && e.effect.type === 'gpu-effect') ?? false
