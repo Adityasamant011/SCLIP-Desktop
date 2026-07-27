@@ -31,6 +31,7 @@ export function useCustomPlayer(
     pause: () => void
     getCurrentFrame: () => number
     isPlaying: () => boolean
+    setPlaybackRate: (rate: number) => void
   } | null>,
   bypassPreviewSeekRef?: React.RefObject<boolean>,
   preferPlayerForStyledTextScrubRef?: React.RefObject<boolean>,
@@ -38,6 +39,7 @@ export function useCustomPlayer(
   onPlayerSeek?: (targetFrame: number) => void,
 ) {
   const isPlaying = usePlaybackStore((s) => s.isPlaying)
+  const playbackRate = usePlaybackStore((s) => s.playbackRate)
 
   const [playerReady, setPlayerReady] = useState(false)
   const lastSyncedFrameRef = useRef<number>(0)
@@ -204,6 +206,13 @@ export function useCustomPlayer(
   }, [playerRef, playerReady])
 
   // Timeline → Player: Sync play/pause state
+  // The store rate is a transient transport multiplier. Wiring it here changes
+  // the global Clock without mutating any authored item speed.
+  useEffect(() => {
+    if (!playerReady) return
+    playerRef.current?.setPlaybackRate(playbackRate)
+  }, [playbackRate, playerReady, playerRef])
+
   useEffect(() => {
     if (!playerRef.current) return
 

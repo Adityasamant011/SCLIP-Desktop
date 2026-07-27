@@ -430,11 +430,18 @@ async function decodeAudioWindow(
         appendWrappedBuffer(initialWrappedBuffer)
       }
 
-      const iteratorStartTime = sliceStartTime ?? safeStartTime
-      for await (const wrappedBuffer of sink.buffers(iteratorStartTime, targetCoverageEndTime)) {
-        appendWrappedBuffer(wrappedBuffer)
-        if (coverageEndTime >= targetCoverageEndTime) {
-          break
+      const iteratorStartTime = initialWrappedBuffer
+        ? Math.max(
+            safeStartTime,
+            initialWrappedBuffer.timestamp + initialWrappedBuffer.duration,
+          )
+        : safeStartTime
+      if (coverageEndTime < targetCoverageEndTime) {
+        for await (const wrappedBuffer of sink.buffers(iteratorStartTime, targetCoverageEndTime)) {
+          appendWrappedBuffer(wrappedBuffer)
+          if (coverageEndTime >= targetCoverageEndTime) {
+            break
+          }
         }
       }
 

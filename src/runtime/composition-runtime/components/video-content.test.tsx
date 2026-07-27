@@ -1,5 +1,6 @@
 import { act, render, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
+import { shouldIssueCoalescedReverseVideoSeek } from '../utils/video-sync-plan'
 import { VideoContent } from './video-content'
 
 const testState = vi.hoisted(() => ({
@@ -101,6 +102,7 @@ vi.mock('@/runtime/composition-runtime/deps/player', () => ({
     currentFrame: 0,
     onFrameChange: () => () => {},
   }),
+  useClockPlaybackRate: () => 1,
   interpolate: () => 0,
   isVideoPoolAbortError: () => false,
 }))
@@ -311,5 +313,34 @@ describe('VideoContent pooled handoff', () => {
     expect(pooledElement.play).not.toHaveBeenCalled()
     rendered.unmount()
     vi.useRealTimers()
+  })
+})
+
+describe('coalesced reverse video seeking', () => {
+  it('keeps only one browser seek in flight and accepts the newest target after settlement', () => {
+    expect(
+      shouldIssueCoalescedReverseVideoSeek({
+        seeking: false,
+        seekInFlight: false,
+        currentTime: 8,
+        targetTime: 7.5,
+      }),
+    ).toBe(true)
+    expect(
+      shouldIssueCoalescedReverseVideoSeek({
+        seeking: true,
+        seekInFlight: true,
+        currentTime: 8,
+        targetTime: 6,
+      }),
+    ).toBe(false)
+    expect(
+      shouldIssueCoalescedReverseVideoSeek({
+        seeking: false,
+        seekInFlight: false,
+        currentTime: 6.0005,
+        targetTime: 6,
+      }),
+    ).toBe(false)
   })
 })

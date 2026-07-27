@@ -8,6 +8,7 @@ const playbackStateMocks = vi.hoisted(() => ({
     frame: 0,
     fps: 30,
     playing: false,
+    transportPlaybackRate: 1,
     resolvedVolume: 1,
     resolvedPitchShiftSemitones: 0,
     resolvedAudioEqStages: [] as (typeof DEFAULT_AUDIO_EQ_SETTINGS)[],
@@ -44,6 +45,9 @@ const soundTouchWorkletMocks = vi.hoisted(() => ({
     frameCount: 0,
     sampleRate: 48000,
   })),
+}))
+const workletNodeMocks = vi.hoisted(() => ({
+  messages: [] as unknown[],
 }))
 
 vi.mock('./hooks/use-audio-playback-state', () => ({
@@ -88,10 +92,24 @@ describe('SoundTouchWorkletAudio', () => {
       frame: 0,
       fps: 30,
       playing: false,
+      transportPlaybackRate: 1,
       resolvedVolume: 1,
       resolvedPitchShiftSemitones: 0,
       resolvedAudioEqStages: [],
     }
+    workletNodeMocks.messages = []
+    vi.stubGlobal(
+      'AudioWorkletNode',
+      class {
+        port = {
+          postMessage: (message: unknown) => {
+            workletNodeMocks.messages.push(message)
+          },
+        }
+        connect() {}
+        disconnect() {}
+      },
+    )
   })
 
   it('does not render fallback while the worklet is still loading', async () => {
@@ -177,6 +195,45 @@ describe('SoundTouchWorkletAudio', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('fallback')).toBeInTheDocument()
+    })
+  })
+
+  it('runs reverse shuttle through SoundTouch with stable pitch and signed source direction', async () => {
+    playbackStateMocks.current = {
+      ...playbackStateMocks.current,
+      frame: 300,
+      playing: true,
+      transportPlaybackRate: -4,
+    }
+    soundTouchWorkletMocks.ensureSoundTouchPreviewWorkletLoaded.mockResolvedValue(true)
+
+    render(
+      <SoundTouchWorkletAudio
+        audioBuffer={makeAudioBuffer(12)}
+        itemId="nested-audio-1"
+        durationInFrames={600}
+        playbackRate={1}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(workletNodeMocks.messages).toContainEqual({
+        type: 'set-tempo',
+        tempo: 4,
+      })
+      expect(workletNodeMocks.messages).toContainEqual({
+        type: 'seek',
+        frame: 480000,
+        direction: -1,
+      })
+      expect(workletNodeMocks.messages).toContainEqual({
+        type: 'set-pitch',
+        pitch: 1,
+      })
+      expect(workletNodeMocks.messages).toContainEqual({
+        type: 'set-playing',
+        playing: true,
+      })
     })
   })
 })

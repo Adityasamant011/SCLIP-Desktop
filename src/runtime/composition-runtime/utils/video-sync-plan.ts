@@ -216,47 +216,73 @@ export function planPausedVideoFrameSync(input: {
   }
 }
 
-/**
- * After a drift-correction seek, prefer rate-based correction (no seek) for this long.
- * Seeking forces a keyframe re-decode that, on heavy footage (e.g. 4K60p high-bitrate
- * HEVC), stalls playback long enough to push drift back over the seek threshold — so an
- * un-debounced corrector re-seeks into the same stall, producing a visible mid-clip hang.
- * The cooldown lets rate correction converge between seeks instead.
- */
-const DRIFT_SEEK_COOLDOWN_MS = 600
+// Continuous playback drift is corrected by rate. Hard seeks are reserved for
+// actual Clock target discontinuities, because every media seek can restart a
+// keyframe/GOP decode and amplify an overloaded pipeline.
+const LARGE_DRIFT_SECONDS = 0.2
+const MAX_LARGE_DRIFT_RATE_CORRECTION = 0.15
+
+export function isVideoSyncTargetDiscontinuity(input: {
+  previousTargetTime: number | null
+  targetTime: number
+  elapsedMs: number
+  nominalRate: number
+}): boolean {
+  if (input.previousTargetTime === null) return false
+
+  const expectedAdvance =
+    (Math.max(0, input.elapsedMs) / 1000) * Math.max(0, Math.abs(input.nominalRate))
+  const actualAdvance = input.targetTime - input.previousTargetTime
+  return Math.abs(actualAdvance - expectedAdvance) > Math.max(0.5, expectedAdvance * 2)
+}
+
+export function shouldUpdateVideoPlaybackRate(
+  currentRate: number,
+  nextRate: number,
+  tolerance = 0.015,
+): boolean {
+  return (
+    !Number.isFinite(currentRate) ||
+    !Number.isFinite(nextRate) ||
+    Math.abs(currentRate - nextRate) >= tolerance
+  )
+}
 
 export function planVideoFrameCallbackCorrection(input: {
   currentTime: number
   targetTime: number
   nominalRate: number
   readyState: number
-  /** Timestamp of the last drift-correction seek; omit to disable the cooldown. */
-  lastSeekTimeMs?: number
-  /** Current time; omit to disable the cooldown. */
-  nowMs?: number
+  /** True only when the Clock target jumped independently of elapsed playback. */
+  targetDiscontinuity?: boolean
 }): VideoFrameCallbackCorrectionPlan {
   const drift = input.currentTime - input.targetTime
   const absDrift = Math.abs(drift)
 
-  if (absDrift > 0.2) {
+  if (absDrift > LARGE_DRIFT_SECONDS) {
     if (input.readyState >= 1) {
-      const sinceSeekMs =
-        input.lastSeekTimeMs != null && input.nowMs != null
-          ? input.nowMs - input.lastSeekTimeMs
-          : Number.POSITIVE_INFINITY
-      // Within the cooldown, don't re-seek (it would stall the decoder again); nudge the
-      // rate hard toward the target instead so we converge without another keyframe seek.
-      if (sinceSeekMs < DRIFT_SEEK_COOLDOWN_MS) {
+      // Decoder overload is not a transport discontinuity. Re-seeking the
+      // advancing Clock target would force another keyframe/GOP decode and keep
+      // the media pipeline behind. Only real Clock jumps should hard-seek.
+      if (input.targetDiscontinuity) {
         return {
-          kind: 'adjust_rate',
-          playbackRate: drift > 0 ? input.nominalRate * 0.95 : input.nominalRate * 1.05,
+          kind: 'seek',
+          seekTo: input.targetTime,
+          playbackRate: input.nominalRate,
+          shouldUpdateLastSyncTime: true,
         }
       }
+
+      const correction = Math.min(
+        MAX_LARGE_DRIFT_RATE_CORRECTION,
+        Math.max(0.05, absDrift * 0.2),
+      )
       return {
-        kind: 'seek',
-        seekTo: input.targetTime,
-        playbackRate: input.nominalRate,
-        shouldUpdateLastSyncTime: true,
+        kind: 'adjust_rate',
+        playbackRate:
+          drift > 0
+            ? input.nominalRate * (1 - correction)
+            : input.nominalRate * (1 + correction),
       }
     }
 
@@ -279,4 +305,16 @@ export function planVideoFrameCallbackCorrection(input: {
     kind: 'nominal_rate',
     playbackRate: input.nominalRate,
   }
+}
+export function shouldIssueCoalescedReverseVideoSeek(options: {
+  seeking: boolean
+  seekInFlight: boolean
+  currentTime: number
+  targetTime: number
+}): boolean {
+  return (
+    !options.seeking &&
+    !options.seekInFlight &&
+    Math.abs(options.currentTime - options.targetTime) > 0.001
+  )
 }

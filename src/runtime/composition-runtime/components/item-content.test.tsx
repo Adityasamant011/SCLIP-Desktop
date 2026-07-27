@@ -4,6 +4,11 @@ import { VideoConfigProvider } from '@/runtime/composition-runtime/deps/player'
 import type { CompositionItem, ControllerItem } from '@/types/timeline'
 import { ItemContent } from './item-content'
 
+vi.mock('@/runtime/composition-runtime/deps/player', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/runtime/composition-runtime/deps/player')>()),
+  useClockPlaybackRate: () => 1,
+}))
+
 describe('ItemContent', () => {
   it('accepts a Null Object controller without rendering pixels', () => {
     const controller: ControllerItem = {

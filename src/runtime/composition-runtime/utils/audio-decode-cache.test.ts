@@ -45,6 +45,7 @@ const mediabunnyMocks = vi.hoisted(() => {
     inputConstructed: 0,
     sinkConstructed: 0,
     sampleSinkConstructed: 0,
+    bufferRangeStarts: [] as number[],
   }
 
   class Input {
@@ -83,7 +84,7 @@ const mediabunnyMocks = vi.hoisted(() => {
       return pendingBuffer
     }
     buffers(startTime: number, endTime: number) {
-      void startTime
+      stats.bufferRangeStarts.push(startTime)
       void endTime
       return (async function* emptyBuffers() {
         yield* []
@@ -138,6 +139,7 @@ const mediabunnyMocks = vi.hoisted(() => {
       stats.inputConstructed = 0
       stats.sinkConstructed = 0
       stats.sampleSinkConstructed = 0
+      stats.bufferRangeStarts = []
     },
     __stats: stats,
   }
@@ -252,6 +254,25 @@ describe('audio-decode-cache targeted slice reuse', () => {
     expect(firstSlice.buffer).toBe(secondSlice.buffer)
     expect(mediabunnyMocks.__stats.inputConstructed).toBe(1)
     expect(mediabunnyMocks.__stats.sinkConstructed).toBe(1)
+    expect(mediabunnyMocks.__stats.bufferRangeStarts).toEqual([2])
+  })
+
+  it('continues an incomplete targeted slice after the initial decoded buffer', async () => {
+    mediabunnyMocks.__setPendingBuffer(
+      Promise.resolve({
+        buffer: makeAudioBuffer(1),
+        timestamp: 0,
+        duration: 1,
+      }),
+    )
+
+    await getOrDecodeAudioSliceForPlayback('media-range', 'blob://audio', {
+      minReadySeconds: 2,
+      targetTimeSeconds: 0,
+      waitTimeoutMs: 0,
+    })
+
+    expect(mediabunnyMocks.__stats.bufferRangeStarts).toEqual([1])
   })
 
   it('shares an in-flight targeted slice decode for duplicate startup requests', async () => {

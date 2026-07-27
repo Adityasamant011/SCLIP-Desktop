@@ -20,6 +20,49 @@ function normalizeFps(fps: number | undefined, fallback: number): number {
   return fps
 }
 
+export interface LatestOnlyAsyncFrameRunner {
+  schedule: (frame: number) => void
+  cancelPending: () => void
+}
+
+/**
+ * Run at most one asynchronous frame request at a time. Pointer motion that
+ * arrives while a request is settling replaces the pending target, so a slow
+ * media seek cannot make the skim path replay every obsolete position.
+ */
+export function createLatestOnlyAsyncFrameRunner(
+  run: (frame: number) => Promise<void>,
+): LatestOnlyAsyncFrameRunner {
+  let inFlight = false
+  let pendingFrame: number | null = null
+
+  const schedule = (frame: number): void => {
+    if (inFlight) {
+      pendingFrame = frame
+      return
+    }
+
+    inFlight = true
+    void run(frame)
+      .catch(() => {
+        // Skimming is best-effort; a failed target must not block the newest one.
+      })
+      .finally(() => {
+        inFlight = false
+        const nextFrame = pendingFrame
+        pendingFrame = null
+        if (nextFrame !== null) schedule(nextFrame)
+      })
+  }
+
+  return {
+    schedule,
+    cancelPending: () => {
+      pendingFrame = null
+    },
+  }
+}
+
 export function getTimelineAudioSkimTimeSeconds(
   item: TimelineItem,
   timelineFrame: number,

@@ -54,3 +54,24 @@ describe('Player initial-frame sync', () => {
     expect(ref.current?.getCurrentFrame()).toBe(42)
   })
 })
+
+describe('Player transport rate bridge', () => {
+  it('propagates signed transient rates to the Clock', () => {
+    const ref = createRef<PlayerRef>()
+    render(
+      <HeadlessPlayer ref={ref} durationInFrames={300} fps={30}>
+        <div />
+      </HeadlessPlayer>,
+    )
+
+    act(() => {
+      ref.current?.setPlaybackRate(4)
+    })
+    expect(ref.current?.getPlaybackRate()).toBe(4)
+
+    act(() => {
+      ref.current?.setPlaybackRate(-2)
+    })
+    expect(ref.current?.getPlaybackRate()).toBe(-2)
+  })
+})

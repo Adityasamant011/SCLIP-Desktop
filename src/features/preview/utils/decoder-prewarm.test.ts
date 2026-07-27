@@ -36,6 +36,7 @@ type MockWorkerMessage = {
     opfsPath: string
     fileSize?: number
   }
+  maxDimension?: number
 }
 
 class MockWorker {
@@ -220,6 +221,28 @@ describe('decoder prewarm', () => {
     await expect(waited).resolves.toBe(mockBitmap)
     await expect(batch).resolves.toEqual(new Map([[3, mockBitmap]]))
   })
+
+  it('passes transient reverse-window sizing to the optimized batch decoder', async () => {
+    registerObjectUrl('blob:reverse-window', new Blob(['reverse-window']))
+
+    await backgroundBatchPreseek('blob:reverse-window', [3, 2, 1], {
+      cacheCapacity: 28,
+      maxDimension: 720,
+    })
+
+    const batchPost = getGeneralWorkers()
+      .flatMap((worker) => worker.postMessage.mock.calls)
+      .map(([message]) => message as MockWorkerMessage)
+      .find((message) => message.type === 'batch_preseek')
+    expect(batchPost).toMatchObject({
+      type: 'batch_preseek',
+      src: 'blob:reverse-window',
+      timestamps: [1, 2, 3],
+      maxDimension: 720,
+    })
+    expect(getDecoderPrewarmMetricsSnapshot().cacheBitmaps).toBe(3)
+  })
+
   it('warmDecoderPrewarmWorkerPool eagerly spawns the pool exactly once', () => {
     warmDecoderPrewarmWorkerPool()
 
@@ -261,7 +284,7 @@ describe('decoder prewarm', () => {
     )
   })
 
-  it('cancels active work and retains only the latest held-scrub target', async () => {
+  it('bounds independent active decodes and retains only the latest held-scrub target', async () => {
     autoRespondPreseek = false
     warmDecoderPrewarmWorkerPool()
     const activeWorker = createdWorkers[getGeneralWorkers().length]!
@@ -276,21 +299,35 @@ describe('decoder prewarm', () => {
     const initialActivePosts = activeWorker.postMessage.mock.calls
       .map(([message]) => message as MockWorkerMessage)
       .filter((message) => message.type === 'active_preseek')
-    expect(initialActivePosts.map((message) => message.timestamp)).toEqual([10])
-    expect(activeWorker.terminate).toHaveBeenCalledTimes(1)
+    expect(initialActivePosts.map((message) => message.timestamp)).toEqual([10, 20])
+    expect(activeWorker.terminate).not.toHaveBeenCalled()
+    expect(activeWorker.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'active_cancel',
+        src: 'blob:drag',
+      }),
+    )
+
+    const stalePost = initialActivePosts[0]!
+    activeWorker.onmessage?.({
+      data: {
+        type: 'preseek_done',
+        id: stalePost.id,
+        success: false,
+        timestamp: 10,
+      },
+    } as MessageEvent)
 
     await vi.waitFor(() => {
-      const posts = createdWorkers
-        .flatMap((worker) => worker.postMessage.mock.calls)
+      const posts = activeWorker.postMessage.mock.calls
         .map(([message]) => message as MockWorkerMessage)
         .filter((message) => message.type === 'active_preseek')
       expect(posts.map((message) => message.timestamp)).toEqual([10, 20, 30])
     })
-    const latestWorker = createdWorkers.at(-1)!
-    const latestPost = latestWorker.postMessage.mock.calls
+    const latestPost = activeWorker.postMessage.mock.calls
       .map(([message]) => message as MockWorkerMessage)
       .find((message) => message.type === 'active_preseek' && message.timestamp === 30)!
-    latestWorker.onmessage?.({
+    activeWorker.onmessage?.({
       data: {
         type: 'preseek_done',
         id: latestPost.id,
@@ -303,11 +340,50 @@ describe('decoder prewarm', () => {
     await expect(latest).resolves.toBe(mockBitmap)
     expect(getDecoderPrewarmMetricsSnapshot()).toMatchObject({
       activeCancellations: 2,
-      activeWorkerRestarts: 2,
+      activeWorkerRestarts: 0,
       activeSupersededRequests: 0,
       cacheSources: 1,
       cacheBitmaps: 1,
     })
+  })
+
+  it('keeps two source decodes live for compound and transition previews', async () => {
+    autoRespondPreseek = false
+    warmDecoderPrewarmWorkerPool()
+    const activeWorker = createdWorkers[getGeneralWorkers().length]!
+    registerObjectUrl('blob:left', new Blob(['left']))
+    registerObjectUrl('blob:right', new Blob(['right']))
+
+    const left = activePreviewPreseek({ src: 'blob:left', timestamp: 3 })
+    const right = activePreviewPreseek({ src: 'blob:right', timestamp: 7 })
+    const posts = activeWorker.postMessage.mock.calls
+      .map(([message]) => message as MockWorkerMessage)
+      .filter((message) => message.type === 'active_preseek')
+
+    expect(posts.map((message) => [message.src, message.timestamp])).toEqual([
+      ['blob:left', 3],
+      ['blob:right', 7],
+    ])
+    expect(
+      activeWorker.postMessage.mock.calls
+        .map(([message]) => message as MockWorkerMessage)
+        .filter((message) => message.type === 'active_cancel'),
+    ).toHaveLength(0)
+
+    for (const post of posts) {
+      activeWorker.onmessage?.({
+        data: {
+          type: 'preseek_done',
+          id: post.id,
+          success: true,
+          timestamp: post.timestamp,
+          bitmap: mockBitmap,
+        },
+      } as MessageEvent)
+    }
+
+    await expect(left).resolves.toBe(mockBitmap)
+    await expect(right).resolves.toBe(mockBitmap)
   })
 
   it('globally bounds decoded bitmap rings across recently active sources', async () => {

@@ -457,6 +457,8 @@ const CompositionCardInternal = memo(function CompositionCardInternal({
   const thumbnailContainerRef = useRef<HTMLDivElement | null>(null)
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null)
   const [skimProgress, setSkimProgress] = useState<number | null>(null)
+  const skimRafRef = useRef<number | null>(null)
+  const pendingSkimClientXRef = useRef<number | null>(null)
   const thisComposition = useCompositionsStore(
     useCallback((s) => s.compositionById[composition.id], [composition.id]),
   )
@@ -568,19 +570,52 @@ const CompositionCardInternal = memo(function CompositionCardInternal({
     [canHoverPreview, updateSkimPreview],
   )
 
+  const flushScheduledSkimPreview = useCallback(() => {
+    skimRafRef.current = null
+    const clientX = pendingSkimClientXRef.current
+    pendingSkimClientXRef.current = null
+    if (clientX === null) return
+    updateSkimPreview(clientX)
+  }, [updateSkimPreview])
+
+  const scheduleSkimPreview = useCallback(
+    (clientX: number) => {
+      pendingSkimClientXRef.current = clientX
+      if (skimRafRef.current !== null) return
+      skimRafRef.current = requestAnimationFrame(flushScheduledSkimPreview)
+    },
+    [flushScheduledSkimPreview],
+  )
+
+  const cancelScheduledSkimPreview = useCallback(() => {
+    pendingSkimClientXRef.current = null
+    if (skimRafRef.current !== null) {
+      cancelAnimationFrame(skimRafRef.current)
+      skimRafRef.current = null
+    }
+  }, [])
+
   const handleThumbnailPointerMove = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
       if (!canHoverPreview || event.pointerType === 'touch') return
-      updateSkimPreview(event.clientX)
+      scheduleSkimPreview(event.clientX)
     },
-    [canHoverPreview, updateSkimPreview],
+    [canHoverPreview, scheduleSkimPreview],
   )
 
   const handleThumbnailPointerLeave = useCallback(() => {
     if (!canHoverPreview) return
+    cancelScheduledSkimPreview()
     setSkimProgress(null)
     clearCompoundClipSkimPreview()
-  }, [canHoverPreview, clearCompoundClipSkimPreview])
+  }, [canHoverPreview, cancelScheduledSkimPreview, clearCompoundClipSkimPreview])
+
+  useEffect(
+    () => () => {
+      cancelScheduledSkimPreview()
+    },
+    [cancelScheduledSkimPreview],
+  )
 
   const itemCount = composition.items.length
   const fps = composition.fps || 30

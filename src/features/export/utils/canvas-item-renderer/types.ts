@@ -106,6 +106,12 @@ export interface ItemRenderContext {
   captureDecodedVideoFrames?: boolean
   /** Maximum wait for an existing worker decode; undefined uses the short opportunistic wait. */
   workerPredecodeWaitMs?: number
+  /**
+   * Reverse shuttle must never serialize the transport behind a main-thread
+   * video seek. Prefer a nearby decoded frame within this source-time window
+   * and keep the exact worker request progressing independently.
+   */
+  nonBlockingVideoFrameToleranceSeconds?: number
   getResolvedVideoSource?: (
     item: VideoItem,
     sourceTime?: number,

@@ -1,5 +1,8 @@
 import React from 'react'
-import { AbsoluteFill } from '@/runtime/composition-runtime/deps/player'
+import {
+  AbsoluteFill,
+  useClockPlaybackRate,
+} from '@/runtime/composition-runtime/deps/player'
 import { useDebugStore, useGizmoStore } from '@/runtime/composition-runtime/deps/stores'
 import type { AudioItem, CompositionItem, TimelineItem, ShapeItem } from '@/types/timeline'
 import type { ResolvedAudioEqSettings } from '@/types/audio'
@@ -39,6 +42,7 @@ import { needsCustomAudioDecoder } from '../utils/audio-codec-detection'
 import { resolveReverseConformedVideoItem } from '@/shared/utils/reverse-conform-item'
 import { useNestedMediaResolutionMode } from '../contexts/nested-media-resolution-context'
 import { useLiveItemContentTransform } from '../contexts/live-item-transform-context'
+import { shouldRenderExternalVideoAudio } from '../utils/audio-playback-routing'
 
 function getLogger() {
   return createLogger('CompositionItem')
@@ -173,6 +177,7 @@ export const ItemContent = React.memo<ItemProps>(
     // Debug overlay toggle (always false in production via store)
     const showDebugOverlay = useDebugStore((s) => s.showVideoDebugOverlay)
     const { fps: timelineFps } = useVideoConfig()
+    const isReverseShuttle = useClockPlaybackRate() < 0
     const nestedMediaResolutionMode = useNestedMediaResolutionMode()
     const mediaItem = useMediaLibraryStore((s) =>
       item.mediaId ? s.mediaById[item.mediaId] : undefined,
@@ -341,10 +346,14 @@ export const ItemContent = React.memo<ItemProps>(
       )
       const shouldUseCustomDecodedVideoAudio =
         !muted && needsCustomAudioDecoder(mediaItem?.audioCodec ?? mediaItem?.codec)
-      const shouldRenderExternalVideoAudio =
-        !muted &&
-        !!videoAudioSrc &&
-        (isReversed || requiresPitchShiftedVideoAudio || shouldUseCustomDecodedVideoAudio)
+      const renderExternalVideoAudio = shouldRenderExternalVideoAudio({
+        muted,
+        hasAudioSource: !!videoAudioSrc,
+        authoredReversed: isReversed,
+        reverseShuttle: isReverseShuttle,
+        requiresPitchShift: requiresPitchShiftedVideoAudio,
+        requiresCustomDecoder: shouldUseCustomDecodedVideoAudio,
+      })
       const videoAudioPlaybackProps = getItemAudioPlaybackProps({
         item,
         trimBefore: safeTrimBefore,
@@ -359,7 +368,7 @@ export const ItemContent = React.memo<ItemProps>(
         liveGainItemIds: audioGainLiveItemIds,
         volumeMultiplier: audioGainMultiplier,
       })
-      const externalVideoAudio = shouldRenderExternalVideoAudio ? (
+      const externalVideoAudio = renderExternalVideoAudio ? (
         shouldUseCustomDecodedVideoAudio ? (
           <CustomDecoderAudio
             {...videoAudioPlaybackProps}
@@ -379,7 +388,7 @@ export const ItemContent = React.memo<ItemProps>(
         <>
           <VideoContent
             item={item}
-            muted={muted || shouldRenderExternalVideoAudio}
+            muted={muted || renderExternalVideoAudio}
             safeTrimBefore={safeTrimBefore}
             playbackRate={playbackRate}
             sourceFps={sourceFps}

@@ -4,7 +4,9 @@ import { usePlaybackStore } from '@/runtime/composition-runtime/deps/stores'
 import { createLogger } from '@/shared/logging/logger'
 import { getAudioPitchRatioFromSemitones } from '@/shared/utils/audio-pitch'
 import type { AudioPlaybackProps } from './audio-playback-props'
+import { getBrowserMediaPlaybackRate } from '@/shared/state/playback/shuttle'
 import { useAudioPlaybackState } from './hooks/use-audio-playback-state'
+import { useReverseShuttleAudio } from './hooks/use-reverse-shuttle-audio'
 import { getAudioTargetTimeSeconds } from '../utils/video-timing'
 import {
   createPreviewClipAudioGraph,
@@ -69,6 +71,7 @@ export const SoundTouchWorkletAudio: React.FC<SoundTouchWorkletAudioProps> = Rea
       frame,
       fps,
       playing,
+      transportPlaybackRate,
       resolvedVolume: finalVolume,
       resolvedPitchShiftSemitones,
       resolvedAudioEqStages,
@@ -97,6 +100,13 @@ export const SoundTouchWorkletAudio: React.FC<SoundTouchWorkletAudioProps> = Rea
       crossfadeFadeOut,
       volumeMultiplier,
     })
+    const isReverseShuttle = transportPlaybackRate < 0
+    const mediaPlaybackRate = getBrowserMediaPlaybackRate(playbackRate, transportPlaybackRate)
+    const timeStretchTempo = Math.max(
+      0.0625,
+      Math.min(16, playbackRate * Math.abs(transportPlaybackRate)),
+    )
+    const sourceDirection: -1 | 1 = (isReversed ? -1 : 1) * (isReverseShuttle ? -1 : 1) < 0 ? -1 : 1
 
     const graphRef = useRef<PreviewClipAudioGraph | null>(null)
     const nodeRef = useRef<AudioWorkletNode | null>(null)
@@ -106,8 +116,10 @@ export const SoundTouchWorkletAudio: React.FC<SoundTouchWorkletAudioProps> = Rea
     const lastSyncWallClockRef = useRef(Date.now())
     const lastSyncContextTimeRef = useRef(0)
     const lastStartOffsetRef = useRef(0)
-    const lastStartRateRef = useRef(playbackRate)
+    const lastStartRateRef = useRef(mediaPlaybackRate)
     const lastFrameRef = useRef(-1)
+    const shuttleFrameRef = useRef(frame)
+    shuttleFrameRef.current = frame
     const lastPostedPlayingRef = useRef<boolean | null>(null)
     const mutedRef = useRef(muted)
     const finalVolumeRef = useRef(finalVolume)
@@ -118,10 +130,11 @@ export const SoundTouchWorkletAudio: React.FC<SoundTouchWorkletAudioProps> = Rea
       nodeRef.current?.port.postMessage(message)
     }
 
-    const postSeekSeconds = (seconds: number, sampleRate: number): void => {
+    const postSeekSeconds = (seconds: number, sampleRate: number, direction: -1 | 1 = 1): void => {
       postMessage({
         type: 'seek',
         frame: Math.max(0, Math.floor(seconds * sampleRate)),
+        direction,
       })
     }
 
@@ -240,13 +253,28 @@ export const SoundTouchWorkletAudio: React.FC<SoundTouchWorkletAudioProps> = Rea
       rampPreviewClipEq(graph, resolvedAudioEqStages)
     }, [resolvedAudioEqStages])
 
+    useReverseShuttleAudio({
+      graphRef,
+      buffer: fallbackRequested && isReverseShuttle ? audioBuffer : null,
+      frameRef: shuttleFrameRef,
+      fps,
+      trimBefore,
+      sourceFps,
+      sourceStartOffsetSec,
+      authoredPlaybackRate: playbackRate,
+      authoredReversed: isReversed,
+      reverseSourceEnd,
+      playing,
+      transportPlaybackRate,
+    })
+
     useEffect(() => {
       if (!nodeReady) return
       postMessage({
         type: 'set-tempo',
-        tempo: Math.max(0.01, playbackRate),
+        tempo: timeStretchTempo,
       })
-    }, [nodeReady, playbackRate])
+    }, [nodeReady, timeStretchTempo])
 
     useEffect(() => {
       if (!nodeReady) return
@@ -299,33 +327,22 @@ export const SoundTouchWorkletAudio: React.FC<SoundTouchWorkletAudioProps> = Rea
       const frameChanged = frame !== lastFrameRef.current
       lastFrameRef.current = frame
 
-      if (isPremounted) {
-        if (lastPostedPlayingRef.current !== false) {
-          postMessage({ type: 'set-playing', playing: false })
-          lastPostedPlayingRef.current = false
-        }
+      const postPlayingState = (nextPlaying: boolean) => {
+        if (lastPostedPlayingRef.current === nextPlaying) return
+        postMessage({ type: 'set-playing', playing: nextPlaying })
+        lastPostedPlayingRef.current = nextPlaying
+      }
+
+      const syncPremountedFrame = () => {
+        postPlayingState(false)
         if (Math.abs(lastStartOffsetRef.current - clipStartTimeSeconds) > SEEK_TOLERANCE_SECONDS) {
-          postSeekSeconds(clipStartTimeSeconds, graph.context.sampleRate)
+          postSeekSeconds(clipStartTimeSeconds, graph.context.sampleRate, sourceDirection)
           lastStartOffsetRef.current = clipStartTimeSeconds
         }
         needsInitialSyncRef.current = true
-        return
       }
 
-      if (playing) {
-        if (isReversed) {
-          if (lastPostedPlayingRef.current !== false) {
-            postMessage({ type: 'set-playing', playing: false })
-            lastPostedPlayingRef.current = false
-          }
-          if (frameChanged || needsInitialSyncRef.current) {
-            postSeekSeconds(clampedTargetTime, graph.context.sampleRate)
-            lastStartOffsetRef.current = clampedTargetTime
-            needsInitialSyncRef.current = false
-          }
-          return
-        }
-
+      const syncPlayingFrame = () => {
         if (graph.context.state === 'suspended') {
           void graph.context.resume().catch(() => undefined)
         }
@@ -333,33 +350,30 @@ export const SoundTouchWorkletAudio: React.FC<SoundTouchWorkletAudioProps> = Rea
         const now = graph.context.currentTime
         const expectedOffset =
           lastStartOffsetRef.current +
-          Math.max(0, now - lastSyncContextTimeRef.current) * lastStartRateRef.current
+          Math.max(0, now - lastSyncContextTimeRef.current) *
+            lastStartRateRef.current *
+            sourceDirection
         const drift = expectedOffset - clampedTargetTime
         const timeSinceLastSync = Date.now() - lastSyncWallClockRef.current
-        const audioBehind = drift < DRIFT_RESYNC_BEHIND_THRESHOLD_SECONDS
-        const audioFarAhead = drift > DRIFT_RESYNC_AHEAD_THRESHOLD_SECONDS
+        const audioBehind = drift * sourceDirection < DRIFT_RESYNC_BEHIND_THRESHOLD_SECONDS
+        const audioFarAhead = drift * sourceDirection > DRIFT_RESYNC_AHEAD_THRESHOLD_SECONDS
         const needsSync =
           needsInitialSyncRef.current || audioFarAhead || (audioBehind && timeSinceLastSync > 500)
 
         if (needsSync) {
-          postSeekSeconds(clampedTargetTime, graph.context.sampleRate)
+          postSeekSeconds(clampedTargetTime, graph.context.sampleRate, sourceDirection)
           lastSyncContextTimeRef.current = now
           lastSyncWallClockRef.current = Date.now()
           lastStartOffsetRef.current = clampedTargetTime
-          lastStartRateRef.current = playbackRate
+          lastStartRateRef.current = timeStretchTempo
           needsInitialSyncRef.current = false
         }
 
-        if (lastPostedPlayingRef.current !== true) {
-          postMessage({ type: 'set-playing', playing: true })
-          lastPostedPlayingRef.current = true
-        }
-      } else {
-        if (lastPostedPlayingRef.current !== false) {
-          postMessage({ type: 'set-playing', playing: false })
-          lastPostedPlayingRef.current = false
-        }
+        postPlayingState(true)
+      }
 
+      const syncPausedFrame = () => {
+        postPlayingState(false)
         const playbackState = usePlaybackStore.getState()
         const isPreviewScrubbing =
           !playbackState.isPlaying &&
@@ -373,15 +387,26 @@ export const SoundTouchWorkletAudio: React.FC<SoundTouchWorkletAudioProps> = Rea
 
         needsInitialSyncRef.current = true
       }
+
+      if (isPremounted) {
+        syncPremountedFrame()
+        return
+      }
+      if (playing) syncPlayingFrame()
+      else syncPausedFrame()
     }, [
       fps,
       frame,
       isReversed,
+      isReverseShuttle,
+      mediaPlaybackRate,
       nodeReady,
       playbackRate,
       playing,
       reverseSourceEnd,
+      sourceDirection,
       sourceFps,
+      timeStretchTempo,
       trimBefore,
     ])
 

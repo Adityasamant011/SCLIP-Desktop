@@ -1,11 +1,59 @@
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import type { AudioItem, TimelineItem, TimelineTrack } from '@/types/timeline'
 import {
+  createLatestOnlyAsyncFrameRunner,
   createTimelineMediaElementAudioSkimPreview,
   getTimelineAudioSkimTimeSeconds,
   selectTimelineSkimSourceAtFrame,
   type CompositionLookup,
 } from './timeline-audio-skim'
+
+describe('createLatestOnlyAsyncFrameRunner', () => {
+  it('drops obsolete queued targets while an asynchronous seek is settling', async () => {
+    let releaseFirst: (() => void) | undefined
+    const first = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    const run = vi
+      .fn<(frame: number) => Promise<void>>()
+      .mockImplementationOnce(() => first)
+      .mockResolvedValue(undefined)
+    const runner = createLatestOnlyAsyncFrameRunner(run)
+
+    runner.schedule(10)
+    runner.schedule(20)
+    runner.schedule(30)
+    expect(run).toHaveBeenCalledTimes(1)
+    expect(run).toHaveBeenLastCalledWith(10)
+
+    releaseFirst?.()
+    await first
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(run).toHaveBeenCalledTimes(2)
+    expect(run).toHaveBeenLastCalledWith(30)
+  })
+
+  it('can discard a queued target without interrupting the active request', async () => {
+    let releaseFirst: (() => void) | undefined
+    const first = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    const run = vi.fn<(frame: number) => Promise<void>>().mockImplementation(() => first)
+    const runner = createLatestOnlyAsyncFrameRunner(run)
+
+    runner.schedule(10)
+    runner.schedule(20)
+    runner.cancelPending()
+    releaseFirst?.()
+    await first
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(run).toHaveBeenCalledTimes(1)
+  })
+})
 
 function makeAudioItem(overrides: Partial<AudioItem> = {}): AudioItem {
   return {

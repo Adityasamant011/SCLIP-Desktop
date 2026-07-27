@@ -477,6 +477,8 @@ export const TimelineMarkers = memo(function TimelineMarkers({
   const scrollLeftRef = useRef(0)
   const rafIdRef = useRef<number | null>(null)
   const syncRulerScrollRef = useRef<(() => void) | null>(null)
+  const hoverPreviewRafRef = useRef<number | null>(null)
+  const pendingHoverPreviewFrameRef = useRef<number | null>(null)
 
   // Unified scrubbing refs (scroll + playhead in same RAF frame)
   const scrollContainerRef = useRef<HTMLDivElement | null>(null)
@@ -852,9 +854,21 @@ export const TimelineMarkers = memo(function TimelineMarkers({
   const handleRulerMouseMove = useCallback(
     (e: React.MouseEvent) => {
       if (isDragging || isRangeDragging) return
+      // The ruler owns this hover. Prevent TimelineContent's bubbling handler
+      // from scheduling a second publication for the same pointer sample.
+      e.stopPropagation()
 
       const frame = getFrameFromClientX(e.clientX)
-      setPreviewFrameRef.current(frame)
+      pendingHoverPreviewFrameRef.current = frame
+      if (hoverPreviewRafRef.current !== null) return
+      hoverPreviewRafRef.current = requestAnimationFrame(() => {
+        hoverPreviewRafRef.current = null
+        const nextFrame = pendingHoverPreviewFrameRef.current
+        pendingHoverPreviewFrameRef.current = null
+        if (nextFrame !== null) {
+          setPreviewFrameRef.current(nextFrame)
+        }
+      })
     },
     [getFrameFromClientX, isDragging, isRangeDragging],
   )
@@ -865,6 +879,11 @@ export const TimelineMarkers = memo(function TimelineMarkers({
 
       const timelineContainer = e.currentTarget.closest('[data-timeline-scroll-container]')
       if (e.relatedTarget instanceof Node && timelineContainer?.contains(e.relatedTarget)) {
+        if (hoverPreviewRafRef.current !== null) {
+          cancelAnimationFrame(hoverPreviewRafRef.current)
+          hoverPreviewRafRef.current = null
+        }
+        pendingHoverPreviewFrameRef.current = null
         // The parent timeline owns skimming across both its ruler and tracks.
         // Crossing that internal boundary is not a skim release: clearing here
         // briefly retargets the committed frame and cancels compound-frame work
@@ -872,9 +891,25 @@ export const TimelineMarkers = memo(function TimelineMarkers({
         return
       }
 
+      if (hoverPreviewRafRef.current !== null) {
+        cancelAnimationFrame(hoverPreviewRafRef.current)
+        hoverPreviewRafRef.current = null
+      }
+      pendingHoverPreviewFrameRef.current = null
       setPreviewFrameRef.current(null)
     },
     [isDragging, isRangeDragging],
+  )
+
+  useEffect(
+    () => () => {
+      if (hoverPreviewRafRef.current !== null) {
+        cancelAnimationFrame(hoverPreviewRafRef.current)
+      }
+      hoverPreviewRafRef.current = null
+      pendingHoverPreviewFrameRef.current = null
+    },
+    [],
   )
 
   const handleRangeMouseDown = useCallback(

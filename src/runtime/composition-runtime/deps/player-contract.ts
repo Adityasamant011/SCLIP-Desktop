@@ -13,6 +13,6 @@ export {
 export { VideoConfigProvider } from '@/runtime/player/VideoConfigProvider'
 export { useVideoConfig } from '@/runtime/player/video-config-context'
 export { useBridgedCurrentFrame, useBridgedIsPlaying } from '@/runtime/player/clock'
-export { useClock } from '@/runtime/player/clock/clock-hooks'
+export { useClock, useClockPlaybackRate } from '@/runtime/player/clock/clock-hooks'
 export { useVideoSourcePool } from '@/runtime/player/video/VideoSourcePoolContext'
 export { isVideoPoolAbortError } from '@/runtime/player/video/VideoSourcePool'

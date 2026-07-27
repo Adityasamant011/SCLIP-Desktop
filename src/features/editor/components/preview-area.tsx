@@ -20,6 +20,8 @@ import { InteractionLockRegion } from './interaction-lock-region'
 import { Button } from '@/components/ui/button'
 import { ErrorBoundary } from '@/app/error-boundary'
 import { useTranslation } from 'react-i18next'
+import { usePlaybackStore } from '@/shared/state/playback'
+import { ShuttleIndicator } from '@/shared/ui/shuttle-indicator'
 
 interface PreviewAreaProps {
   project: {
@@ -38,6 +40,19 @@ const DEFAULT_EMPTY_TIMELINE_SECONDS = 10
 const PREVIEW_RESIZE_MIN_UPDATE_MS = 33
 const SPLIT_DRAG_MIN_UPDATE_MS = 33
 const PREVIEW_SOURCE_SPLIT_DEFAULT_PERCENT = 50
+
+function ProgramShuttleIndicator() {
+  const isPlaying = usePlaybackStore((state) => state.isPlaying)
+  const playbackRate = usePlaybackStore((state) => state.playbackRate)
+  const transportMode = usePlaybackStore((state) => state.transportMode)
+
+  return (
+    <ShuttleIndicator
+      active={isPlaying && transportMode === 'shuttle'}
+      playbackRate={playbackRate}
+    />
+  )
+}
 const PREVIEW_SCOPES_SPLIT_DEFAULT_PERCENT = 32
 const PREVIEW_SIDE_PANEL_MIN_PERCENT = 22
 const PREVIEW_SIDE_PANEL_MAX_PERCENT = 55
@@ -685,8 +700,9 @@ export const PreviewArea = memo(function PreviewArea({
                   className="@container border-t border-border panel-header relative flex items-center px-3 overflow-hidden"
                   style={{ height: EDITOR_LAYOUT_CSS_VALUES.previewControlsHeight }}
                 >
-                  <div className="flex-shrink-0">
+                  <div className="flex flex-shrink-0 items-center gap-2">
                     <TimecodeDisplay fps={fps} totalFrames={totalFrames} />
+                    <ProgramShuttleIndicator />
                   </div>
 
                   <div className="absolute inset-0 flex items-center justify-center pointer-events-none">

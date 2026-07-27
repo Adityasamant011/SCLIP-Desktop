@@ -55,6 +55,14 @@ describe('TimecodeDisplay', () => {
     expect(button).toHaveTextContent('0999')
   })
 
+  it('reserves enough width for hour-long SMPTE values', () => {
+    render(<TimecodeDisplay fps={30} totalFrames={180_001} />)
+
+    expect(screen.getByRole('button')).toHaveStyle({
+      width: 'calc(23ch + 0.75rem)',
+    })
+  })
+
   it('shows the skim preview frame in the timecode readout', () => {
     render(<TimecodeDisplay fps={30} totalFrames={1000} />)
 

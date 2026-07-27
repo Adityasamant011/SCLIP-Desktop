@@ -262,12 +262,6 @@ Platform-coupled code (GPU, ML, audio, storage, browser) lives in
 `@/infrastructure/*` and is imported directly; there is no separate `lib/`
 layer.
 
-For the full directory breakdown, see the layer notes:
-
-- [src/infrastructure/README.md](src/infrastructure/README.md)
-- [src/shared/README.md](src/shared/README.md)
-- Feature `deps/README.md` files inside individual feature folders
-
 ## Contributing
 
 FreeCut is open source but not open contribution. Pull requests are not accepted at this time.

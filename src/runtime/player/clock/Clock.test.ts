@@ -74,6 +74,35 @@ describe('Clock playback timing', () => {
     clock.dispose()
   })
 
+  it('advances reverse shuttle at display cadence while skipping intermediate frames', () => {
+    const clock = new Clock({
+      fps: 30,
+      durationInFrames: 300,
+      initialFrame: 120,
+    })
+    clock.playbackRate = -2
+
+    clock.play()
+    runNextAnimationFrame(500)
+
+    expect(clock.currentFrame).toBe(90)
+    clock.dispose()
+  })
+
+  it('restarts reverse playback from the last frame only at the first boundary', () => {
+    const clock = new Clock({
+      fps: 30,
+      durationInFrames: 300,
+      initialFrame: 0,
+    })
+    clock.playbackRate = -1
+
+    clock.play()
+
+    expect(clock.currentFrame).toBe(299)
+    clock.dispose()
+  })
+
   it('catches up immediately when window focus returns before the next RAF', () => {
     const clock = new Clock({
       fps: 30,

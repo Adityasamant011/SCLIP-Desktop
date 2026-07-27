@@ -15,6 +15,7 @@ import { useCompositionsStore } from '../stores/compositions-store'
 import { useItemsStore } from '../stores/items-store'
 import { useTimelineStore } from '../stores/timeline-store'
 import {
+  createLatestOnlyAsyncFrameRunner,
   getTimelineAudioBufferPeak,
   selectTimelineSkimSourceAtFrame,
   timelineAudioBufferSkimPreview,
@@ -26,6 +27,15 @@ export function useTimelineAudioSkimPreview(): void {
   const requestIdRef = useRef(0)
   const rafRef = useRef<number | null>(null)
   const pendingFrameRef = useRef<number | null>(null)
+  const skimPreviewFrameRef = useRef<(frame: number) => Promise<void>>(async () => {})
+  const latestAudioSkimRunnerRef = useRef<ReturnType<
+    typeof createLatestOnlyAsyncFrameRunner
+  > | null>(null)
+  if (latestAudioSkimRunnerRef.current === null) {
+    latestAudioSkimRunnerRef.current = createLatestOnlyAsyncFrameRunner((frame) =>
+      skimPreviewFrameRef.current(frame),
+    )
+  }
   const sourceByMediaIdRef = useRef<
     Map<string, { mediaUrl: string; mediaKind: 'audio' | 'video' }>
   >(new Map())
@@ -33,6 +43,7 @@ export function useTimelineAudioSkimPreview(): void {
   const stopAudioSkim = useCallback(() => {
     requestIdRef.current += 1
     pendingFrameRef.current = null
+    latestAudioSkimRunnerRef.current?.cancelPending()
     if (rafRef.current !== null) {
       cancelAnimationFrame(rafRef.current)
       rafRef.current = null
@@ -215,6 +226,7 @@ export function useTimelineAudioSkimPreview(): void {
     },
     [resolveSkimUrl, stopAudioSkim],
   )
+  skimPreviewFrameRef.current = skimPreviewFrame
 
   const scheduleAudioSkim = useCallback(
     (frame: number) => {
@@ -226,10 +238,10 @@ export function useTimelineAudioSkimPreview(): void {
         const nextFrame = pendingFrameRef.current
         pendingFrameRef.current = null
         if (nextFrame === null) return
-        void skimPreviewFrame(nextFrame)
+        latestAudioSkimRunnerRef.current?.schedule(nextFrame)
       })
     },
-    [skimPreviewFrame],
+    [],
   )
 
   useEffect(() => {

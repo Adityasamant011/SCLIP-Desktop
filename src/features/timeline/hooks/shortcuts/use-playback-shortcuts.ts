@@ -37,6 +37,9 @@ function getSnapPoints(): number[] {
 export function usePlaybackShortcuts(callbacks: TimelineShortcutCallbacks) {
   const hotkeys = useResolvedHotkeys()
   const togglePlayPause = usePlaybackStore((s) => s.togglePlayPause)
+  const shuttleForward = usePlaybackStore((s) => s.shuttleForward)
+  const shuttleReverse = usePlaybackStore((s) => s.shuttleReverse)
+  const pause = usePlaybackStore((s) => s.pause)
   const setCurrentFrame = usePlaybackStore((s) => s.setCurrentFrame)
   const setPreviewFrame = usePlaybackStore((s) => s.setPreviewFrame)
   const setDisplayedFrame = usePreviewBridgeStore((s) => s.setDisplayedFrame)
@@ -69,6 +72,74 @@ export function usePlaybackShortcuts(callbacks: TimelineShortcutCallbacks) {
     },
     { ...HOTKEY_OPTIONS, eventListenerOptions: { capture: true } },
     [togglePlayPause, isPlaying, callbacks],
+  )
+
+  // Shuttle: L advances forward through 1x, 2x, and 4x. Ignore browser key
+  // repeat so one physical press produces one transport transition.
+  useHotkeys(
+    'l',
+    (event) => {
+      if (event.repeat) return
+      event.preventDefault()
+      const { hoveredPanel, playerMethods } = useSourcePlayerStore.getState()
+      if (hoveredPanel === 'source' && playerMethods) {
+        playerMethods.shuttleForward()
+        return
+      }
+      const wasPlaying = usePlaybackStore.getState().isPlaying
+      shuttleForward()
+      if (!wasPlaying) {
+        callbacks.onPlay?.()
+      }
+    },
+    { ...HOTKEY_OPTIONS, eventListenerOptions: { capture: true } },
+    [callbacks, shuttleForward],
+  )
+
+  // Shuttle: J mirrors L in reverse. Browser media stays on a paused visual
+  // seek path for negative rates; the Clock still advances at display cadence.
+  useHotkeys(
+    'j',
+    (event) => {
+      if (event.repeat) return
+      event.preventDefault()
+      const { hoveredPanel, playerMethods } = useSourcePlayerStore.getState()
+      if (hoveredPanel === 'source' && playerMethods) {
+        playerMethods.shuttleReverse()
+        return
+      }
+      const wasPlaying = usePlaybackStore.getState().isPlaying
+      shuttleReverse()
+      if (!wasPlaying) {
+        callbacks.onPlay?.()
+      }
+    },
+    { ...HOTKEY_OPTIONS, eventListenerOptions: { capture: true } },
+    [callbacks, shuttleReverse],
+  )
+
+  // K owns pause only while a transport is active. When already paused it
+  // yields to the existing Edit keyframe shortcut.
+  useHotkeys(
+    'k',
+    (event) => {
+      if (event.repeat) return
+      const { hoveredPanel, playerMethods } = useSourcePlayerStore.getState()
+      if (hoveredPanel === 'source' && playerMethods) {
+        if (!playerMethods.isPlaying()) return
+        event.preventDefault()
+        event.stopPropagation()
+        playerMethods.pause()
+        return
+      }
+      if (!usePlaybackStore.getState().isPlaying) return
+      event.preventDefault()
+      event.stopPropagation()
+      pause()
+      callbacks.onPause?.()
+    },
+    { ...HOTKEY_OPTIONS, eventListenerOptions: { capture: true } },
+    [callbacks, pause],
   )
 
   // Navigation: Arrow Left - Previous frame

@@ -12,6 +12,7 @@ export interface SoundTouchAppendSourceMessage {
 export interface SoundTouchSeekMessage {
   type: 'seek'
   frame: number
+  direction?: -1 | 1
 }
 
 export interface SoundTouchSetTempoMessage {

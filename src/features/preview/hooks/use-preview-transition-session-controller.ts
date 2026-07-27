@@ -2,6 +2,7 @@ import { useCallback, type MutableRefObject } from 'react'
 import type { TimelineItem } from '@/types/timeline'
 import type { ResolvedTransitionWindow } from '@/shared/timeline/transitions/transition-planner'
 import { usePlaybackStore } from '@/shared/state/playback'
+import { getBrowserMediaPlaybackRate } from '@/shared/state/playback/shuttle'
 import {
   getBestDomVideoElementForItem,
   transitionSafePlay,
@@ -179,7 +180,8 @@ export function usePreviewTransitionSessionController({
 
     const window = transitionSessionWindowRef.current
     if (window) {
-      const currentFrame = usePlaybackStore.getState().currentFrame
+      const playback = usePlaybackStore.getState()
+      const currentFrame = playback.currentFrame
       for (const clip of [window.leftClip, window.rightClip]) {
         if (clip.type !== 'video') continue
         const el = transitionSessionPinnedElementsRef.current.get(clip.id)
@@ -204,7 +206,10 @@ export function usePreviewTransitionSessionController({
             // Element may be settling — ignore transient seek failures.
           }
         } else if (drift > 0.016) {
-          el.playbackRate = clipSpeed
+          el.playbackRate = getBrowserMediaPlaybackRate(
+            clipSpeed,
+            playback.playbackRate,
+          )
         }
       }
     }

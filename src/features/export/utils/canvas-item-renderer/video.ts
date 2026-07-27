@@ -59,9 +59,14 @@ function tryDrawActivePreviewFallback(options: {
   drawBitmap: (bitmap: ImageBitmap) => boolean
   timelineFrame: number
   itemId: string
+  allowOutsideActivePreview?: boolean
 }): boolean {
   const { rctx, previewRootFrame, workerSource, sourceTime, toleranceSeconds, drawBitmap } = options
-  if (!rctx.isActivePreviewFrameCurrent?.(previewRootFrame)) return false
+  if (
+    !options.allowOutsideActivePreview &&
+    !rctx.isActivePreviewFrameCurrent?.(previewRootFrame)
+  )
+    return false
   const bitmap = rctx.getCachedActivePreviewFallbackBitmap?.(
     workerSource,
     sourceTime,
@@ -187,6 +192,7 @@ async function tryDrawWorkerPredecodedBitmap(
   timelineFrame: number,
   sourceTime: number,
   toleranceSeconds: number,
+  allowInactiveProxyFallback = false,
 ): Promise<boolean> {
   const previewRootFrame = rctx.previewRootTimelineFrame ?? timelineFrame
   const workerSource = rctx.getResolvedVideoSource?.(item, sourceTime, toleranceSeconds) ?? item.src
@@ -229,6 +235,7 @@ async function tryDrawWorkerPredecodedBitmap(
       drawBitmap,
       timelineFrame,
       itemId: item.id,
+      allowOutsideActivePreview: allowInactiveProxyFallback,
     })
   )
     return true
@@ -297,6 +304,7 @@ export async function renderVideoItem(
       ? (snappedSourceFrame + 1e-4) / sourceFps
       : rawSourceTime
   const tier2ToleranceSeconds = getTier2VideoFrameToleranceSeconds(sourceFps)
+  const nonBlockingToleranceSeconds = rctx.nonBlockingVideoFrameToleranceSeconds
   const previewRootFrame = rctx.previewRootTimelineFrame ?? frame
   const holdPreviewFrontBuffer = () => {
     if (isPreviewMode) rctx.markActivePreviewFramePending?.()
@@ -343,6 +351,52 @@ export async function renderVideoItem(
     )
     if (drewActiveBitmap) return true
   }
+  if (isPreviewMode && nonBlockingToleranceSeconds !== undefined) {
+    // Reverse playback has a decoded-frame runway prepared off-thread. Prefer
+    // its nearest display-cadence frame before consulting an asynchronously
+    // seeking DOM video. Mixing the two sources makes nested compounds visibly
+    // jump when a late browser seek lands between monotonic worker frames.
+    const drewNearbyWorkerBitmap = await tryDrawWorkerPredecodedBitmap(
+      ctx,
+      item,
+      transform,
+      canvasSettings,
+      rctx,
+      frame,
+      sourceTime,
+      nonBlockingToleranceSeconds,
+      true,
+    )
+    if (drewNearbyWorkerBitmap) {
+      rctx.markActivePreviewFallbackUsed?.()
+      return true
+    }
+
+    if (scrubbingCache && extractor) {
+      const dims = extractor.getDimensions()
+      const cachedEntry = scrubbingCache.getVideoFrameEntry(
+        item.id,
+        sourceTime,
+        nonBlockingToleranceSeconds,
+      )
+      if (
+        cachedEntry &&
+        drawTier2VideoFrame(
+          ctx,
+          cachedEntry.frame,
+          dims.width,
+          dims.height,
+          transform,
+          canvasSettings,
+          item.crop,
+          rctx.canvasPool,
+        )
+      ) {
+        rctx.markActivePreviewFallbackUsed?.()
+        return true
+      }
+    }
+  }
   const domVideoElementProvider = rctx.domVideoElementProvider
   // During transitions, frame can lie outside item's natural span (the
   // participant's renderSpan is extended to cover the transition zone), and
@@ -376,7 +430,17 @@ export async function renderVideoItem(
   }
   let domVideoDecision = resolvePreviewDomVideoDrawDecision(domVideoDecisionOptions)
   if (domVideoDecision.hasReadyDomVideo && !domVideoDecision.shouldDraw) {
-    domVideoDecision = await waitForPreviewDomVideoDrawDecision(domVideoDecisionOptions)
+    if (nonBlockingToleranceSeconds === undefined) {
+      domVideoDecision = await waitForPreviewDomVideoDrawDecision(domVideoDecisionOptions)
+    } else {
+      // Reverse shuttle must not serialize the render pump behind a browser
+      // seek. Mark a stale DOM frame unavailable so worker/proxy delivery can
+      // continue immediately while the coalesced seek settles.
+      domVideoDecision = {
+        ...domVideoDecision,
+        hasReadyDomVideo: false,
+      }
+    }
   }
   const hasDomVideo = domVideoDecision.hasReadyDomVideo
 
@@ -597,6 +661,14 @@ export async function renderVideoItem(
       }
       return true
     }
+  }
+
+  if (isPreviewMode && nonBlockingToleranceSeconds !== undefined) {
+    // The display keeps its last valid pixels while the cancellable worker
+    // lane decodes the newest reverse target. Never fall through to a
+    // main-thread MediaBunny seek for this transient transport mode.
+    holdPreviewFrontBuffer()
+    return false
   }
 
   const resolvedWorkerSource =

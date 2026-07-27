@@ -13,6 +13,8 @@ interface StoredChunk extends SoundTouchPreviewSourceChunk {
 export class QueuedStereoBufferSource {
   private chunks: StoredChunk[] = []
   private sequence = 0
+  private direction: -1 | 1 = 1
+  private reverseAnchorFrame = 0
   frameCount = 0
 
   append(chunk: SoundTouchPreviewSourceChunk): void {
@@ -53,7 +55,14 @@ export class QueuedStereoBufferSource {
   clear(): void {
     this.chunks = []
     this.sequence = 0
+    this.direction = 1
+    this.reverseAnchorFrame = 0
     this.frameCount = 0
+  }
+
+  setReadDirection(direction: -1 | 1, anchorFrame = 0): void {
+    this.direction = direction
+    this.reverseAnchorFrame = Math.max(0, Math.floor(anchorFrame))
   }
 
   extract(target: Float32Array, numFrames: number, sourcePosition: number = 0): number {
@@ -61,6 +70,10 @@ export class QueuedStereoBufferSource {
     const requestedFrames = Math.max(0, Math.floor(numFrames))
     if (requestedFrames === 0) {
       return 0
+    }
+
+    if (this.direction < 0) {
+      return this.extractReverse(target, requestedFrames, safeSourcePosition)
     }
 
     let copiedFrames = 0
@@ -88,6 +101,39 @@ export class QueuedStereoBufferSource {
 
       copiedFrames += framesToCopy
       cursorFrame += framesToCopy
+    }
+
+    return copiedFrames
+  }
+
+  private extractReverse(
+    target: Float32Array,
+    requestedFrames: number,
+    sourcePosition: number,
+  ): number {
+    let copiedFrames = 0
+    let cursorFrame = this.reverseAnchorFrame - sourcePosition
+    let outIndex = 0
+
+    while (copiedFrames < requestedFrames && cursorFrame >= 0) {
+      const chunk = this.findChunkContainingFrame(cursorFrame)
+      if (!chunk) {
+        break
+      }
+
+      const chunkOffset = cursorFrame - chunk.startFrame
+      const framesToCopy = Math.min(
+        requestedFrames - copiedFrames,
+        chunkOffset + 1,
+      )
+      for (let i = 0; i < framesToCopy; i += 1) {
+        const sourceIndex = chunkOffset - i
+        target[outIndex++] = chunk.leftChannel[sourceIndex] ?? 0
+        target[outIndex++] = chunk.rightChannel[sourceIndex] ?? 0
+      }
+
+      copiedFrames += framesToCopy
+      cursorFrame -= framesToCopy
     }
 
     return copiedFrames
