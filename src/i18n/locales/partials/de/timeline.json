@@ -270,7 +270,6 @@
       "noScenesDetected": "Keine Szenen Detected",
       "noScenesWithinBounds": "Keine Szenen innerhalb Grenzen",
       "noValidSplitPoints": "Keine gultig teilen Punkte",
-      "requiresWebGpu": "Benotigt Web GPU",
       "splitAtScenes": "teilen At Szenen"
     },
     "selectTrackToRemove": "Auswahlen Spur zu Entfernen",

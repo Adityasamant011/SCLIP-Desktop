@@ -431,11 +431,6 @@
       "reason": "unreviewed: carried over by the 2026-07-09 re-baseline; trace individually before deleting."
     },
     {
-      "path": "src/infrastructure/analysis/scene-detection.ts",
-      "exportName": "detectScenes",
-      "reason": "Dynamically imported by the scene detection loader."
-    },
-    {
       "path": "src/infrastructure/analysis/verification/registry.ts",
       "exportName": "DEFAULT_SCENE_VERIFICATION_PROVIDER_ID",
       "reason": "unreviewed: carried over by the 2026-07-09 re-baseline; trace individually before deleting."

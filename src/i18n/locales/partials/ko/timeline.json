@@ -270,7 +270,6 @@
       "noScenesDetected": "감지된 장면 없음",
       "noScenesWithinBounds": "범위 내 장면 없음",
       "noValidSplitPoints": "유효한 분할 지점 없음",
-      "requiresWebGpu": "WebGPU 필요",
       "splitAtScenes": "장면에서 분할"
     },
     "selectTrackToRemove": "제거할 트랙 선택",

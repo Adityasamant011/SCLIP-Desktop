@@ -270,7 +270,6 @@
       "noScenesDetected": "Nenhuma cena detectada",
       "noScenesWithinBounds": "Nenhuma cena dentro dos limites",
       "noValidSplitPoints": "Nenhum ponto de divisao valido",
-      "requiresWebGpu": "Requer WebGPU",
       "splitAtScenes": "Dividir nas cenas"
     },
     "selectTrackToRemove": "Selecione a faixa para remover",

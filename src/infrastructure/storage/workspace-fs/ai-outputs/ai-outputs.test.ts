@@ -71,8 +71,8 @@ describe('workspace-fs ai-outputs', () => {
       model: 'histogram',
       data: {
         method: 'histogram',
+        detectorVersion: 2,
         sampleIntervalMs: 250,
-        fps: 30,
         cuts: [],
       },
     })
@@ -96,8 +96,8 @@ describe('workspace-fs ai-outputs', () => {
       model: 'histogram',
       data: {
         method: 'histogram',
+        detectorVersion: 2,
         sampleIntervalMs: 250,
-        fps: 30,
         cuts: [],
       },
     })

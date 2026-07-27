@@ -94,18 +94,20 @@ export type CaptionsPayload = {
 }
 
 export interface SceneCutPayload {
-  frame: number
   time: number
-  /** Service-defined motion metadata (histogram distance, flow magnitude, etc.). */
-  motion: unknown
+  score: number
+  confidence: number
+  type: 'cut'
+  /** Detector-specific diagnostic metrics. */
+  metrics: unknown
   verified?: boolean
 }
 
 export interface ScenesPayload {
-  method: 'histogram' | 'optical-flow'
-  sampleIntervalMs: number
+  method: 'histogram' | 'adaptive'
+  detectorVersion: number
+  sampleIntervalMs?: number
   verificationModel?: string
-  fps: number
   cuts: SceneCutPayload[]
 }
 

@@ -132,7 +132,7 @@ Runs on-device in the browser — nothing is uploaded.
 
 - On-device transcription with the Parakeet engine (Whisper fallback) and generated caption text items
 - AI captioning with local vision-language providers and configurable sample cadence
-- Scene detection with histogram, optical-flow, and optional model verification workflows
+- Scene detection with fast histogram or frame-accurate adaptive content analysis and optional model verification
 - Scene Browser for searching captioned media and reusing detected moments
 - Local Kokoro text-to-speech voiceovers
 - Local MusicGen music generation with presets, progress, and cancellation

@@ -10,7 +10,7 @@
  * when the requested parameters match, and re-run when they don't.
  */
 
-import type { SceneCut } from '@/infrastructure/analysis/scene-detection'
+import type { SceneCut } from '@/infrastructure/analysis/scene-detection-types'
 import { createLogger } from '@/shared/logging/logger'
 
 import { writeAiOutput, deleteAiOutput } from './ai-outputs'
@@ -19,16 +19,16 @@ import type { ScenesPayload, SceneCutPayload } from './ai-outputs'
 const logger = createLogger('WorkspaceFS:Scenes')
 
 export interface SavedScenes {
-  method: 'histogram' | 'optical-flow'
-  sampleIntervalMs: number
+  method: 'histogram' | 'adaptive'
+  detectorVersion: number
+  sampleIntervalMs?: number
   verificationModel?: string
-  fps: number
   cuts: SceneCut[]
 }
 
 interface SaveScenesInput extends SavedScenes {
   mediaId: string
-  /** Stable provider id (e.g. `"scene-detect-histogram"`, `"scene-detect-optical-flow"`). */
+  /** Stable provider id (e.g. `"scene-detect-histogram"`, `"scene-detect-adaptive"`). */
   service: string
   /** Detector/model identifier — for histogram this is just `"histogram"`. */
   model: string
@@ -36,9 +36,11 @@ interface SaveScenesInput extends SavedScenes {
 
 function cutsToPayload(cuts: SceneCut[]): SceneCutPayload[] {
   return cuts.map((cut) => ({
-    frame: cut.frame,
     time: cut.time,
-    motion: cut.motion,
+    score: cut.score,
+    confidence: cut.confidence,
+    type: cut.type,
+    metrics: cut.metrics,
     verified: cut.verified,
   }))
 }
@@ -47,9 +49,9 @@ export async function saveScenes(input: SaveScenesInput): Promise<SavedScenes> {
   try {
     const payload: ScenesPayload = {
       method: input.method,
+      detectorVersion: input.detectorVersion,
       sampleIntervalMs: input.sampleIntervalMs,
       verificationModel: input.verificationModel,
-      fps: input.fps,
       cuts: cutsToPayload(input.cuts),
     }
     await writeAiOutput({
@@ -59,16 +61,17 @@ export async function saveScenes(input: SaveScenesInput): Promise<SavedScenes> {
       model: input.model,
       params: {
         method: input.method,
-        sampleIntervalMs: input.sampleIntervalMs,
+        detectorVersion: input.detectorVersion,
+        sampleIntervalMs: input.sampleIntervalMs ?? null,
         verificationModel: input.verificationModel ?? null,
       },
       data: payload,
     })
     return {
       method: input.method,
+      detectorVersion: input.detectorVersion,
       sampleIntervalMs: input.sampleIntervalMs,
       verificationModel: input.verificationModel,
-      fps: input.fps,
       cuts: input.cuts,
     }
   } catch (error) {

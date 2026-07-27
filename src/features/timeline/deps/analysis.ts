@@ -3,6 +3,10 @@ import {
   SCENE_VERIFICATION_MODEL_OPTIONS,
   type SceneVerificationModelId,
 } from '@/shared/utils/scene-verification-models'
+import {
+  SCENE_DETECTOR_VERSION,
+  type SceneDetectionMethod,
+} from '@/infrastructure/analysis/scene-detection-types'
 
 export const importSceneDetection = () => import('@/infrastructure/analysis/scene-detection')
 
@@ -18,3 +22,5 @@ export function getSceneVerificationModelOptions(): readonly {
 }
 
 export type VerificationModel = SceneVerificationModelId
+export { SCENE_DETECTOR_VERSION }
+export type { SceneDetectionMethod }

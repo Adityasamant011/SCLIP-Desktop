@@ -266,7 +266,6 @@
       "noScenesDetected": "Sahne algılanmadı",
       "noScenesWithinBounds": "Sınırlar içinde sahne yok",
       "noValidSplitPoints": "Geçerli bölme noktası yok",
-      "requiresWebGpu": "WebGPU gerektirir",
       "splitAtScenes": "Sahnelerde böl"
     },
     "selectTrackToRemove": "Kaldırılacak parçayı seçin",
