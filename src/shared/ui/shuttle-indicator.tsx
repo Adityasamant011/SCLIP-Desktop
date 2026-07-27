@@ -6,11 +6,7 @@ interface ShuttleIndicatorProps {
   className?: string
 }
 
-export function ShuttleIndicator({
-  active,
-  playbackRate,
-  className,
-}: ShuttleIndicatorProps) {
+export function ShuttleIndicator({ active, playbackRate, className }: ShuttleIndicatorProps) {
   if (!active || playbackRate === 0) {
     return null
   }

@@ -920,9 +920,7 @@ export function usePreviewRenderPump({
           if ('setDomVideoElementProvider' in renderer) {
             const playbackNow = usePlaybackStore.getState()
             renderer.setNonBlockingVideoFrameTolerance?.(
-              playbackNow.isPlaying && playbackNow.playbackRate < 0
-                ? 0.5
-                : undefined,
+              playbackNow.isPlaying && playbackNow.playbackRate < 0 ? 0.5 : undefined,
             )
             if (playbackNow.isPlaying && playbackNow.playbackRate >= 0) {
               // Only pin/clear the transition session when the rendered frame is
@@ -1193,7 +1191,7 @@ export function usePreviewRenderPump({
                 shouldPreserveHighFidelityBackwardPreview(fastScrubTargetFrame))
             if (
               !shouldShowPlaybackTransitionOverlay &&
-              !renderedPlaybackOverlay &&
+              !(forceFastScrubOverlay || renderedPlaybackOverlay) &&
               !isPausedOnTransitionFrame &&
               !shouldShowRenderedScrubOverlay
             ) {
@@ -1544,16 +1542,11 @@ export function usePreviewRenderPump({
       })
       const bySource = new Map<string, number[]>()
       for (const frame of plan.targetFrames) {
-        const frameSources = collectVisibleTrackVideoSourceTimesBySrc(
-          combinedTracks,
-          frame,
-          fps,
-          {
-            requireExplicitSourceFps: false,
-            resolveComposition: resolvePreseekComposition,
-            resolveItemSrc: resolvePreseekItemSrc,
-          },
-        )
+        const frameSources = collectVisibleTrackVideoSourceTimesBySrc(combinedTracks, frame, fps, {
+          requireExplicitSourceFps: false,
+          resolveComposition: resolvePreseekComposition,
+          resolveItemSrc: resolvePreseekItemSrc,
+        })
         for (const [src, timestamps] of frameSources) {
           const accumulated = bySource.get(src) ?? []
           accumulated.push(...timestamps)
@@ -1868,10 +1861,7 @@ export function usePreviewRenderPump({
         }
 
         const startPlaybackPump = () => {
-          if (
-            !scrubMountedRef.current ||
-            !usesRenderedPlaybackOverlay(usePlaybackStore.getState())
-          )
+          if (!scrubMountedRef.current || !usesRenderedPlaybackOverlay(usePlaybackStore.getState()))
             return
           if (prewarmItemIds.length === 0) {
             if (playbackRafId === null) {
@@ -2023,10 +2013,7 @@ export function usePreviewRenderPump({
           const el = transitionSessionPinnedElementsRef.current.get(clip.id)
           if (!el || el.dataset.transitionHold !== '1') continue
           const clipSpeed = clip.speed ?? 1
-          const mediaPlaybackRate = getBrowserMediaPlaybackRate(
-            clipSpeed,
-            state.playbackRate,
-          )
+          const mediaPlaybackRate = getBrowserMediaPlaybackRate(clipSpeed, state.playbackRate)
           const targetTime = getVideoItemSourceTimeSeconds(clip, state.currentFrame, fps)
           if (targetTime === null) continue
           if (state.playbackRate < 0) {
@@ -2077,10 +2064,7 @@ export function usePreviewRenderPump({
             const maxAdj = Math.max(0.03, mediaPlaybackRate * 0.06)
             el.playbackRate = Math.max(
               mediaPlaybackRate - maxAdj,
-              Math.min(
-                mediaPlaybackRate + maxAdj,
-                mediaPlaybackRate + correction,
-              ),
+              Math.min(mediaPlaybackRate + maxAdj, mediaPlaybackRate + correction),
             )
           }
         }
@@ -2318,7 +2302,8 @@ export function usePreviewRenderPump({
         state,
         prev,
         settlingReleasedScrubFrame,
-        forceFastScrubOverlay: renderedPlaybackActive || renderedPlaybackWasActive,
+        forceFastScrubOverlay:
+          forceFastScrubOverlay || renderedPlaybackActive || renderedPlaybackWasActive,
       })
       setActivePreviewRenderTarget(activePreviewPresentationTarget)
       if (!renderedPlaybackActive && shouldPreferPlayerForPreview(state.previewFrame)) {
@@ -2384,13 +2369,13 @@ export function usePreviewRenderPump({
           : null
       const targetFrame = resolveRenderPumpTargetFrame({
         state,
-        forceFastScrubOverlay: renderedPlaybackActive,
+        forceFastScrubOverlay: forceFastScrubOverlay || renderedPlaybackActive,
         isPausedInsideTransition,
         settlingReleasedScrubFrame: releasedScrubRenderFrame,
       })
       const prevTargetFrame = resolveRenderPumpTargetFrame({
         state: prev,
-        forceFastScrubOverlay: renderedPlaybackWasActive,
+        forceFastScrubOverlay: forceFastScrubOverlay || renderedPlaybackWasActive,
         isPausedInsideTransition: prevIsPausedInsideTransition,
         settlingReleasedScrubFrame: null,
       })
@@ -2658,8 +2643,7 @@ export function usePreviewRenderPump({
         playbackState.currentFrame,
         playbackState,
       )
-      const requiresRenderedPresentation =
-        forceFastScrubOverlay || pausedTransitionPresentation
+      const requiresRenderedPresentation = forceFastScrubOverlay || pausedTransitionPresentation
       const prefersDomGizmo =
         !pausedTransitionPresentation &&
         shouldPreferDomPlayerForGizmo(

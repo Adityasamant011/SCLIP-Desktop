@@ -352,4 +352,34 @@ describe('CustomDecoderAudio', () => {
     expect(document.querySelector('[data-testid="buffered"]')).toBeNull()
     expect(document.querySelector('[data-testid="pitch"]')).toBeInTheDocument()
   })
+
+  it('switches custom-codec audio to SoundTouch during forward shuttle', async () => {
+    audioDecodeMocks.getOrDecodeAudioSliceForPlayback.mockResolvedValue({
+      buffer: makeAudioBuffer(),
+      startTime: 0,
+      isComplete: false,
+    })
+    audioDecodeMocks.getOrDecodeAudio.mockReturnValue(new Promise<AudioBuffer>(() => {}))
+
+    const props = {
+      src: 'blob:opus-audio',
+      mediaId: 'media-opus',
+      itemId: 'item-opus',
+      durationInFrames: 120,
+      playbackRate: 1,
+    }
+    const { rerender } = render(<CustomDecoderAudio {...props} />)
+
+    expect(document.querySelector('[data-testid="buffered"]')).toBeInTheDocument()
+    expect(document.querySelector('[data-testid="pitch"]')).toBeNull()
+
+    clockRateMocks.current = 2
+    rerender(<CustomDecoderAudio {...props} volumeMultiplier={1.01} />)
+
+    await waitFor(() => {
+      expect(audioDecodeMocks.getOrDecodeAudioSliceForPlayback).toHaveBeenCalledTimes(1)
+    })
+    expect(document.querySelector('[data-testid="buffered"]')).toBeNull()
+    expect(document.querySelector('[data-testid="pitch"]')).toBeInTheDocument()
+  })
 })

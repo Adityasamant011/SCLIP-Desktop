@@ -41,7 +41,7 @@ import {
   usePlayer,
 } from '@/features/preview/deps/player-context'
 import { SourceComposition } from './source-composition'
-import { ShuttleIndicator } from './shuttle-indicator'
+import { ShuttleIndicator } from '@/shared/ui/shuttle-indicator'
 import { resolveMediaUrl } from '../utils/media-resolver'
 import {
   clampDraggedSourceInPoint,
@@ -662,17 +662,13 @@ function SourcePlaybackControls({
       isPlaying: () => player.isPlaying(),
       shuttleForward: () => {
         shuttleActiveRef.current = true
-        const nextRate = player.isPlaying()
-          ? getNextShuttleRate(player.getPlaybackRate(), 1)
-          : 1
+        const nextRate = player.isPlaying() ? getNextShuttleRate(player.getPlaybackRate(), 1) : 1
         player.setPlaybackRate(nextRate)
         player.play()
       },
       shuttleReverse: () => {
         shuttleActiveRef.current = true
-        const nextRate = player.isPlaying()
-          ? getNextShuttleRate(player.getPlaybackRate(), -1)
-          : -1
+        const nextRate = player.isPlaying() ? getNextShuttleRate(player.getPlaybackRate(), -1) : -1
         player.setPlaybackRate(nextRate)
         player.play()
       },

@@ -96,6 +96,7 @@ vi.mock('@/runtime/composition-runtime/deps/player', async () => {
     interpolate,
     useBridgedCurrentFrame: () => 0,
     useBridgedIsPlaying: () => false,
+    useClockPlaybackRate: () => 1,
   }
 })
 

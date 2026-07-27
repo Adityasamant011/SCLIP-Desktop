@@ -183,13 +183,7 @@ const CustomDecoderPitchPreservedAudio: React.FC<CustomDecoderAudioProps> = ({
   crossfadeFadeOut,
   volumeMultiplier = 1,
 }) => {
-  const {
-    frame,
-    fps,
-    playing,
-    transportPlaybackRate,
-    isPreviewScrubbing,
-  } = useAudioPlaybackState({
+  const { frame, fps, playing, transportPlaybackRate, isPreviewScrubbing } = useAudioPlaybackState({
     itemId,
     liveGainItemIds,
     volume,
@@ -292,9 +286,7 @@ const CustomDecoderPitchPreservedAudio: React.FC<CustomDecoderAudioProps> = ({
       minReadySeconds: PARTIAL_WAV_READY_SECONDS,
       waitTimeoutMs: PARTIAL_WAV_WAIT_TIMEOUT_MS,
       targetTimeSeconds: clipStartTime,
-      ...(isReverseShuttle
-        ? { preRollSeconds: REVERSE_SHUTTLE_PREROLL_SECONDS }
-        : {}),
+      ...(isReverseShuttle ? { preRollSeconds: REVERSE_SHUTTLE_PREROLL_SECONDS } : {}),
     })
       .then((slice) => {
         if (cancelled) return
@@ -381,9 +373,7 @@ const CustomDecoderPitchPreservedAudio: React.FC<CustomDecoderAudioProps> = ({
       minReadySeconds: PARTIAL_WAV_EXTENSION_READY_SECONDS,
       waitTimeoutMs: PARTIAL_WAV_WAIT_TIMEOUT_MS,
       targetTimeSeconds: Math.max(0, targetTime),
-      ...(isReverseShuttle
-        ? { preRollSeconds: REVERSE_SHUTTLE_PREROLL_SECONDS }
-        : {}),
+      ...(isReverseShuttle ? { preRollSeconds: REVERSE_SHUTTLE_PREROLL_SECONDS } : {}),
     })
       .then((slice) => {
         if (cancelled) return
@@ -542,7 +532,8 @@ const CustomDecoderPitchPreservedAudio: React.FC<CustomDecoderAudioProps> = ({
  */
 export const CustomDecoderAudio: React.FC<CustomDecoderAudioProps> = React.memo((props) => {
   const playbackRate = props.playbackRate ?? 1
-  const isReverseShuttle = useClockPlaybackRate() < 0
+  const transportPlaybackRate = useClockPlaybackRate()
+  const isShuttleRate = Math.abs(transportPlaybackRate - 1) > 0.0001
   const itemPreview = useGizmoStore(
     useCallback((state) => state.preview?.[props.itemId], [props.itemId]),
   )
@@ -559,7 +550,7 @@ export const CustomDecoderAudio: React.FC<CustomDecoderAudioProps> = React.memo(
   const hasActivePitchPreview = hasAudioPitchOverride(itemPreview?.properties)
   const shouldUseBufferedPlayback =
     props.isReversed !== true &&
-    !isReverseShuttle &&
+    !isShuttleRate &&
     Math.abs(playbackRate - 1) <= 0.0001 &&
     !hasActivePitchPreview &&
     !isAudioPitchShiftActive(resolvedPitchShiftSemitones)

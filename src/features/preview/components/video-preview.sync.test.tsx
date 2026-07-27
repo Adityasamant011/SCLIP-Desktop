@@ -313,6 +313,7 @@ vi.mock('@/features/preview/deps/player-core', async () => {
       pause: () => void
       getCurrentFrame: () => number
       isPlaying: () => boolean
+      setPlaybackRate: (rate: number) => void
     },
     React.PropsWithChildren<
       {
@@ -367,6 +368,7 @@ vi.mock('@/features/preview/deps/player-core', async () => {
         },
         getCurrentFrame: () => mockedPlayerFrame,
         isPlaying: () => mockedPlayerIsPlaying,
+        setPlaybackRate: () => {},
       }),
       [],
     )

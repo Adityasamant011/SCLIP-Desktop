@@ -5,7 +5,6 @@ import {
   PlaybackControls,
   AlignmentToolbar,
   TimecodeDisplay,
-  ShuttleIndicator,
   PreviewZoomControls,
   importSourceMonitor,
   importInlineSourcePreview,
@@ -22,6 +21,7 @@ import { Button } from '@/components/ui/button'
 import { ErrorBoundary } from '@/app/error-boundary'
 import { useTranslation } from 'react-i18next'
 import { usePlaybackStore } from '@/shared/state/playback'
+import { ShuttleIndicator } from '@/shared/ui/shuttle-indicator'
 
 interface PreviewAreaProps {
   project: {
