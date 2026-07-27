@@ -21,6 +21,8 @@ describe('TimelinePlayhead', () => {
       currentFrameEpoch: 0,
       isPlaying: false,
       playbackRate: 1,
+      transportMode: 'normal',
+      playbackScrubResumeTransport: null,
       loop: false,
       volume: 1,
       muted: false,
@@ -117,7 +119,70 @@ describe('TimelinePlayhead', () => {
     })
   })
 
+  it('temporarily pauses active playback and resumes its transport from the released frame', async () => {
+    usePlaybackStore.setState({
+      isPlaying: true,
+      playbackRate: 4,
+      transportMode: 'shuttle',
+    })
+    const { container } = render(
+      <div className="timeline-ruler">
+        <TimelinePlayhead inRuler maxFrame={300} />
+      </div>,
+    )
+    const ruler = container.querySelector('.timeline-ruler') as HTMLDivElement
+    ruler.getBoundingClientRect = () => ({
+      x: 0,
+      y: 0,
+      left: 0,
+      top: 0,
+      right: 600,
+      bottom: 40,
+      width: 600,
+      height: 40,
+      toJSON: () => ({}),
+    })
+    const hitArea = container.querySelector('[data-playhead-handle]') as HTMLDivElement
+
+    fireEvent.mouseDown(hitArea, { clientX: 24, clientY: 8, button: 0 })
+
+    expect(usePlaybackStore.getState()).toMatchObject({
+      isPlaying: false,
+      playbackRate: 1,
+      transportMode: 'normal',
+      playbackScrubResumeTransport: {
+        playbackRate: 4,
+        transportMode: 'shuttle',
+      },
+    })
+    expect(mainTimelineScrubActiveRef.current).toBe(true)
+
+    fireEvent.mouseMove(document, { clientX: 120, clientY: 8 })
+    fireEvent.mouseUp(document, { clientX: 120, clientY: 8 })
+
+    expect(usePlaybackStore.getState()).toMatchObject({
+      currentFrame: 36,
+      isPlaying: false,
+    })
+
+    await waitFor(() =>
+      expect(usePlaybackStore.getState()).toMatchObject({
+        currentFrame: 36,
+        isPlaying: true,
+        playbackRate: 4,
+        transportMode: 'shuttle',
+        playbackScrubResumeTransport: null,
+      }),
+    )
+    expect(mainTimelineScrubActiveRef.current).toBe(false)
+  })
+
   it('releases scrub ownership and cancels the RAF when the window loses focus', async () => {
+    usePlaybackStore.setState({
+      isPlaying: true,
+      playbackRate: -2,
+      transportMode: 'shuttle',
+    })
     const frameCallbacks: FrameRequestCallback[] = []
     const cancelAnimationFrameSpy = vi.spyOn(window, 'cancelAnimationFrame')
     vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
@@ -154,6 +219,8 @@ describe('TimelinePlayhead', () => {
     expect(timelineSkimmerScrubSignal.current).toBe(false)
     expect(cancelAnimationFrameSpy).toHaveBeenCalledWith(1)
     expect(usePlaybackStore.getState().previewFrame).toBeNull()
+    expect(usePlaybackStore.getState().isPlaying).toBe(false)
+    expect(usePlaybackStore.getState().playbackScrubResumeTransport).toBeNull()
     await waitFor(() => expect(document.body.style.cursor).toBe(''))
   })
 

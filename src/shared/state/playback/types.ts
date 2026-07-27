@@ -23,6 +23,10 @@ export interface CaptureOptions {
 
 export type PreviewQuality = 1 | 0.5 | 0.33 | 0.25
 export type PlaybackTransportMode = 'normal' | 'shuttle'
+export interface PlaybackScrubResumeTransport {
+  playbackRate: number
+  transportMode: PlaybackTransportMode
+}
 
 export interface PlaybackState {
   currentFrame: number
@@ -32,6 +36,8 @@ export interface PlaybackState {
   playbackRate: number
   /** Transient transport intent used to distinguish L at 1x from normal playback. */
   transportMode: PlaybackTransportMode
+  /** Transport to restore after a playhead drag that began during playback. */
+  playbackScrubResumeTransport: PlaybackScrubResumeTransport | null
   loop: boolean
   /**
    * Per-device monitor gain (linear, 1 = unity). Persisted to localStorage,
@@ -78,6 +84,9 @@ export interface PlaybackActions {
   setScrubFrame: (frame: number, itemId?: string | null) => void
   /** Commit a transient scrub and clear its preview/freeze in one store write. */
   finishScrub: (frame: number) => void
+  beginPlaybackScrub: () => void
+  resumePlaybackAfterScrub: () => void
+  cancelPlaybackScrubResume: () => void
   play: () => void
   pause: () => void
   togglePlayPause: () => void

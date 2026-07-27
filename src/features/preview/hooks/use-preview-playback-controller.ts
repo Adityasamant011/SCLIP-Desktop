@@ -144,13 +144,14 @@ export function usePreviewPlaybackController({
   )
 
   const handlePlayStateChange = useCallback((playing: boolean) => {
+    const playback = usePlaybackStore.getState()
+    if (playback.playbackScrubResumeTransport !== null) return
     if (playing) {
-      const playback = usePlaybackStore.getState()
       if (!playback.isPlaying) {
         playback.play()
       }
-    } else {
-      usePlaybackStore.getState().pause()
+    } else if (playback.isPlaying) {
+      playback.pause()
     }
   }, [])
 

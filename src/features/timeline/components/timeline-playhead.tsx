@@ -133,6 +133,7 @@ export function TimelinePlayhead({
   const scrubScrollContainerRef = useRef<HTMLDivElement | null>(null)
   const scrubCoordinateSurfaceRef = useRef<HTMLDivElement | null>(null)
   const scrubPlayheadElementsRef = useRef<HTMLElement[]>([])
+  const resumePlaybackRafRef = useRef<number | null>(null)
   const skimmerScrubOwnerRef = useRef({})
   const scrubThrottleStateRef = useRef(
     createScrubThrottleState({
@@ -159,6 +160,15 @@ export function TimelinePlayhead({
   useEffect(() => {
     isDraggingRef.current = isDragging
   }, [isDragging])
+
+  useEffect(() => {
+    return () => {
+      if (resumePlaybackRafRef.current !== null) {
+        cancelAnimationFrame(resumePlaybackRafRef.current)
+        usePlaybackStore.getState().cancelPlaybackScrubResume()
+      }
+    }
+  }, [])
 
   // Subscribe to playback frame changes and update position directly.
   // During playhead drags, use the same atomic scrub state as the main ruler
@@ -237,6 +247,15 @@ export function TimelinePlayhead({
       e.stopPropagation()
       // Seeking is disabled during a voiceover take (see timeline-markers).
       if (isMicRecordingActive(useMicRecordingStore.getState().status)) return
+      const playbackState = usePlaybackStore.getState()
+      if (resumePlaybackRafRef.current !== null) {
+        cancelAnimationFrame(resumePlaybackRafRef.current)
+        resumePlaybackRafRef.current = null
+        playbackState.cancelPlaybackScrubResume()
+      }
+      // Match ruler scrubbing: grabbing the playhead takes transport ownership
+      // immediately so the playback clock cannot overwrite the drag.
+      playbackState.beginPlaybackScrub()
       const { scrollContainer, coordinateSurface } = getPlayheadDragSurfaces({
         playhead: playheadRef.current,
         explicitCoordinateSurface: coordinateSurfaceRef?.current ?? null,
@@ -246,7 +265,7 @@ export function TimelinePlayhead({
         coordinateSurface,
         scrollContainer,
         e.clientX,
-        frameToPixelsRef.current(usePlaybackStore.getState().currentFrame),
+        frameToPixelsRef.current(playbackState.currentFrame),
       )
       scrubClientXRef.current = e.clientX
       scrubAnimationTimeRef.current = null
@@ -259,7 +278,7 @@ export function TimelinePlayhead({
           : []
       scrubThrottleStateRef.current = createScrubThrottleState({
         pointerX,
-        frame: usePlaybackStore.getState().currentFrame,
+        frame: playbackState.currentFrame,
         nowMs: performance.now(),
       })
       isDraggingRef.current = true
@@ -365,7 +384,7 @@ export function TimelinePlayhead({
       scrubClientXRef.current = e.clientX
     }
 
-    const handleMouseUp = () => {
+    const finishDrag = (resumePlayback: boolean) => {
       // Cancel any pending RAF before clearing preview to prevent resurrection
       if (rafIdRef.current !== null) {
         cancelAnimationFrame(rafIdRef.current)
@@ -397,17 +416,31 @@ export function TimelinePlayhead({
       mainTimelineScrubActiveRef.current = false
       endTimelineSkimmerScrub(skimmerScrubOwner)
       setIsDragging(false)
+
+      if (resumePlayback) {
+        // Give the paused seek one paint boundary to settle before restarting.
+        // Resuming in the mouseup event lets React batch pause + resume and the
+        // previous playback clock can overwrite the released frame.
+        resumePlaybackRafRef.current = requestAnimationFrame(() => {
+          resumePlaybackRafRef.current = null
+          usePlaybackStore.getState().resumePlaybackAfterScrub()
+        })
+      } else {
+        usePlaybackStore.getState().cancelPlaybackScrubResume()
+      }
     }
+    const handleMouseUp = () => finishDrag(true)
+    const handleWindowBlur = () => finishDrag(false)
 
     document.addEventListener('mousemove', handleMouseMove)
     document.addEventListener('mouseup', handleMouseUp)
-    window.addEventListener('blur', handleMouseUp)
+    window.addEventListener('blur', handleWindowBlur)
     rafIdRef.current = requestAnimationFrame(runScrubLoop)
 
     return () => {
       document.removeEventListener('mousemove', handleMouseMove)
       document.removeEventListener('mouseup', handleMouseUp)
-      window.removeEventListener('blur', handleMouseUp)
+      window.removeEventListener('blur', handleWindowBlur)
       // Restore original cursor
       document.body.style.cursor = originalCursor
       // Cancel any pending RAF to prevent memory leaks
@@ -419,7 +452,7 @@ export function TimelinePlayhead({
       mainTimelineScrubActiveRef.current = false
       endTimelineSkimmerScrub(skimmerScrubOwner)
     }
-  }, [isDragging]) // Stable dependencies - no stale closures
+  }, [isDragging])
 
   return (
     <div
