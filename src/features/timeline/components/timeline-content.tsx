@@ -27,6 +27,8 @@ import {
   SCROLL_SMOOTHING,
   SCROLL_GESTURE_TIMEOUT,
   ZOOM_FRICTION,
+  ZOOM_MAX,
+  ZOOM_MIN,
   ZOOM_MIN_VELOCITY,
   TIMELINE_RULER_HEIGHT,
   TRACK_SECTION_DIVIDER_HEIGHT,
@@ -77,6 +79,8 @@ const ACTIVE_TIMELINE_GESTURE_CURSOR_CLASSES = [
   'timeline-cursor-slide-smart',
   'timeline-cursor-gauge',
 ] as const
+
+const FINE_ZOOM_FACTOR = 1.1
 
 type TrackScrollbarSection = 'video' | 'audio' | 'single'
 
@@ -1588,7 +1592,7 @@ export const TimelineContent = memo(function TimelineContent({
   const applyZoomWithAnchor = useCallback(
     (newZoomLevel: number, anchor: TimelineZoomAnchor) => {
       const currentZoom = queuedZoomLevelRef.current ?? useZoomStore.getState().level
-      const clampedZoom = Math.max(0.01, Math.min(2, newZoomLevel))
+      const clampedZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, newZoomLevel))
       if (clampedZoom === currentZoom) return
 
       const nextScrollLeft = getAnchoredZoomScrollLeft({
@@ -1655,12 +1659,14 @@ export const TimelineContent = memo(function TimelineContent({
   )
 
   const handleZoomIn = useCallback(() => {
-    const newZoomLevel = Math.min(2, useZoomStore.getState().level + 0.1)
+    const currentZoomLevel = queuedZoomLevelRef.current ?? useZoomStore.getState().level
+    const newZoomLevel = Math.min(ZOOM_MAX, currentZoomLevel * FINE_ZOOM_FACTOR)
     applyZoomWithPlayheadAnchor(newZoomLevel)
   }, [applyZoomWithPlayheadAnchor])
 
   const handleZoomOut = useCallback(() => {
-    const newZoomLevel = Math.max(0.01, useZoomStore.getState().level - 0.1)
+    const currentZoomLevel = queuedZoomLevelRef.current ?? useZoomStore.getState().level
+    const newZoomLevel = Math.max(ZOOM_MIN, currentZoomLevel / FINE_ZOOM_FACTOR)
     applyZoomWithPlayheadAnchor(newZoomLevel)
   }, [applyZoomWithPlayheadAnchor])
 

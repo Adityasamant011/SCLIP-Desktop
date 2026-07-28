@@ -1277,6 +1277,7 @@ export const TimelineItem = memo(function TimelineItem({
       <ClipFloatingLayer
         transformRef={transformRef}
         ghostRef={ghostRef}
+        showFollowerDragGhost={isAltDrag}
         visualLeftFrame={visualLeftFrame}
         visualWidthFrames={visualWidthFrames}
         dragOffset={dragOffset}

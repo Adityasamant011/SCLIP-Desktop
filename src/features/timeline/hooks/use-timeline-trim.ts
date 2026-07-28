@@ -91,7 +91,7 @@ export function useTimelineTrim(
 
   // Use snap calculator - pass item.id to exclude self from magnetic snaps
   // Only use magnetic snap targets (item edges), not grid lines
-  const { getMagneticSnapTargets, getSnapThresholdFrames, snapEnabled } = useSnapCalculator(
+  const { getMagneticSnapTargets, getSnapThresholdFrames, isSnapEnabled } = useSnapCalculator(
     timelineDuration,
     item.id,
   )
@@ -123,6 +123,7 @@ export function useTimelineTrim(
 
   // Track previous snap target to avoid unnecessary store updates
   const prevSnapTargetRef = useRef<{ frame: number; type: string } | null>(null)
+  const magneticSnapTargetsRef = useRef<SnapTarget[]>([])
 
   /**
    * Find nearest snap target for a given frame position
@@ -133,13 +134,11 @@ export function useTimelineTrim(
       targetFrame: number,
       excludeItemIds?: Set<string>,
     ): { snappedFrame: number; snapTarget: SnapTarget | null } => {
-      if (!snapEnabled) {
+      if (!isSnapEnabled()) {
         return { snappedFrame: targetFrame, snapTarget: null }
       }
 
-      // Read fresh targets from store — the memoized magneticSnapTargets can be
-      // stale after previous edits that shifted items (e.g. ripple edit).
-      const targets = getMagneticSnapTargets()
+      const targets = magneticSnapTargetsRef.current
       if (targets.length === 0) {
         return { snappedFrame: targetFrame, snapTarget: null }
       }
@@ -162,7 +161,7 @@ export function useTimelineTrim(
 
       return { snappedFrame: targetFrame, snapTarget: null }
     },
-    [snapEnabled, getMagneticSnapTargets, getSnapThresholdFrames],
+    [getSnapThresholdFrames, isSnapEnabled],
   )
 
   // Mouse move handler - only updates local state for visual feedback
@@ -716,6 +715,7 @@ export function useTimelineTrim(
       setActiveSnapTarget(null)
       setDragState(null)
       prevSnapTargetRef.current = null
+      magneticSnapTargetsRef.current = []
 
       // Reset modifier key refs
       altKeyRef.current = false
@@ -775,6 +775,7 @@ export function useTimelineTrim(
         useRollingEditPreviewStore.getState().clearPreview()
         useTransitionBreakPreviewStore.getState().clearPreview()
         useLinkedEditPreviewStore.getState().clear()
+        magneticSnapTargetsRef.current = []
       }
     }
   }, [trimState.isTrimming, handleMouseMove, handleMouseUp])
@@ -824,6 +825,7 @@ export function useTimelineTrim(
         }
       }
 
+      magneticSnapTargetsRef.current = getMagneticSnapTargets()
       setDragState({
         isDragging: true,
         draggedItemIds: [item.id],
@@ -871,6 +873,7 @@ export function useTimelineTrim(
       item.durationInFrames,
       trackLocked,
       getItemFromStore,
+      getMagneticSnapTargets,
       item.id,
       setActiveSnapTarget,
       setDragState,

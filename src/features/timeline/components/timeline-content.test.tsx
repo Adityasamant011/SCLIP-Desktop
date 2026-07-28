@@ -11,6 +11,7 @@ import type { TimelineTrack, VideoItem } from '@/types/timeline'
 import { _resetViewportThrottle, useTimelineViewportStore } from '../stores/timeline-viewport-store'
 import { useTimelineStore } from '../stores/timeline-store'
 import { _resetZoomStoreForTest, useZoomStore } from '../stores/zoom-store'
+import { ZOOM_MAX, ZOOM_MIN } from '../constants'
 import { TimelineContent } from './timeline-content'
 import { TIMELINE_LIVE_SCROLL_EVENT } from '@/shared/timeline/live-scroll-sync'
 
@@ -272,6 +273,94 @@ describe('TimelineContent playback selection behavior', () => {
 
     expect(perfMarkMocks.mark).not.toHaveBeenCalledWith('TimelineContent')
     expect(onMetricsChange.mock.lastCall?.[0].timelineWidth).toBeGreaterThan(initialTimelineWidth)
+  })
+
+  it('steps zoom buttons multiplicatively while preserving the playhead anchor', () => {
+    let zoomHandlers:
+      | {
+          handleZoomIn: () => void
+          handleZoomOut: () => void
+        }
+      | undefined
+
+    useZoomStore.getState().setZoomLevelSynchronized(ZOOM_MIN)
+    usePlaybackStore.getState().setCurrentFrame(150)
+
+    const { container } = render(
+      <TimelineContent
+        duration={10}
+        tracks={[VIDEO_TRACK]}
+        onZoomHandlersReady={(handlers) => {
+          zoomHandlers = handlers
+        }}
+      />,
+    )
+    const scrollContainer = container.querySelector('[data-timeline-scroll-container]')
+    if (!(scrollContainer instanceof HTMLDivElement) || !zoomHandlers) {
+      throw new Error('Expected timeline scroll container and zoom handlers')
+    }
+    scrollContainer.scrollLeft = 2
+
+    const frameCallbacks: FrameRequestCallback[] = []
+    const animationFrameSpy = vi
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((callback) => {
+        frameCallbacks.push(callback)
+        return frameCallbacks.length
+      })
+
+    act(() => zoomHandlers?.handleZoomIn())
+    expect(frameCallbacks).toHaveLength(1)
+    act(() => frameCallbacks.shift()?.(performance.now()))
+
+    expect(useZoomStore.getState().level).toBeCloseTo(0.011)
+    expect(useZoomStore.getState().level).not.toBeCloseTo(0.11)
+    expect(scrollContainer.scrollLeft).toBeCloseTo(2.5)
+
+    act(() => zoomHandlers?.handleZoomOut())
+    expect(frameCallbacks).toHaveLength(1)
+    act(() => frameCallbacks.shift()?.(performance.now()))
+
+    expect(useZoomStore.getState().level).toBeCloseTo(ZOOM_MIN)
+    expect(scrollContainer.scrollLeft).toBeCloseTo(2)
+
+    animationFrameSpy.mockRestore()
+  })
+
+  it('keeps zoom buttons within the production zoom limits', () => {
+    let zoomHandlers:
+      | {
+          handleZoomIn: () => void
+          handleZoomOut: () => void
+        }
+      | undefined
+
+    render(
+      <TimelineContent
+        duration={10}
+        tracks={[VIDEO_TRACK]}
+        onZoomHandlersReady={(handlers) => {
+          zoomHandlers = handlers
+        }}
+      />,
+    )
+    if (!zoomHandlers) {
+      throw new Error('Expected zoom handlers')
+    }
+
+    const animationFrameSpy = vi.spyOn(window, 'requestAnimationFrame')
+
+    act(() => useZoomStore.getState().setZoomLevelSynchronized(ZOOM_MIN))
+    act(() => zoomHandlers?.handleZoomOut())
+    expect(useZoomStore.getState().level).toBe(ZOOM_MIN)
+    expect(animationFrameSpy).not.toHaveBeenCalled()
+
+    act(() => useZoomStore.getState().setZoomLevelSynchronized(ZOOM_MAX))
+    act(() => zoomHandlers?.handleZoomIn())
+    expect(useZoomStore.getState().level).toBe(ZOOM_MAX)
+    expect(animationFrameSpy).not.toHaveBeenCalled()
+
+    animationFrameSpy.mockRestore()
   })
 
   it('applies live zoom and its cursor-anchor scroll in the same animation frame', () => {

@@ -3,6 +3,7 @@ import { useShallow } from 'zustand/react/shallow'
 import type { MutableRefObject, RefObject } from 'react'
 import type { TimelineItem } from '@/types/timeline'
 import { useItemsStore } from '../../stores/items-store'
+import { getTrackItemRelations } from '../../stores/items-store-indexes'
 import { useSelectionStore } from '@/shared/state/selection'
 import {
   dragOffsetRef,
@@ -93,27 +94,9 @@ export function useDragVisualState({
   const dragWasActiveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const neighboringJoinIds = useItemsStore(
-    useShallow((state) => {
-      const trackItems = state.itemsByTrackId[item.trackId] ?? []
-      let leftId: string | null = null
-      let rightId: string | null = null
-      const itemStart = item.from
-      const itemEnd = item.from + item.durationInFrames
-
-      for (const other of trackItems) {
-        if (other.id === item.id) continue
-
-        if (other.from + other.durationInFrames === itemStart) {
-          leftId = other.id
-        } else if (other.from === itemEnd) {
-          rightId = other.id
-        }
-
-        if (leftId && rightId) break
-      }
-
-      return { leftId, rightId }
-    }),
+    useShallow(
+      (state) => getTrackItemRelations(state.itemsByTrackId[item.trackId], item).dragNeighborIds,
+    ),
   )
 
   const dragParticipation = useSelectionStore((state) =>

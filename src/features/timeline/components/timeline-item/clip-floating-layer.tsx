@@ -17,6 +17,7 @@ import type { CaptionDialogState } from './use-caption-dialog-state'
 interface ClipFloatingLayerProps {
   transformRef: RefObject<HTMLDivElement | null>
   ghostRef: RefObject<HTMLDivElement | null>
+  showFollowerDragGhost: boolean
   visualLeftFrame: number
   visualWidthFrames: number
   dragOffset: { x: number; y: number }
@@ -48,6 +49,7 @@ interface ClipFloatingLayerProps {
 export function ClipFloatingLayer({
   transformRef,
   ghostRef,
+  showFollowerDragGhost,
   visualLeftFrame,
   visualWidthFrames,
   dragOffset,
@@ -112,7 +114,7 @@ export function ClipFloatingLayer({
       <TransitionDropGhost ghost={transitionDropGhost} />
 
       {/* Alt-drag ghosts */}
-      <FollowerDragGhost ref={ghostRef} left={left} width={width} />
+      {showFollowerDragGhost && <FollowerDragGhost ref={ghostRef} left={left} width={width} />}
 
       <DragBlockedTooltip hint={pointerHint} />
       <TranscribeDialogController

@@ -1,5 +1,5 @@
 import type React from 'react'
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import type { TimelineItem, TimelineTrack } from '@/types/timeline'
 import type { DragState, UseTimelineDragReturn, SnapTarget } from '../types/drag'
 import { useTimelineStore } from '../stores/timeline-store'
@@ -469,9 +469,6 @@ export function useTimelineDrag(
 
   // Selection store - use granular selectors to prevent re-renders
   // NOTE: dragState subscription removed - activeSnapTarget is read directly in timeline-content.tsx
-  const selectedSnapExclusionIds = useSelectionStore(
-    useCallback((s) => (s.selectedItemIdSet.has(item.id) ? s.selectedItemIds : null), [item.id]),
-  )
   const selectItems = useSelectionStore((s) => s.selectItems)
   const setDragState = useSelectionStore((s) => s.setDragState)
   const setActiveSnapTarget = useSelectionStore((s) => s.setActiveSnapTarget)
@@ -515,24 +512,11 @@ export function useTimelineDrag(
   const pixelsToFramePrecise = pixelsToFramePreciseNow
   const frameToPixels = frameToPixelsNow
 
-  // Get current alt-drag state from selection store for snap exclusion logic
-  const isAltDragActive = useSelectionStore((s) => s.dragState?.isAltDrag ?? false)
-
-  // Snap calculator - only use magnetic snap targets (item edges), not grid lines
-  // Pass all selected item IDs to exclude from snap targets (for group selection)
-  // During alt-drag (duplicate), DON'T exclude original items - allow snapping to them
-  const excludeFromSnap = useMemo(() => {
-    // During alt-drag, include original items as snap targets
-    if (isAltDragActive) {
-      return null // Don't exclude any items
-    }
-    // Normal drag: exclude dragging items from snap targets
-    return selectedSnapExclusionIds ?? item.id
-  }, [selectedSnapExclusionIds, item.id, isAltDragActive])
-
-  const { magneticSnapTargets, getSnapThresholdFrames, snapEnabled } = useSnapCalculator(
+  // Build magnetic targets only after the drag threshold is crossed. The
+  // gesture's actual cohort is excluded for moves; Alt-drag keeps originals.
+  const { getMagneticSnapTargets, getSnapThresholdFrames, isSnapEnabled } = useSnapCalculator(
     timelineDuration,
-    excludeFromSnap,
+    item.id,
     { includeTransitionMidpoints: false },
   )
 
@@ -549,12 +533,9 @@ export function useTimelineDrag(
   // Helper to get items on-demand (avoids subscription that would cause all items to re-render)
   const getItems = useCallback(() => useTimelineStore.getState().items, [])
   // Update refs synchronously (not in useEffect) so they're always current
-  const magneticSnapTargetsRef = useRef(magneticSnapTargets)
-  magneticSnapTargetsRef.current = magneticSnapTargets
+  const magneticSnapTargetsRef = useRef<SnapTarget[]>([])
   const getSnapThresholdFramesRef = useRef(getSnapThresholdFrames)
   getSnapThresholdFramesRef.current = getSnapThresholdFrames
-  const snapEnabledRef = useRef(snapEnabled)
-  snapEnabledRef.current = snapEnabled
 
   // Update refs when dependencies change
   useEffect(() => {
@@ -711,7 +692,7 @@ export function useTimelineDrag(
     ): { snappedFrame: number; snapTarget: SnapTarget | null } => {
       const targets = magneticSnapTargetsRef.current
       const threshold = getSnapThresholdFramesRef.current()
-      const enabled = snapEnabledRef.current
+      const enabled = isSnapEnabled()
 
       if (!enabled || targets.length === 0) {
         return { snappedFrame: targetStartFrame, snapTarget: null }
@@ -754,7 +735,7 @@ export function useTimelineDrag(
 
       return { snappedFrame: targetStartFrame, snapTarget: null }
     },
-    [],
+    [isSnapEnabled],
   )
 
   /**
@@ -848,6 +829,7 @@ export function useTimelineDrag(
 
           // Broadcast drag state to all selected items
           const draggedIds = dragStateRef.current?.draggedItems.map((item) => item.id) || []
+          magneticSnapTargetsRef.current = getMagneticSnapTargets(e.altKey ? null : draggedIds)
           if (e.altKey) {
             startLargeAltDragCanvas(draggedIds)
           }
@@ -870,6 +852,7 @@ export function useTimelineDrag(
       const cancelDrag = () => {
         // Clean up if mouse released before threshold
         dragStateRef.current = null
+        magneticSnapTargetsRef.current = []
         dragVisualTopByTrackIdRef.current.clear()
         dragPreviewOffsetByItemRef.current = {}
         clearLargeAltDragCanvas()
@@ -892,6 +875,7 @@ export function useTimelineDrag(
       setActiveSnapTarget,
       setDragState,
       getItems,
+      getMagneticSnapTargets,
     ],
   )
 
@@ -911,8 +895,10 @@ export function useTimelineDrag(
       const altKeyChanged = isAltDragRef.current !== e.altKey
       isAltDragRef.current = e.altKey
       if (altKeyChanged) {
+        const draggedIds = dragStateRef.current.draggedItems.map((dragged) => dragged.id)
+        magneticSnapTargetsRef.current = getMagneticSnapTargets(e.altKey ? null : draggedIds)
         if (e.altKey) {
-          startLargeAltDragCanvas(dragStateRef.current.draggedItems.map((dragged) => dragged.id))
+          startLargeAltDragCanvas(draggedIds)
         } else {
           clearLargeAltDragCanvas()
         }
@@ -1368,6 +1354,7 @@ export function useTimelineDrag(
             clearLargeAltDragCanvas()
             clearLinkedMovePreview()
             prevSnapTargetRef.current = null
+            magneticSnapTargetsRef.current = []
             dragStateRef.current = null
             isAltDragRef.current = false
             clearGlobalDragCursor()
@@ -1499,6 +1486,7 @@ export function useTimelineDrag(
       clearLargeAltDragCanvas()
       clearLinkedMovePreview()
       prevSnapTargetRef.current = null // Reset snap target tracking
+      magneticSnapTargetsRef.current = []
       dragStateRef.current = null
       isAltDragRef.current = false // Reset alt drag state
       clearGlobalDragCursor()
@@ -1531,6 +1519,7 @@ export function useTimelineDrag(
         window.removeEventListener('mousemove', coalescedMouseMove.queue)
         window.removeEventListener('mouseup', handleCoalescedMouseUp)
         coalescedMouseMove.cancel()
+        magneticSnapTargetsRef.current = []
         dragVisualTopByTrackIdRef.current.clear()
         clearLargeAltDragCanvas()
         clearLinkedMovePreview()
@@ -1546,6 +1535,7 @@ export function useTimelineDrag(
     getCompatibleTrackIdFromMouseY,
     getTrackDropTarget,
     calculateMagneticSnap,
+    getMagneticSnapTargets,
     clearLinkedMovePreview,
     elementRef,
     getItems,

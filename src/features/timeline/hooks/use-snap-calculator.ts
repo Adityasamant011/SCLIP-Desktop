@@ -1,6 +1,7 @@
-import { useMemo, useCallback } from 'react'
+import { useCallback } from 'react'
 import type { SnapTarget } from '../types/drag'
-import { useTimelineStore } from '../stores/timeline-store'
+import { useItemsStore } from '../stores/items-store'
+import { useTimelineSettingsStore } from '../stores/timeline-settings-store'
 import { useTransitionsStore } from '../stores/transitions-store'
 import { usePlaybackStore } from '@/shared/state/playback'
 import {
@@ -13,12 +14,12 @@ import { getVisibleTrackIds } from '../utils/group-utils'
 import { BASE_SNAP_THRESHOLD_PIXELS } from '../constants'
 import { getZoomLevelNow, getPixelsPerSecondNow } from '../utils/zoom-conversions'
 
-// Helpers to get state on-demand without subscribing
-// This is CRITICAL: useSnapCalculator is used by every TimelineItem via
-// use-timeline-drag, use-timeline-trim, and use-rate-stretch hooks.
-// Subscribing to items would cause ALL items to re-render when ANY item moves!
-const getItemsOnDemand = () => useTimelineStore.getState().items
-const getTracksOnDemand = () => useTimelineStore.getState().tracks
+type SnapExclusion = string | string[] | null
+
+function normalizeExcludeIds(excludeItemIds: SnapExclusion): string[] {
+  if (!excludeItemIds) return []
+  return Array.isArray(excludeItemIds) ? excludeItemIds : [excludeItemIds]
+}
 
 /**
  * Advanced snap calculator hook
@@ -34,62 +35,66 @@ const getTracksOnDemand = () => useTimelineStore.getState().tracks
  */
 export function useSnapCalculator(
   timelineDuration: number,
-  excludeItemIds: string | string[] | null,
+  excludeItemIds: SnapExclusion,
   options: {
     includeTransitionMidpoints?: boolean
   } = {},
 ) {
   const includeTransitionMidpoints = options.includeTransitionMidpoints ?? true
-  // Normalize to array for consistent handling
-  const excludeIds = useMemo(() => {
-    if (!excludeItemIds) return []
-    return Array.isArray(excludeItemIds) ? excludeItemIds : [excludeItemIds]
-  }, [excludeItemIds])
-  // Get state with granular selectors
-  // NOTE: Don't subscribe to items, currentFrame, or zoom - read from store
-  // when needed to prevent re-renders. Zoom is read imperatively because
-  // useSnapCalculator is used by every TimelineItem via drag/trim hooks.
-  const fps = useTimelineStore((s) => s.fps)
-  const snapEnabled = useTimelineStore((s) => s.snapEnabled)
 
-  /**
-   * Calculate adaptive snap threshold in frames (on-demand — reads zoom imperatively)
-   */
   const getSnapThresholdFrames = useCallback(() => {
+    const fps = useTimelineSettingsStore.getState().fps
     return calculateAdaptiveSnapThreshold(
       getZoomLevelNow(),
       BASE_SNAP_THRESHOLD_PIXELS,
       getPixelsPerSecondNow(),
       fps,
     )
-  }, [fps])
+  }, [])
+
+  const isSnapEnabled = useCallback(() => {
+    return useTimelineSettingsStore.getState().snapEnabled
+  }, [])
 
   /**
-   * Generate snap targets on-demand (NOT memoized on items to avoid re-renders)
-   * Called when calculateSnap is invoked, using current items from store
+   * Generate magnetic targets only when a gesture starts or a caller explicitly queries.
+   * An override supports gesture-specific cohorts, including Alt-drag originals.
    */
+  const getMagneticSnapTargets = useCallback(
+    (excludeItemIdsOverride?: SnapExclusion) => {
+      const { items, tracks } = useItemsStore.getState()
+      const transitions = useTransitionsStore.getState().transitions
+      const visibleTrackIds = getVisibleTrackIds(tracks)
+      const resolvedExcludeIds =
+        excludeItemIdsOverride === undefined ? excludeItemIds : excludeItemIdsOverride
+      const excludeIds = normalizeExcludeIds(resolvedExcludeIds)
+      const targets: SnapTarget[] = getFilteredItemSnapEdges(
+        items,
+        transitions,
+        visibleTrackIds,
+        excludeIds,
+        {
+          includeTransitionMidpoints,
+        },
+      )
+
+      return targets
+    },
+    [excludeItemIds, includeTransitionMidpoints],
+  )
+
   const generateSnapTargets = useCallback(() => {
-    const items = getItemsOnDemand()
-    const transitions = useTransitionsStore.getState().transitions
-    const visibleTrackIds = getVisibleTrackIds(getTracksOnDemand())
+    const { fps } = useTimelineSettingsStore.getState()
     const targets: SnapTarget[] = []
-
-    // 1. Grid snap points (timeline markers)
     const gridFrames = generateGridSnapPoints(timelineDuration, fps, getZoomLevelNow())
-    gridFrames.forEach((frame) => {
-      targets.push({ frame, type: 'grid' })
-    })
 
-    // 2. Item edges + transition midpoints (filtered by visible tracks,
-    //    transition inner edges suppressed, dragged items excluded)
-    for (const edge of getFilteredItemSnapEdges(items, transitions, visibleTrackIds, excludeIds, {
-      includeTransitionMidpoints,
-    })) {
-      targets.push(edge)
+    for (const frame of gridFrames) {
+      targets.push({ frame, type: 'grid' })
     }
+    targets.push(...getMagneticSnapTargets())
 
     return targets
-  }, [excludeIds, includeTransitionMidpoints, timelineDuration, fps])
+  }, [getMagneticSnapTargets, timelineDuration])
 
   /**
    * Calculate snap for a given position
@@ -101,7 +106,7 @@ export function useSnapCalculator(
    */
   const calculateSnap = useCallback(
     (targetStartFrame: number, itemDurationInFrames: number) => {
-      if (!snapEnabled) {
+      if (!isSnapEnabled()) {
         return {
           snappedFrame: targetStartFrame,
           snapTarget: null,
@@ -169,27 +174,13 @@ export function useSnapCalculator(
         didSnap: false,
       }
     },
-    [snapEnabled, generateSnapTargets, getSnapThresholdFrames],
+    [generateSnapTargets, getSnapThresholdFrames, isSnapEnabled],
   )
-
-  /**
-   * Get magnetic snap targets only (item edges, for visual guidelines)
-   * Generated on-demand to avoid subscribing to items
-   */
-  const getMagneticSnapTargets = useCallback(() => {
-    return generateSnapTargets().filter((t) => t.type === 'item-start' || t.type === 'item-end')
-  }, [generateSnapTargets])
-
-  // For compatibility with existing code that expects a memoized array,
-  // we generate it once. This won't update when items move, but that's
-  // intentional to avoid re-renders. Fresh targets are used in calculateSnap.
-  const magneticSnapTargets = useMemo(() => getMagneticSnapTargets(), [getMagneticSnapTargets])
 
   return {
     calculateSnap,
-    magneticSnapTargets,
     getMagneticSnapTargets,
     getSnapThresholdFrames,
-    snapEnabled,
+    isSnapEnabled,
   }
 }
