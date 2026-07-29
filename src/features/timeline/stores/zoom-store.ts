@@ -14,6 +14,8 @@ interface ZoomState {
 }
 
 interface ZoomActions {
+  beginZoomGesture: () => void
+  endZoomGesture: () => void
   setZoomLevel: (level: number) => void
   setZoomLevelImmediate: (level: number) => void // Bypasses throttle for smooth momentum zoom
   setZoomLevelSynchronized: (level: number) => void
@@ -54,6 +56,7 @@ let visualZoomThrottleTimeout: ReturnType<typeof setTimeout> | null = null
 let contentZoomSettleTimeout: ReturnType<typeof setTimeout> | null = null
 let contentZoomCommitRaf: number | null = null
 let contentZoomCommitIdleCallback: number | null = null
+let activeZoomGestureCount = 0
 
 function zoomLevelToPixelsPerSecond(level: number): number {
   return level * 100
@@ -150,6 +153,9 @@ function schedulePlaybackAwareContentCommit(set: (partial: Partial<ZoomState>) =
 
 function scheduleContentZoomCommit(set: (partial: Partial<ZoomState>) => void) {
   clearContentZoomSettleTimeout()
+  if (activeZoomGestureCount > 0) {
+    return
+  }
   contentZoomSettleTimeout = setTimeout(() => {
     contentZoomSettleTimeout = null
     schedulePlaybackAwareContentCommit(set)
@@ -194,6 +200,26 @@ export const useZoomStore = create<ZoomState & ZoomActions>((set, get) => ({
   contentPixelsPerSecond: 100,
   isZoomInteracting: false,
 
+  beginZoomGesture: () => {
+    activeZoomGestureCount += 1
+    clearContentZoomSettleTimeout()
+    if (!get().isZoomInteracting) {
+      set({ isZoomInteracting: true })
+    }
+  },
+  endZoomGesture: () => {
+    if (activeZoomGestureCount > 0) {
+      activeZoomGestureCount -= 1
+    }
+    if (activeZoomGestureCount > 0) {
+      return
+    }
+    if (pendingContentZoomLevel !== null) {
+      scheduleContentZoomCommit(set)
+    } else if (get().isZoomInteracting) {
+      set({ isZoomInteracting: false })
+    }
+  },
   setZoomLevel: (level) => {
     const now = performance.now()
     pendingVisualZoomLevel = level
@@ -282,6 +308,7 @@ export function _resetZoomStoreForTest() {
   clearContentZoomSettleTimeout()
   pendingVisualZoomLevel = null
   pendingContentZoomLevel = null
+  activeZoomGestureCount = 0
   lastVisualZoomUpdate = 0
   useZoomStore.setState({
     level: 1,

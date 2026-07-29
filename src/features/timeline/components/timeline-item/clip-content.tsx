@@ -1,4 +1,12 @@
-import { Suspense, lazy, memo, useCallback, useDeferredValue, useMemo, type ReactNode } from 'react'
+import {
+  Suspense,
+  lazy,
+  memo,
+  useCallback,
+  useDeferredValue,
+  useMemo,
+  type ReactNode,
+} from 'react'
 import { Link2 } from 'lucide-react'
 import { perfMarkRender } from '@/shared/logging/perf-marks'
 import type { TimelineItem } from '@/types/timeline'
@@ -8,7 +16,8 @@ import { useCompositionsStore } from '../../stores/compositions-store'
 import { useSequencesStore } from '../../stores/sequences-store'
 import { useItemsStore } from '../../stores/items-store'
 import { useClipVisibility } from '../../hooks/use-clip-visibility'
-import { useSettledZoomStore } from '../../stores/zoom-store'
+import { useZoomStore } from '../../stores/zoom-store'
+import { getDemotionAwarePixelsPerSecond } from '../../utils/timeline-dom-density'
 import { EDITOR_LAYOUT_CSS_VALUES } from '@/config/editor-layout'
 import { getTextItemPlainText } from '@/shared/utils/text-item-spans'
 import {
@@ -173,6 +182,7 @@ interface ClipContentProps {
   preferImmediateRendering?: boolean
   audioWaveformScale?: number
   linkedSyncOffsetFrames?: number | null
+  isDetailEligible?: boolean
 }
 
 interface ClipTitleTextProps {
@@ -860,63 +870,79 @@ function getSyncOffsetBadgeMinWidthPx(linkedSyncOffsetLabel: string): number {
 const WidthGatedMediaClipContent = memo(function WidthGatedMediaClipContent(
   props: ClipContentProps,
 ) {
-  const { item, clipWidthFrames, fps, isLinked = false, linkedSyncOffsetFrames = null } = props
+  const {
+    item,
+    clipWidthFrames,
+    fps,
+    isLinked = false,
+    linkedSyncOffsetFrames = null,
+    isDetailEligible = true,
+  } = props
   const minVisualWidthPx = getMediaVisualMinWidthPx(item)
   const linkedSyncOffsetLabel =
     linkedSyncOffsetFrames === null ? null : formatSignedFrameDelta(linkedSyncOffsetFrames, fps)
   const syncOffsetBadgeMinWidthPx =
     linkedSyncOffsetLabel === null ? null : getSyncOffsetBadgeMinWidthPx(linkedSyncOffsetLabel)
-  // Subscribe only to a useful-detail threshold crossing. Narrow clips keep a
-  // stable label-only shell regardless of hover, selection, or active tool, so
-  // those interactions cannot pop a filmstrip into view. The settled zoom
-  // naturally debounces wheel bursts. An already-mounted detailed renderer may
-  // still use live geometry for trim/slide previews, but live zoom never
-  // promotes a whole cohort through this gate.
-  const settledMediaLod = useSettledZoomStore(
+  // This selector still evaluates on live zoom updates, but its integer bitmask
+  // changes only when the clip crosses a real-pixel detail boundary. Expensive
+  // filmstrips, waveforms, labels, and icons therefore demote across the gesture
+  // instead of batching hundreds of React commits into the settle frame.
+  const mediaLod = useZoomStore(
     useCallback(
-      (s) => {
-        if (fps <= 0) return 0
+      (state) => {
+        if (fps <= 0 || !isDetailEligible) return 0
         const durationSeconds = clipWidthFrames / fps
-        const settledWidthPx = durationSeconds * s.contentPixelsPerSecond
+        const detailPixelsPerSecond = getDemotionAwarePixelsPerSecond(
+          state.contentPixelsPerSecond,
+          state.pixelsPerSecond,
+          state.isZoomInteracting,
+        )
+        const detailWidthPx = durationSeconds * detailPixelsPerSecond
         let lod = 0
-        if (settledWidthPx >= minVisualWidthPx) lod |= MEDIA_LOD_VISUAL
+        if (detailWidthPx >= minVisualWidthPx) lod |= MEDIA_LOD_VISUAL
         if (syncOffsetBadgeMinWidthPx !== null) {
-          if (settledWidthPx >= syncOffsetBadgeMinWidthPx) {
+          if (detailWidthPx >= syncOffsetBadgeMinWidthPx) {
             lod |= MEDIA_LOD_SYNC_OFFSET
           }
           const syncOffsetLinkIconMinWidthPx =
             syncOffsetBadgeMinWidthPx + MEDIA_LABEL_GAP_PX + MEDIA_LINK_ICON_WIDTH_PX
-          if (settledWidthPx >= syncOffsetLinkIconMinWidthPx) {
+          if (detailWidthPx >= syncOffsetLinkIconMinWidthPx) {
             lod |= MEDIA_LOD_LINK_ICON
           }
           const syncOffsetLabelMinWidthPx =
             syncOffsetLinkIconMinWidthPx +
             MEDIA_LABEL_GAP_PX +
             MEDIA_LINKED_LABEL_VISIBLE_TEXT_WIDTH_PX
-          if (settledWidthPx >= syncOffsetLabelMinWidthPx) {
+          if (detailWidthPx >= syncOffsetLabelMinWidthPx) {
             lod |= MEDIA_LOD_LABEL
           }
         } else {
-          if (settledWidthPx >= MEDIA_LINK_ICON_MIN_WIDTH_PX) lod |= MEDIA_LOD_LINK_ICON
+          if (detailWidthPx >= MEDIA_LINK_ICON_MIN_WIDTH_PX) lod |= MEDIA_LOD_LINK_ICON
           const labelThreshold = isLinked
             ? MEDIA_LINKED_LABEL_MIN_WIDTH_PX
             : MEDIA_LABEL_MIN_WIDTH_PX
-          if (settledWidthPx >= labelThreshold) lod |= MEDIA_LOD_LABEL
+          if (detailWidthPx >= labelThreshold) lod |= MEDIA_LOD_LABEL
         }
         return lod
       },
-      [clipWidthFrames, fps, isLinked, minVisualWidthPx, syncOffsetBadgeMinWidthPx],
+      [
+        clipWidthFrames,
+        fps,
+        isDetailEligible,
+        isLinked,
+        minVisualWidthPx,
+        syncOffsetBadgeMinWidthPx,
+      ],
     ),
   )
-  const clearsVisualDetailThreshold = (settledMediaLod & MEDIA_LOD_VISUAL) !== 0
-  const showLinkIcon = (settledMediaLod & MEDIA_LOD_LINK_ICON) !== 0
-  const showLabel = (settledMediaLod & MEDIA_LOD_LABEL) !== 0
-  const showSyncOffset = (settledMediaLod & MEDIA_LOD_SYNC_OFFSET) !== 0
-  // A threshold crossing itself is cheap; defer the rich child mount so an
-  // equal-duration split cohort can be scheduled as interruptible work. Keep
-  // demotion immediate so a stale deferred false cannot outlive a newer gesture.
-  const deferredVisualDetailThreshold = useDeferredValue(clearsVisualDetailThreshold)
-  const showVisualDetail = clearsVisualDetailThreshold && deferredVisualDetailThreshold
+  // Intersect with the deferred mask: removed bits disappear immediately,
+  // while ordinary detail promotion can use React's deferred lane.
+  const deferredMediaLod = useDeferredValue(mediaLod)
+  const visibleMediaLod = mediaLod & deferredMediaLod
+  const showVisualDetail = (visibleMediaLod & MEDIA_LOD_VISUAL) !== 0
+  const showLinkIcon = (visibleMediaLod & MEDIA_LOD_LINK_ICON) !== 0
+  const showLabel = (visibleMediaLod & MEDIA_LOD_LABEL) !== 0
+  const showSyncOffset = (visibleMediaLod & MEDIA_LOD_SYNC_OFFSET) !== 0
   const hasVisibleClipContent = showVisualDetail || showLinkIcon || showLabel || showSyncOffset
 
   perfMarkRender('ClipContent')
@@ -952,6 +978,9 @@ const WidthGatedMediaClipContent = memo(function WidthGatedMediaClipContent(
 export const ClipContent = memo(function ClipContent(props: ClipContentProps) {
   if (hasBasicMediaVisuals(props.item)) {
     return <WidthGatedMediaClipContent {...props} />
+  }
+  if (props.isDetailEligible === false) {
+    return null
   }
   return <DetailedClipContent {...props} />
 })

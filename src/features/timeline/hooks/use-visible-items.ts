@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react'
+import { useCallback, useEffect, useState, useRef, useSyncExternalStore } from 'react'
 import type { TimelineItem } from '@/types/timeline'
 import type { Transition } from '@/types/transition'
 import { useTimelineViewportStore } from '../stores/timeline-viewport-store'
@@ -34,7 +34,7 @@ const CULL_CONTRACTION_QUIET_MS = 600
 const EMPTY_ITEMS: TimelineItem[] = []
 const EMPTY_TRANSITIONS: Transition[] = []
 
-interface VisibleFrameRange {
+export interface VisibleFrameRange {
   start: number
   end: number
 }
@@ -42,6 +42,46 @@ interface VisibleFrameRange {
 interface VisibleItemsSnapshot {
   visibleItems: TimelineItem[]
   visibleTransitions: Transition[]
+}
+
+const detailRangeByTrackId = new Map<string, VisibleFrameRange>()
+const detailRangeListenersByTrackId = new Map<string, Set<() => void>>()
+
+function areVisibleRangesEqual(
+  previousRange: VisibleFrameRange,
+  nextRange: VisibleFrameRange,
+): boolean {
+  return previousRange.start === nextRange.start && previousRange.end === nextRange.end
+}
+
+function publishDetailRange(trackId: string, range: VisibleFrameRange) {
+  const previousRange = detailRangeByTrackId.get(trackId)
+  if (previousRange && areVisibleRangesEqual(previousRange, range)) {
+    return
+  }
+
+  detailRangeByTrackId.set(trackId, range)
+  for (const listener of detailRangeListenersByTrackId.get(trackId) ?? []) {
+    listener()
+  }
+}
+
+function subscribeToDetailRange(trackId: string, listener: () => void): () => void {
+  let listeners = detailRangeListenersByTrackId.get(trackId)
+  if (!listeners) {
+    listeners = new Set()
+    detailRangeListenersByTrackId.set(trackId, listeners)
+  }
+  listeners.add(listener)
+  publishDetailRange(trackId, computeCurrentDetailRange(trackId))
+
+  return () => {
+    listeners.delete(listener)
+    if (listeners.size === 0) {
+      detailRangeListenersByTrackId.delete(trackId)
+      detailRangeByTrackId.delete(trackId)
+    }
+  }
 }
 
 function getHysteresisFrames(pixelsPerSecond: number, fps: number, cullBufferPx: number): number {
@@ -342,21 +382,46 @@ function getTrackVisibleTransitions(trackId: string): Transition[] | undefined {
   return transitionsState.transitionsByTrackId[trackId] ?? EMPTY_TRANSITIONS
 }
 
-function computeVisibleItemsSnapshot(trackId: string): VisibleItemsSnapshot {
+function computeCurrentDetailRange(trackId: string): VisibleFrameRange {
   const { scrollLeft, viewportWidth } = useTimelineViewportStore.getState()
   const pixelsPerSecond = getCullingPixelsPerSecond(useZoomStore.getState())
   const { fps } = useTimelineSettingsStore.getState()
+  const items = useItemsStore.getState().itemsByTrackId[trackId]
+  const cullBufferPx = getTimelineItemCullBufferPx(items?.length ?? 0)
+  return getVisibleFrameRange(scrollLeft, viewportWidth, pixelsPerSecond, fps, cullBufferPx)
+}
+
+function getDetailRangeSnapshot(trackId: string): VisibleFrameRange {
+  const currentRange = detailRangeByTrackId.get(trackId)
+  if (currentRange) {
+    return currentRange
+  }
+
+  const initialRange = computeCurrentDetailRange(trackId)
+  detailRangeByTrackId.set(trackId, initialRange)
+  return initialRange
+}
+
+/**
+ * The current live viewport + cull buffer, independent from the larger cohort
+ * retained temporarily for smooth zoom reversal. Consumers can keep retained
+ * roots mounted while suppressing expensive detail outside this range.
+ */
+export function useVisibleItemDetailRange(trackId: string): VisibleFrameRange {
+  const subscribe = useCallback(
+    (listener: () => void) => subscribeToDetailRange(trackId, listener),
+    [trackId],
+  )
+  const getSnapshot = useCallback(() => getDetailRangeSnapshot(trackId), [trackId])
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+}
+
+function computeVisibleItemsSnapshot(trackId: string): VisibleItemsSnapshot {
   const itemsState = useItemsStore.getState()
   const items = itemsState.itemsByTrackId[trackId]
   const transitions = getTrackVisibleTransitions(trackId)
-  const cullBufferPx = getTimelineItemCullBufferPx(items?.length ?? 0)
-  const visibleFrameRange = getVisibleFrameRange(
-    scrollLeft,
-    viewportWidth,
-    pixelsPerSecond,
-    fps,
-    cullBufferPx,
-  )
+  const visibleFrameRange = computeCurrentDetailRange(trackId)
+  publishDetailRange(trackId, visibleFrameRange)
   const visibleItems = getVisibleItemsForRange(items, visibleFrameRange)
   const visibleTransitions = getVisibleTransitionsForRange(
     transitions,
@@ -562,6 +627,10 @@ export function useVisibleItems(trackId: string) {
         fps,
         cullBufferPx,
       )
+      // Follow live, quantized geometry even while `lastRange` intentionally
+      // retains a larger mounted cohort for immediate zoom reversal. Rich clip
+      // detail can stay bounded without root unmount/remount churn.
+      publishDetailRange(trackId, newRange)
       const viewportRange = getVisibleFrameRange(
         scrollLeft,
         viewportWidth,
@@ -584,6 +653,21 @@ export function useVisibleItems(trackId: string) {
       // plus globally-budgeted overscan.
       if (lastRange && (zoomState.isZoomInteracting || retainZoomCohort)) {
         if (!visibleRangesOverlap(lastRange, viewportRange)) {
+          if (zoomState.isZoomInteracting) {
+            // TimelineContent publishes live zoom before it writes the matching
+            // anchored scroll offset in the same RAF. The intermediate pair can
+            // look disjoint even though the following viewport notification is
+            // continuous. Keep the old roots for the whole gesture so a later
+            // viewport notification or direction reversal cannot swap cohorts.
+            return
+          }
+          // The retained zoom cohort can still look disjoint at settle when the
+          // anchor moved a long way. Preserve it through the quiet window; the
+          // staged coordinator will expand/contract under the shared budget.
+          if (retainZoomCohort) {
+            scheduleStagedContraction(newRange)
+            return
+          }
           // A scrollbar jump to a disjoint window must replace the range. A
           // union would mount every clip in the potentially enormous gap.
           cancelStagedExpansion()

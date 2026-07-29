@@ -93,6 +93,7 @@ interface TimelineItemProps {
   trackLocked?: boolean
   trackHidden?: boolean
   isCompactWidth: boolean
+  isDetailEligible: boolean
   onHoverChange?: (itemId: string, hovered: boolean) => void
 }
 
@@ -115,6 +116,7 @@ export const TimelineItem = memo(function TimelineItem({
   trackLocked = false,
   trackHidden = false,
   isCompactWidth,
+  isDetailEligible,
   onHoverChange,
 }: TimelineItemProps) {
   perfMarkRender('TimelineItem')
@@ -1064,6 +1066,7 @@ export const TimelineItem = memo(function TimelineItem({
               preferImmediateRendering={preferImmediateContentRendering}
               audioWaveformScale={audioVisualizationScale}
               linkedSyncOffsetFrames={linkedSyncOffsetFrames}
+              isDetailEligible={isDetailEligible}
             />
 
             {!useCompactClipShell && (

@@ -223,7 +223,50 @@ describe('ClipContent', () => {
     expect(filmstrip).toHaveAttribute('data-visible', 'true')
   })
 
-  it('reveals linked label content only when settled width can contain it', () => {
+  it('keeps a retained offscreen media shell compact at a rich settled zoom', async () => {
+    useSettingsStore.setState({
+      showFilmstrips: true,
+      enableFilmstripExtraction: true,
+    })
+    useZoomStore.setState({
+      level: 5,
+      pixelsPerSecond: 500,
+      contentLevel: 5,
+      contentPixelsPerSecond: 500,
+      isZoomInteracting: false,
+    })
+    const item: TimelineItem = {
+      id: 'retained-offscreen-video',
+      type: 'video',
+      trackId: 'track-1',
+      from: 3000,
+      durationInFrames: 60,
+      label: 'Retained offscreen video',
+      mediaId: 'media-1',
+      src: 'blob:test',
+    } as TimelineItem
+    const props = {
+      item,
+      clipLeftFrames: 3000,
+      clipWidthFrames: 60,
+      fps: 30,
+    }
+    const view = render(<ClipContent {...props} isDetailEligible={false} />)
+    const shell = view.container.querySelector('[data-media-clip-content]')
+
+    expect(shell).toHaveAttribute('hidden')
+    expect(screen.queryByTestId('clip-filmstrip')).not.toBeInTheDocument()
+
+    view.rerender(<ClipContent {...props} isDetailEligible={true} />)
+    expect(await screen.findByTestId('clip-filmstrip')).toBeInTheDocument()
+
+    view.rerender(<ClipContent {...props} isDetailEligible={false} />)
+    expect(view.container.querySelector('[data-media-clip-content]')).toBe(shell)
+    expect(shell).toHaveAttribute('hidden')
+    expect(screen.queryByTestId('clip-filmstrip')).not.toBeInTheDocument()
+  })
+
+  it('demotes linked label content when live width can no longer contain it', () => {
     useZoomStore.setState({
       level: 1,
       pixelsPerSecond: 100,
@@ -278,8 +321,8 @@ describe('ClipContent', () => {
       })
     })
 
-    expect(linkIcon).toBeVisible()
-    expect(label).toBeVisible()
+    expect(linkIcon).not.toBeVisible()
+    expect(label).not.toBeVisible()
   })
 
   it('reveals an out-of-sync badge, link icon, and label only when each can fit', () => {
@@ -637,7 +680,7 @@ describe('ClipContent', () => {
         })
       })
 
-      expect(screen.getByTestId(detailTestId)).toBe(detailNode)
+      expect(screen.queryByTestId(detailTestId)).not.toBeInTheDocument()
 
       act(() => {
         useZoomStore.setState({
@@ -650,6 +693,168 @@ describe('ClipContent', () => {
       expect(screen.getByText(`Compact ${kind}`)).toBe(labelNode)
     },
   )
+
+  it('mounts newly exposed media at the live zoom-out LOD without a settle teardown', () => {
+    useZoomStore.setState({
+      level: 50,
+      pixelsPerSecond: 5000,
+      contentLevel: 50,
+      contentPixelsPerSecond: 5000,
+      isZoomInteracting: false,
+    })
+    useSettingsStore.setState({
+      showFilmstrips: true,
+      enableFilmstripExtraction: true,
+      showWaveforms: false,
+    })
+    useZoomStore.setState({
+      level: 0.1,
+      pixelsPerSecond: 10,
+      isZoomInteracting: true,
+    })
+
+    const item = {
+      id: 'new-live-zoom-out-video',
+      type: 'video',
+      trackId: 'track-1',
+      from: 0,
+      durationInFrames: 1,
+      label: 'New live zoom-out video',
+      mediaId: 'media-1',
+      src: 'blob:test',
+    } as TimelineItem
+    const onRender = vi.fn()
+
+    render(
+      <Profiler id="new-live-zoom-out-video" onRender={onRender}>
+        <ClipContent item={item} clipLeftFrames={0} clipWidthFrames={1} fps={30} />
+      </Profiler>,
+    )
+
+    expect(screen.queryByTestId('clip-filmstrip')).not.toBeInTheDocument()
+    const initialCommitCount = onRender.mock.calls.length
+
+    act(() => {
+      useZoomStore.setState({
+        contentLevel: 0.1,
+        contentPixelsPerSecond: 10,
+        isZoomInteracting: false,
+      })
+    })
+
+    expect(screen.queryByTestId('clip-filmstrip')).not.toBeInTheDocument()
+    expect(onRender).toHaveBeenCalledTimes(initialCommitCount)
+  })
+
+  it('demotes a saturated media cohort before settle without a parent rerender', async () => {
+    useZoomStore.setState({
+      level: 50,
+      pixelsPerSecond: 5000,
+      contentLevel: 50,
+      contentPixelsPerSecond: 5000,
+      isZoomInteracting: false,
+    })
+    useSettingsStore.setState({
+      showFilmstrips: true,
+      enableFilmstripExtraction: true,
+      showWaveforms: false,
+    })
+
+    const item = {
+      id: 'retained-live-zoom-out-video',
+      type: 'video',
+      trackId: 'track-1',
+      from: 0,
+      durationInFrames: 30,
+      label: 'Retained live zoom-out video',
+      mediaId: 'media-1',
+      src: 'blob:test',
+    } as TimelineItem
+    const onRender = vi.fn()
+    render(
+      <Profiler id="retained-live-zoom-out-video" onRender={onRender}>
+        <ClipContent
+          item={item}
+          clipLeftFrames={0}
+          clipWidthFrames={30}
+          fps={30}
+        />
+      </Profiler>,
+    )
+
+    expect(await screen.findByTestId('clip-filmstrip')).toBeInTheDocument()
+
+    act(() => {
+      useZoomStore.setState({
+        level: 0.1,
+        pixelsPerSecond: 10,
+        isZoomInteracting: true,
+      })
+    })
+
+    expect(screen.queryByTestId('clip-filmstrip')).not.toBeInTheDocument()
+    const demotedCommitCount = onRender.mock.calls.length
+
+    act(() => {
+      useZoomStore.setState({
+        contentLevel: 0.1,
+        contentPixelsPerSecond: 10,
+        isZoomInteracting: false,
+      })
+    })
+
+    expect(screen.queryByTestId('clip-filmstrip')).not.toBeInTheDocument()
+    expect(onRender).toHaveBeenCalledTimes(demotedCommitCount)
+  })
+
+  it('restores live-demoted media after a net-zero zoom reversal', async () => {
+    useZoomStore.setState({
+      level: 50,
+      pixelsPerSecond: 5000,
+      contentLevel: 50,
+      contentPixelsPerSecond: 5000,
+      isZoomInteracting: false,
+    })
+    useSettingsStore.setState({
+      showFilmstrips: true,
+      enableFilmstripExtraction: true,
+      showWaveforms: false,
+    })
+    useZoomStore.setState({
+      level: 0.1,
+      pixelsPerSecond: 10,
+      isZoomInteracting: true,
+    })
+
+    const item = {
+      id: 'net-zero-zoom-video',
+      type: 'video',
+      trackId: 'track-1',
+      from: 0,
+      durationInFrames: 30,
+      label: 'Net-zero zoom video',
+      mediaId: 'media-1',
+      src: 'blob:test',
+    } as TimelineItem
+
+    render(<ClipContent item={item} clipLeftFrames={0} clipWidthFrames={30} fps={30} />)
+    expect(screen.queryByTestId('clip-filmstrip')).not.toBeInTheDocument()
+
+    act(() => {
+      useZoomStore.setState({
+        level: 50,
+        pixelsPerSecond: 5000,
+        isZoomInteracting: true,
+      })
+      useZoomStore.setState({
+        contentLevel: 50,
+        contentPixelsPerSecond: 5000,
+        isZoomInteracting: false,
+      })
+    })
+
+    expect(await screen.findByTestId('clip-filmstrip')).toBeInTheDocument()
+  })
 
   it('isolates detailed video from waveform and composition updates', async () => {
     useSettingsStore.setState({

@@ -9,6 +9,20 @@ export const DEFAULT_TIMELINE_ITEM_CULL_BUFFER_PX = 2000
 export const DENSE_TIMELINE_ITEM_CULL_BUFFER_PX = 600
 export const COMPACT_TIMELINE_ITEM_MAX_WIDTH_PX = 36
 
+/**
+ * During zoom-out, use the smaller live scale so retained and newly exposed
+ * clips can demote before the settled content channel catches up. Zoom-in keeps
+ * the settled scale so detail promotion remains deferred.
+ */
+export function getDemotionAwarePixelsPerSecond(
+  settledPixelsPerSecond: number,
+  livePixelsPerSecond: number,
+  isZoomInteracting: boolean,
+): number {
+  if (!isZoomInteracting) return settledPixelsPerSecond
+  return Math.min(settledPixelsPerSecond, livePixelsPerSecond)
+}
+
 export function getTimelineItemCullBufferPx(trackItemCount: number): number {
   return trackItemCount >= DENSE_TIMELINE_TRACK_ITEM_THRESHOLD
     ? DENSE_TIMELINE_ITEM_CULL_BUFFER_PX

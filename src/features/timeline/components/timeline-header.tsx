@@ -116,6 +116,8 @@ const TimelineZoomControls = memo(function TimelineZoomControls({
   const settledZoomLevel = useZoomStore((state) => state.contentLevel)
   const zoomIn = useZoomStore((state) => state.zoomIn)
   const zoomOut = useZoomStore((state) => state.zoomOut)
+  const beginZoomGesture = useZoomStore((state) => state.beginZoomGesture)
+  const endZoomGesture = useZoomStore((state) => state.endZoomGesture)
   const setZoomImmediate = useZoomStore((state) => state.setZoomLevelImmediate)
   const setZoomSynchronized = useZoomStore((state) => state.setZoomLevelSynchronized)
   const sliderRef = useRef<HTMLSpanElement>(null)
@@ -125,6 +127,7 @@ const TimelineZoomControls = memo(function TimelineZoomControls({
   const sliderInteractionRef = useRef<'idle' | 'dragging' | 'awaiting-zoom'>('idle')
   const sliderCommitBaseZoomRef = useRef<number | null>(null)
   const sliderKeyboardInputRef = useRef(false)
+  const sliderZoomGestureHeldRef = useRef(false)
   const liveZoomLevelRef = useRef(useZoomStore.getState().level)
   const [, forceKeyboardSliderRender] = useReducer((revision: number) => revision + 1, 0)
   const btnSize = {
@@ -172,6 +175,22 @@ const TimelineZoomControls = memo(function TimelineZoomControls({
     range.style.right = `${100 - percentage}%`
     thumb.setAttribute('aria-valuenow', String(value))
   }, [])
+
+  const releaseSliderZoomGesture = useCallback(() => {
+    if (!sliderZoomGestureHeldRef.current) {
+      return
+    }
+    sliderZoomGestureHeldRef.current = false
+    endZoomGesture()
+  }, [endZoomGesture])
+
+  const beginSliderZoomGesture = useCallback(() => {
+    if (sliderZoomGestureHeldRef.current) {
+      return
+    }
+    sliderZoomGestureHeldRef.current = true
+    beginZoomGesture()
+  }, [beginZoomGesture])
 
   const flushSliderChange = useCallback(() => {
     sliderRafRef.current = null
@@ -225,12 +244,18 @@ const TimelineZoomControls = memo(function TimelineZoomControls({
   }, [renderSliderPreview, zoomToSlider])
 
   useEffect(() => {
+    window.addEventListener('pointerup', releaseSliderZoomGesture)
+    window.addEventListener('pointercancel', releaseSliderZoomGesture)
+
     return () => {
+      window.removeEventListener('pointerup', releaseSliderZoomGesture)
+      window.removeEventListener('pointercancel', releaseSliderZoomGesture)
       if (sliderRafRef.current !== null) {
         cancelAnimationFrame(sliderRafRef.current)
       }
+      releaseSliderZoomGesture()
     }
-  }, [])
+  }, [releaseSliderZoomGesture])
 
   const handleSliderChange = useCallback(
     (values: number[]) => {
@@ -309,9 +334,10 @@ const TimelineZoomControls = memo(function TimelineZoomControls({
       latestSliderValueRef.current = sliderValue
       renderSliderPreview(sliderValue)
       commitSliderZoom(sliderValue, latestSliderValue)
+      releaseSliderZoomGesture()
       blurActiveElement()
     },
-    [commitSliderZoom, renderSliderPreview],
+    [commitSliderZoom, releaseSliderZoomGesture, renderSliderPreview],
   )
 
   const controlledSliderValue = zoomToSlider(settledZoomLevel)
@@ -345,6 +371,8 @@ const TimelineZoomControls = memo(function TimelineZoomControls({
         ]}
         onValueChange={handleSliderChange}
         onValueCommit={handleSliderCommit}
+        onPointerDownCapture={beginSliderZoomGesture}
+        onPointerCancelCapture={releaseSliderZoomGesture}
         onKeyDownCapture={() => {
           sliderKeyboardInputRef.current = true
         }}

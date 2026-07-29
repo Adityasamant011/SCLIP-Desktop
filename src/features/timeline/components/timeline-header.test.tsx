@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
-import type { FocusEventHandler, KeyboardEventHandler } from 'react'
+import type { FocusEventHandler, KeyboardEventHandler, PointerEventHandler } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 
 import { ZOOM_MAX, ZOOM_MIN } from '../constants'
@@ -23,12 +23,23 @@ vi.mock('@/components/ui/slider', async () => {
         value?: number[]
         onValueChange?: (value: number[]) => void
         onValueCommit?: (value: number[]) => void
+        onPointerDownCapture?: PointerEventHandler<HTMLSpanElement>
+        onPointerCancelCapture?: PointerEventHandler<HTMLSpanElement>
         onKeyDownCapture?: KeyboardEventHandler<HTMLSpanElement>
         onKeyUpCapture?: KeyboardEventHandler<HTMLSpanElement>
         onBlurCapture?: FocusEventHandler<HTMLSpanElement>
       }
     >(function MockSlider(
-      { value, onValueChange, onValueCommit, onKeyDownCapture, onKeyUpCapture, onBlurCapture },
+      {
+        value,
+        onValueChange,
+        onValueCommit,
+        onPointerDownCapture,
+        onPointerCancelCapture,
+        onKeyDownCapture,
+        onKeyUpCapture,
+        onBlurCapture,
+      },
       ref,
     ) {
       sliderRenderSpy()
@@ -38,6 +49,8 @@ vi.mock('@/components/ui/slider', async () => {
           ref={ref}
           data-testid="zoom-slider"
           data-value={value?.[0]}
+          onPointerDownCapture={onPointerDownCapture}
+          onPointerCancelCapture={onPointerCancelCapture}
           onKeyDownCapture={onKeyDownCapture}
           onKeyUpCapture={onKeyUpCapture}
           onBlurCapture={onBlurCapture}
@@ -170,6 +183,66 @@ describe('TimelineHeader zoom slider', () => {
       expect(Number(screen.getByRole('slider').getAttribute('aria-valuenow'))).toBeCloseTo(
         finalSliderValue,
       )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not settle or contract content while the slider thumb is held', () => {
+    vi.useFakeTimers()
+    try {
+      sliderInput.value = 0.9
+      const targetZoom = ZOOM_MIN * Math.pow(ZOOM_MAX / ZOOM_MIN, sliderInput.value)
+      render(<TimelineHeader />)
+      const thumb = screen.getByRole('slider')
+
+      fireEvent.pointerDown(thumb)
+      fireEvent.mouseDown(thumb)
+      act(() => vi.advanceTimersByTime(1_000))
+
+      expect(useZoomStore.getState()).toMatchObject({
+        level: targetZoom,
+        contentLevel: 1,
+        isZoomInteracting: true,
+      })
+
+      fireEvent.mouseUp(thumb)
+      act(() => vi.advanceTimersByTime(199))
+      expect(useZoomStore.getState().contentLevel).toBe(1)
+
+      act(() => vi.advanceTimersByTime(1))
+      expect(useZoomStore.getState()).toMatchObject({
+        contentLevel: targetZoom,
+        isZoomInteracting: false,
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('releases slider zoom when pointer-up lands outside the control', () => {
+    vi.useFakeTimers()
+    try {
+      sliderInput.value = 0.85
+      const targetZoom = ZOOM_MIN * Math.pow(ZOOM_MAX / ZOOM_MIN, sliderInput.value)
+      render(<TimelineHeader />)
+
+      fireEvent.pointerDown(screen.getByRole('slider'))
+      fireEvent.mouseDown(screen.getByRole('slider'))
+      act(() => vi.advanceTimersByTime(1_000))
+      expect(useZoomStore.getState()).toMatchObject({
+        level: targetZoom,
+        contentLevel: 1,
+        isZoomInteracting: true,
+      })
+
+      fireEvent.pointerUp(window)
+      act(() => vi.advanceTimersByTime(200))
+
+      expect(useZoomStore.getState()).toMatchObject({
+        contentLevel: targetZoom,
+        isZoomInteracting: false,
+      })
     } finally {
       vi.useRealTimers()
     }

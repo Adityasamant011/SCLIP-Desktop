@@ -152,6 +152,41 @@ describe('zoom-store interaction split', () => {
     })
   })
 
+  it('holds content zoom for the full slider gesture and settles after release', () => {
+    const zoom = useZoomStore.getState()
+    zoom.beginZoomGesture()
+    zoom.setZoomLevelImmediate(1.4)
+
+    vi.advanceTimersByTime(1_000)
+    expect(useZoomStore.getState()).toMatchObject({
+      level: 1.4,
+      contentLevel: 1,
+      isZoomInteracting: true,
+    })
+
+    useZoomStore.getState().setZoomLevelImmediate(1.8)
+    vi.advanceTimersByTime(1_000)
+    expect(useZoomStore.getState()).toMatchObject({
+      level: 1.8,
+      contentLevel: 1,
+      isZoomInteracting: true,
+    })
+
+    useZoomStore.getState().endZoomGesture()
+    vi.advanceTimersByTime(199)
+    expect(useZoomStore.getState()).toMatchObject({
+      contentLevel: 1,
+      isZoomInteracting: true,
+    })
+
+    vi.advanceTimersByTime(1)
+    expect(useZoomStore.getState()).toMatchObject({
+      level: 1.8,
+      contentLevel: 1.8,
+      isZoomInteracting: false,
+    })
+  })
+
   it('notifies committed-only subscribers once after a live zoom burst', () => {
     const settledNotifications = vi.fn()
     testUnsubscribers.push(useSettledZoomStore.subscribe(settledNotifications))

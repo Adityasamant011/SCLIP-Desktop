@@ -6,11 +6,20 @@ import { useTimelineStore } from '../stores/timeline-store'
 import { _resetZoomStoreForTest, useZoomStore } from '../stores/zoom-store'
 
 vi.mock('./timeline-item', () => ({
-  TimelineItem: ({ item, isCompactWidth }: { item: TimelineItem; isCompactWidth: boolean }) => (
+  TimelineItem: ({
+    item,
+    isCompactWidth,
+    isDetailEligible,
+  }: {
+    item: TimelineItem
+    isCompactWidth: boolean
+    isDetailEligible: boolean
+  }) => (
     <div
       data-item-id={item.id}
       data-rich-item-id={item.id}
       data-compact-width={String(isCompactWidth)}
+      data-detail-eligible={String(isDetailEligible)}
     />
   ),
 }))
@@ -25,6 +34,7 @@ const items: TimelineItem[] = [
     from: 0,
     durationInFrames: 30,
     label: 'One',
+    mediaId: 'media-1',
     src: 'blob:one',
   },
   {
@@ -34,6 +44,7 @@ const items: TimelineItem[] = [
     from: 35,
     durationInFrames: 30,
     label: 'Two',
+    mediaId: 'media-2',
     src: 'blob:two',
   },
 ]
@@ -46,12 +57,22 @@ describe('TimelineTrackItems stable DOM renderer', () => {
 
   it('keeps rich clip nodes mounted across rerenders', () => {
     const view = render(
-      <TimelineTrackItems trackItems={items} trackLocked={false} trackHidden={false} />,
+      <TimelineTrackItems
+        trackId="track-1"
+        trackItems={items}
+        trackLocked={false}
+        trackHidden={false}
+      />,
     )
     const firstItem = view.container.querySelector('[data-rich-item-id="item-1"]')
 
     view.rerender(
-      <TimelineTrackItems trackItems={[...items]} trackLocked={false} trackHidden={false} />,
+      <TimelineTrackItems
+        trackId="track-1"
+        trackItems={[...items]}
+        trackLocked={false}
+        trackHidden={false}
+      />,
     )
 
     expect(view.container.querySelectorAll('[data-rich-item-id]')).toHaveLength(2)
@@ -68,7 +89,12 @@ describe('TimelineTrackItems stable DOM renderer', () => {
     const onRender = vi.fn()
     const view = render(
       <Profiler id="track-items" onRender={onRender}>
-        <TimelineTrackItems trackItems={items} trackLocked={false} trackHidden={false} />
+        <TimelineTrackItems
+          trackId="track-1"
+          trackItems={items}
+          trackLocked={false}
+          trackHidden={false}
+        />
       </Profiler>,
     )
     const firstItem = view.container.querySelector('[data-rich-item-id="item-1"]')
@@ -98,5 +124,125 @@ describe('TimelineTrackItems stable DOM renderer', () => {
     expect(onRender).toHaveBeenCalledTimes(initialCommitCount + 1)
     expect(firstItem).toHaveAttribute('data-compact-width', 'false')
     expect(view.container.querySelector('[data-rich-item-id="item-1"]')).toBe(firstItem)
+  })
+
+  it('mounts a newly exposed zoom-out cohort directly as compact shells', () => {
+    useZoomStore.setState({
+      level: 50,
+      pixelsPerSecond: 5000,
+      contentLevel: 50,
+      contentPixelsPerSecond: 5000,
+      isZoomInteracting: false,
+    })
+    const view = render(
+      <TimelineTrackItems
+        trackId="track-1"
+        trackItems={[items[0]!]}
+        trackLocked={false}
+        trackHidden={false}
+      />,
+    )
+    const firstItem = view.container.querySelector('[data-rich-item-id="item-1"]')
+
+    expect(firstItem).toHaveAttribute('data-compact-width', 'false')
+
+    act(() => {
+      useZoomStore.setState({
+        level: 0.1,
+        pixelsPerSecond: 10,
+        isZoomInteracting: true,
+      })
+    })
+
+    // The track publishes only the compact-cohort boundary, not every live PPS.
+    expect(firstItem).toHaveAttribute('data-compact-width', 'true')
+
+    view.rerender(
+      <TimelineTrackItems
+        trackId="track-1"
+        trackItems={items}
+        trackLocked={false}
+        trackHidden={false}
+      />,
+    )
+
+    const firstCompactItem = view.container.querySelector('[data-rich-item-id="item-1"]')
+    const secondCompactItem = view.container.querySelector('[data-rich-item-id="item-2"]')
+    expect(firstCompactItem).toHaveAttribute('data-compact-width', 'true')
+    expect(secondCompactItem).toHaveAttribute('data-compact-width', 'true')
+
+    act(() => {
+      useZoomStore.setState({
+        contentLevel: 0.1,
+        contentPixelsPerSecond: 10,
+        isZoomInteracting: false,
+      })
+    })
+
+    expect(view.container.querySelector('[data-rich-item-id="item-1"]')).toBe(firstCompactItem)
+    expect(view.container.querySelector('[data-rich-item-id="item-2"]')).toBe(secondCompactItem)
+  })
+
+  it('restores a newly exposed cohort after a net-zero zoom reversal', () => {
+    useZoomStore.setState({
+      level: 50,
+      pixelsPerSecond: 5000,
+      contentLevel: 50,
+      contentPixelsPerSecond: 5000,
+      isZoomInteracting: false,
+    })
+    const view = render(
+      <TimelineTrackItems
+        trackId="track-1"
+        trackItems={[items[0]!]}
+        trackLocked={false}
+        trackHidden={false}
+      />,
+    )
+
+    act(() => {
+      useZoomStore.setState({
+        level: 0.1,
+        pixelsPerSecond: 10,
+        isZoomInteracting: true,
+      })
+    })
+    expect(
+      view.container.querySelector('[data-rich-item-id="item-1"]'),
+    ).toHaveAttribute('data-compact-width', 'true')
+    view.rerender(
+      <TimelineTrackItems
+        trackId="track-1"
+        trackItems={items}
+        trackLocked={false}
+        trackHidden={false}
+      />,
+    )
+
+    const firstItem = view.container.querySelector('[data-rich-item-id="item-1"]')
+    const secondItem = view.container.querySelector('[data-rich-item-id="item-2"]')
+    expect(firstItem).toHaveAttribute('data-compact-width', 'true')
+    expect(secondItem).toHaveAttribute('data-compact-width', 'true')
+
+    act(() => {
+      useZoomStore.setState({
+        level: 50,
+        pixelsPerSecond: 5000,
+        isZoomInteracting: true,
+      })
+      useZoomStore.setState({
+        contentLevel: 50,
+        contentPixelsPerSecond: 5000,
+        isZoomInteracting: false,
+      })
+    })
+
+    expect(firstItem).toHaveAttribute('data-compact-width', 'false')
+    // The retained root survives the reversal but remains cheap while it is
+    // outside the current detail window.
+    expect(secondItem).toHaveAttribute('data-compact-width', 'true')
+    expect(secondItem).toHaveAttribute('data-detail-eligible', 'false')
+    expect(view.container.querySelector('[data-rich-item-id="item-1"]')).toBe(firstItem)
+    expect(view.container.querySelector('[data-rich-item-id="item-2"]')).toBe(secondItem)
   })
 })

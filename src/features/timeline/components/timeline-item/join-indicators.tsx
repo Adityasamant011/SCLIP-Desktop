@@ -1,16 +1,27 @@
 import { createContext, memo, useContext, useDeferredValue, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/shared/ui/cn'
-import { useSettledZoomStore } from '../../stores/zoom-store'
+import { useZoomStore } from '../../stores/zoom-store'
+import { getDemotionAwarePixelsPerSecond } from '../../utils/timeline-dom-density'
 
 const JOIN_INDICATOR_MIN_ZOOM_PPS = 30
 const TimelineJoinIndicatorsEnabledContext = createContext(true)
 
 export function TimelineJoinIndicatorsZoomGate({ children }: { children: ReactNode }) {
-  const enabledAtSettledZoom = useSettledZoomStore(
-    (state) => state.contentPixelsPerSecond >= JOIN_INDICATOR_MIN_ZOOM_PPS,
-  )
-  const enabled = useDeferredValue(enabledAtSettledZoom)
+  const enabledAtRenderZoom = useZoomStore((state) => {
+    return (
+      getDemotionAwarePixelsPerSecond(
+        state.contentPixelsPerSecond,
+        state.pixelsPerSecond,
+        state.isZoomInteracting,
+      ) >= JOIN_INDICATOR_MIN_ZOOM_PPS
+    )
+  })
+  const deferredEnabled = useDeferredValue(enabledAtRenderZoom)
+  // Promotion can wait for React's transition lane, but zoom-out demotion must
+  // be immediate so even a saturated split cohort removes its indicator leaves
+  // before the settle commit.
+  const enabled = enabledAtRenderZoom && deferredEnabled
 
   return (
     <TimelineJoinIndicatorsEnabledContext.Provider value={enabled}>

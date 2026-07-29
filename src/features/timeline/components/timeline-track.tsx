@@ -1244,6 +1244,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
 
             {/* Render all items for this track - dimmed when the track is disabled */}
             <TimelineTrackItems
+              trackId={track.id}
               trackItems={trackItems}
               trackLocked={isTrackLocked}
               trackHidden={isTrackDisabled}
