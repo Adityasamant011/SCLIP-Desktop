@@ -22,13 +22,31 @@ interface ZoomActions {
   zoomToFit: (containerWidth: number, contentDurationSeconds: number) => void
 }
 
+interface SettledZoomState {
+  contentLevel: number
+  contentPixelsPerSecond: number
+}
+
+/**
+ * Content-only zoom channel.
+ *
+ * The live zoom store publishes on every wheel frame. Expensive clip selectors
+ * only care about the committed content scale, so keeping that pair in a
+ * separate store prevents every mounted clip from evaluating its selector on
+ * each live update.
+ */
+export const useSettledZoomStore = create<SettledZoomState>(() => ({
+  contentLevel: 1,
+  contentPixelsPerSecond: 100,
+}))
+
 // Throttle visual zoom updates a bit for non-immediate callers like the header
 // slider, then let committed content zoom catch up only after interaction settles.
 const VISUAL_ZOOM_THROTTLE_MS = 120
-// Keep rich clip content/culling frozen across a wheel burst, then catch it up
-// promptly after the last event. Track shells and the ruler still update every
-// frame during the gesture.
-const CONTENT_ZOOM_SETTLE_MS = 100
+// Keep rich clip content/culling frozen across a wheel burst, including slower
+// mouse-wheel notches. Track shells, canvases, and the ruler still update live;
+// this only keeps a late content commit from colliding with the next wheel task.
+const CONTENT_ZOOM_SETTLE_MS = 200
 let lastVisualZoomUpdate = 0
 let pendingVisualZoomLevel: number | null = null
 let pendingContentZoomLevel: number | null = null
@@ -138,9 +156,15 @@ function scheduleContentZoomCommit(set: (partial: Partial<ZoomState>) => void) {
   }, CONTENT_ZOOM_SETTLE_MS)
 }
 
-function stageContentZoomCommit(set: (partial: Partial<ZoomState>) => void, level: number) {
+function stageContentZoomCommit(
+  set: (partial: Partial<ZoomState>) => void,
+  level: number,
+  interactionAlreadyStarted = false,
+) {
   pendingContentZoomLevel = level
-  set({ isZoomInteracting: true })
+  if (!interactionAlreadyStarted) {
+    set({ isZoomInteracting: true })
+  }
   scheduleContentZoomCommit(set)
 }
 
@@ -206,7 +230,9 @@ export const useZoomStore = create<ZoomState & ZoomActions>((set, get) => ({
     pendingVisualZoomLevel = null
     lastVisualZoomUpdate = performance.now()
     setVisualZoom(set, level, true)
-    stageContentZoomCommit(set, level)
+    // setVisualZoom already publishes isZoomInteracting=true with the live
+    // geometry. Do not publish a second identical interaction-only state.
+    stageContentZoomCommit(set, level, true)
   },
   setZoomLevelSynchronized: (level) => {
     applySynchronizedZoom(set, level)
@@ -224,6 +250,21 @@ export const useZoomStore = create<ZoomState & ZoomActions>((set, get) => ({
     applySynchronizedZoom(set, newLevel)
   },
 }))
+
+// Keep direct `useZoomStore.setState(...)` calls (including focused tests and
+// restore paths) synchronized without adding more than one live subscriber.
+useZoomStore.subscribe((state, previousState) => {
+  if (
+    state.contentLevel === previousState.contentLevel &&
+    state.contentPixelsPerSecond === previousState.contentPixelsPerSecond
+  ) {
+    return
+  }
+  useSettledZoomStore.setState({
+    contentLevel: state.contentLevel,
+    contentPixelsPerSecond: state.contentPixelsPerSecond,
+  })
+})
 
 // Non-reactive handler registration — avoids unnecessary subscriber notifications
 let _zoomTo100Handler: ((centerFrame: number) => void) | null = null

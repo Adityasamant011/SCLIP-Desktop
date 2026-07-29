@@ -2,7 +2,7 @@ import { memo } from 'react'
 import { CONSTRAINED_COLORS, FREE_COLORS, type ActiveEdgeState } from './trim-constants'
 
 function getFramePositionStyle(frame: number): string {
-  return `calc(${frame} * var(--timeline-px-per-frame, 0px))`
+  return `calc(${frame} * var(--timeline-percent-per-frame, 0%))`
 }
 
 interface EdgeHalosProps {

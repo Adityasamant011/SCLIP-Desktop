@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useLayoutEffect, useRef, useSyncExternalStore } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { useTimelineViewportStore } from '../stores/timeline-viewport-store'
 import { useZoomStore } from '../stores/zoom-store'
 
@@ -10,6 +11,13 @@ import { useZoomStore } from '../stores/zoom-store'
  */
 export const CLIP_VISIBILITY_PREFETCH_MARGIN_PX = 600
 const RATIO_EPSILON = 0.002
+const subscribeToNothing = () => () => {}
+const getNullZoomSnapshot = () => null
+const subscribeToZoom = (onStoreChange: () => void) => useZoomStore.subscribe(onStoreChange)
+const getStandaloneZoomSnapshot = () => {
+  const state = useZoomStore.getState()
+  return state.isZoomInteracting ? Number.NaN : state.contentPixelsPerSecond
+}
 
 export interface ClipVisibilityState {
   isVisible: boolean
@@ -26,45 +34,65 @@ export interface ClipVisibilityState {
  * different coordinate spaces. Keep the last valid bounded window until zoom
  * settles instead of expanding every clip to its full duration.
  */
-export function useClipVisibility(clipLeftPx: number, clipWidthPx: number): ClipVisibilityState {
-  const [visibility, setVisibility] = useState<ClipVisibilityState>(() =>
+export function useClipVisibility(
+  clipLeftPx: number,
+  clipWidthPx: number,
+  geometryPixelsPerSecond?: number,
+): ClipVisibilityState {
+  const committedVisibilityRef = useRef<ClipVisibilityState>(
     computeVisibility(useTimelineViewportStore.getState(), clipLeftPx, clipWidthPx),
   )
 
-  useEffect(() => {
-    const apply = (viewport: TimelineViewportSnapshot) => {
-      // During zoom, clip positions and viewport scroll are in different
-      // coordinate spaces. Freeze the last valid bounded window.
-      if (useZoomStore.getState().isZoomInteracting) {
-        return
-      }
+  // Standalone consumers that do not provide their geometry scale retain a
+  // small settled-zoom subscription. Main-timeline clip content passes the
+  // bridged scale, so this selector stays null and cannot create a SyncLane
+  // zoom-end fan-out.
+  useSyncExternalStore(
+    geometryPixelsPerSecond === undefined ? subscribeToZoom : subscribeToNothing,
+    geometryPixelsPerSecond === undefined ? getStandaloneZoomSnapshot : getNullZoomSnapshot,
+    geometryPixelsPerSecond === undefined ? getStandaloneZoomSnapshot : getNullZoomSnapshot,
+  )
 
-      const next = computeVisibility(viewport, clipLeftPx, clipWidthPx)
-      setVisibility((prev) => {
-        if (
-          prev.isVisible === next.isVisible &&
-          Math.abs(prev.visibleStartRatio - next.visibleStartRatio) < RATIO_EPSILON &&
-          Math.abs(prev.visibleEndRatio - next.visibleEndRatio) < RATIO_EPSILON
-        ) {
-          return prev
-        }
-        return next
-      })
-    }
+  const visibility = useTimelineViewportStore(
+    useShallow(
+      useCallback(
+        (viewport) => {
+          const zoom = useZoomStore.getState()
+          const bridgedGeometryIsCurrent =
+            geometryPixelsPerSecond === undefined ||
+            Math.abs(geometryPixelsPerSecond - zoom.contentPixelsPerSecond) < 0.001
 
-    apply(useTimelineViewportStore.getState())
-    const unsubViewport = useTimelineViewportStore.subscribe(apply)
-    // Recompute when zoom interaction ends so the frozen window catches up.
-    const unsubZoom = useZoomStore.subscribe((curr, prev) => {
-      if (prev.isZoomInteracting && !curr.isZoomInteracting) {
-        apply(useTimelineViewportStore.getState())
-      }
-    })
-    return () => {
-      unsubViewport()
-      unsubZoom()
-    }
-  }, [clipLeftPx, clipWidthPx])
+          // Live scrollLeft and settled clip pixels use different coordinate
+          // spaces. Also remain frozen while the provider's concurrent geometry
+          // render is pending after the store itself has settled.
+          if (zoom.isZoomInteracting || !bridgedGeometryIsCurrent) {
+            return committedVisibilityRef.current
+          }
+
+          const next = computeVisibility(viewport, clipLeftPx, clipWidthPx)
+          const previous = committedVisibilityRef.current
+          if (
+            previous.isVisible === next.isVisible &&
+            Math.abs(previous.visibleStartRatio - next.visibleStartRatio) < RATIO_EPSILON &&
+            Math.abs(previous.visibleEndRatio - next.visibleEndRatio) < RATIO_EPSILON
+          ) {
+            return previous
+          }
+
+          return next
+        },
+        [clipLeftPx, clipWidthPx, geometryPixelsPerSecond],
+      ),
+    ),
+  )
+
+  // React refs are shared between current and work-in-progress fibers. Publish
+  // the frozen baseline only after the selected visibility has committed, so a
+  // suspended or abandoned zoom transition cannot leak its geometry into the
+  // currently painted timeline.
+  useLayoutEffect(() => {
+    committedVisibilityRef.current = visibility
+  }, [visibility])
 
   return visibility
 }

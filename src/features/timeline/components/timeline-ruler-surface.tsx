@@ -47,10 +47,7 @@ export const TimelineRulerSurface = memo(function TimelineRulerSurface({
   useEffect(
     () =>
       useZoomStore.subscribe((state, previousState) => {
-        if (
-          state.pixelsPerSecond !== previousState.pixelsPerSecond ||
-          state.contentPixelsPerSecond !== previousState.contentPixelsPerSecond
-        ) {
+        if (state.pixelsPerSecond !== previousState.pixelsPerSecond) {
           applyRulerZoom()
         }
       }),

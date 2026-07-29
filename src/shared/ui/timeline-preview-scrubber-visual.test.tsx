@@ -1,3 +1,4 @@
+import { Profiler } from 'react'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it } from 'vite-plus/test'
 
@@ -67,6 +68,46 @@ describe('TimelinePreviewScrubberVisual', () => {
     fireEvent.scroll(scrollTarget)
 
     expect(skim).toHaveStyle({ transform: 'translate3d(45px, 0, 0)' })
+  })
+
+  it('repositions from an imperative geometry signal without a React update', () => {
+    let pixelsPerFrame = 2
+    const listeners = new Set<() => void>()
+    const renderPhases: string[] = []
+    const repositionSignal = {
+      subscribe(listener: () => void) {
+        listeners.add(listener)
+        return () => listeners.delete(listener)
+      },
+    }
+
+    render(
+      <Profiler
+        id="preview-scrubber"
+        onRender={(_id, phase) => {
+          renderPhases.push(phase)
+        }}
+      >
+        <TimelinePreviewScrubberVisual
+          frameToPixels={(frame) => frame * pixelsPerFrame}
+          fps={30}
+          repositionSignal={repositionSignal}
+        />
+      </Profiler>,
+    )
+
+    act(() => usePlaybackStore.getState().setPreviewFrame(20))
+    const skim = screen.getByTestId('timeline-preview-scrubber')
+    expect(skim).toHaveStyle({ transform: 'translate3d(40px, 0, 0)' })
+    renderPhases.length = 0
+
+    pixelsPerFrame = 3.5
+    act(() => {
+      for (const listener of listeners) listener()
+    })
+
+    expect(skim).toHaveStyle({ transform: 'translate3d(70px, 0, 0)' })
+    expect(renderPhases).toEqual([])
   })
 
   it('stays hidden while any imperative scrub gesture is active', () => {

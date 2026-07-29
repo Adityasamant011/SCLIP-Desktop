@@ -96,6 +96,7 @@ import {
   type TimelineDropGhostPreviewsHandle,
 } from './timeline-drop-ghost-previews'
 import { TimelineTrackItems } from './timeline-track-items'
+import { createTimelineTrackContentLayerRef } from '../utils/timeline-live-geometry'
 
 /**
  * Lightweight on-demand context menu for track gaps.
@@ -226,6 +227,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
   const [gapContextMenuRequest, setGapContextMenuRequest] =
     useState<TrackGapContextMenuRequest | null>(null)
   const trackRef = useRef<HTMLDivElement>(null)
+  const [trackContentLayerRef] = useState(createTimelineTrackContentLayerRef)
   const gapContextMenuTokenRef = useRef(0)
   const dragPreviewCacheRef = useRef<{
     dropFrame: number | null
@@ -903,11 +905,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
     (e: React.MouseEvent) => {
       // Check if clicking on a clip (has data-item-id ancestor)
       const target = e.target as HTMLElement
-      if (
-        target.closest(
-          '[data-item-id], [data-item-context-anchor]',
-        )
-      ) {
+      if (target.closest('[data-item-id], [data-item-context-anchor]')) {
         // Let the clip's context menu handle it
         return
       }
@@ -1236,24 +1234,31 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
         onContextMenu={handleContextMenu}
       >
         <div className="relative" style={{ height: `${track.height}px` }}>
-          {!isDropDisabled && <TrackDropGhostOverlay trackId={track.id} />}
+          <div
+            ref={trackContentLayerRef}
+            data-timeline-track-content-layer
+            className="absolute inset-y-0 left-0"
+            style={{ width: '100%', contain: 'layout style' }}
+          >
+            {!isDropDisabled && <TrackDropGhostOverlay trackId={track.id} />}
 
-          {/* Render all items for this track - dimmed when the track is disabled */}
-          <TimelineTrackItems
-            trackItems={trackItems}
-            trackLocked={isTrackLocked}
-            trackHidden={isTrackDisabled}
-          />
+            {/* Render all items for this track - dimmed when the track is disabled */}
+            <TimelineTrackItems
+              trackItems={trackItems}
+              trackLocked={isTrackLocked}
+              trackHidden={isTrackDisabled}
+            />
 
-          {/* Render transitions for this track */}
-          {trackKind !== 'audio' &&
-            trackTransitions.map((transition) => (
-              <TransitionItem
-                key={transition.id}
-                transition={transition}
-                trackHidden={isTrackDisabled}
-              />
-            ))}
+            {/* Render transitions for this track */}
+            {trackKind !== 'audio' &&
+              trackTransitions.map((transition) => (
+                <TransitionItem
+                  key={transition.id}
+                  transition={transition}
+                  trackHidden={isTrackDisabled}
+                />
+              ))}
+          </div>
 
           {/* Locked track overlay indicator */}
           {isTrackLocked && (

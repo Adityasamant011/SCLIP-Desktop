@@ -1,10 +1,12 @@
-import { memo, useEffect, useLayoutEffect, useRef } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useRef } from 'react'
 
 import {
   computeLiveViewportWaveformCanvasGeometry,
+  computeTimelineWaveformCanvasGeometry,
   computeVisibleWaveformCanvasGeometry,
   type VisibleWaveformCanvasGeometry,
 } from './visible-waveform-canvas-geometry'
+import { useTimelineViewportStore } from '../../stores/timeline-viewport-store'
 import { useZoomStore } from '../../stores/zoom-store'
 
 interface VisibleWaveformCanvasProps {
@@ -22,7 +24,9 @@ interface VisibleWaveformCanvasProps {
   viewportVersion: string
   /** Throttled content/zoom version. */
   version: string | number
-  /** Measure the real live clip/viewport intersection before drawing. */
+  /** Waveform data revision, excluding zoom-only changes. */
+  contentVersion?: string | number
+  /** Track the real live clip/viewport intersection before drawing. */
   liveTimelineViewport?: boolean
   liveViewportOverscanPx?: number
   renderWindow: (
@@ -32,16 +36,89 @@ interface VisibleWaveformCanvasProps {
   ) => void
 }
 
+interface LiveTimelineSnapshot {
+  pixelsPerSecond: number
+  scrollLeft: number
+  viewportWidth: number
+}
+
+function getLiveTimelineSnapshot(): LiveTimelineSnapshot {
+  const { pixelsPerSecond } = useZoomStore.getState()
+  const { scrollLeft, viewportWidth } = useTimelineViewportStore.getState()
+  return {
+    pixelsPerSecond,
+    scrollLeft,
+    viewportWidth,
+  }
+}
+
+function parseRequiredFiniteNumber(value: string | undefined): number | null {
+  if (value === undefined || value.trim() === '') return null
+  const number = Number(value)
+  return Number.isFinite(number) ? number : null
+}
+
+function parseOptionalInset(value: string | undefined): number | null {
+  if (value === undefined) return 0
+  const number = parseRequiredFiniteNumber(value)
+  return number !== null && number >= 0 ? number : null
+}
+
+function computeLiveTimelineGeometryFromItem(
+  timelineItem: HTMLElement | null,
+  snapshot: LiveTimelineSnapshot,
+  overscanPx: number,
+): VisibleWaveformCanvasGeometry | null {
+  if (!timelineItem) return null
+
+  const transform = timelineItem.style.transform.trim()
+  if (transform !== '' && transform !== 'none') {
+    return null
+  }
+
+  const startFrame = parseRequiredFiniteNumber(timelineItem.dataset.timelineStartFrame)
+  const durationFrames = parseRequiredFiniteNumber(timelineItem.dataset.timelineDurationFrames)
+  const fps = parseRequiredFiniteNumber(timelineItem.dataset.timelineFps)
+  const contentInsetStartPx = parseOptionalInset(timelineItem.dataset.timelineContentInsetStartPx)
+  const contentInsetEndPx = parseOptionalInset(timelineItem.dataset.timelineContentInsetEndPx)
+  if (
+    startFrame === null ||
+    durationFrames === null ||
+    fps === null ||
+    contentInsetStartPx === null ||
+    contentInsetEndPx === null
+  ) {
+    return null
+  }
+
+  return computeTimelineWaveformCanvasGeometry({
+    startFrame,
+    durationFrames,
+    fps,
+    pixelsPerSecond: snapshot.pixelsPerSecond,
+    scrollLeft: snapshot.scrollLeft,
+    viewportWidth: snapshot.viewportWidth,
+    overscanPx,
+    contentInsetStartPx,
+    contentInsetEndPx,
+  })
+}
+
 function measureLiveTimelineGeometry(
   canvas: HTMLCanvasElement,
   overscanPx: number,
+  timelineViewport = canvas.closest<HTMLElement>('[data-timeline-scroll-container]'),
+  viewportRectCache?: Map<HTMLElement, DOMRect>,
 ): VisibleWaveformCanvasGeometry | null {
   const host = canvas.parentElement
-  const timelineViewport = canvas.closest<HTMLElement>('[data-timeline-scroll-container]')
   if (!host || !timelineViewport) return null
 
   const hostRect = host.getBoundingClientRect()
-  const viewportRect = timelineViewport.getBoundingClientRect()
+  let viewportRect = viewportRectCache?.get(timelineViewport)
+  if (!viewportRect) {
+    viewportRect = timelineViewport.getBoundingClientRect()
+    viewportRectCache?.set(timelineViewport, viewportRect)
+  }
   return computeLiveViewportWaveformCanvasGeometry({
     hostLeft: hostRect.left,
     hostWidth: hostRect.width,
@@ -53,33 +130,50 @@ function measureLiveTimelineGeometry(
 
 interface LiveCanvasRegistration {
   canvas: HTMLCanvasElement
+  timelineItem: HTMLElement | null
+  timelineViewport: HTMLElement | null
   overscanPx: number
+  lastPixelsPerSecond: number
   redraw: (geometry: VisibleWaveformCanvasGeometry) => void
 }
 
 const liveCanvasRegistrations = new Set<LiveCanvasRegistration>()
 let liveCanvasPositionUpdateQueued = false
 let unsubscribeLiveCanvasZoom: (() => void) | null = null
+let unsubscribeLiveCanvasViewport: (() => void) | null = null
 
 function scheduleLiveCanvasPositionUpdate(): void {
   if (liveCanvasPositionUpdateQueued) return
   liveCanvasPositionUpdateQueued = true
   queueMicrotask(() => {
     liveCanvasPositionUpdateQueued = false
+    const snapshot = getLiveTimelineSnapshot()
+    let viewportRectCache: Map<HTMLElement, DOMRect> | undefined
     const updates: Array<{
       registration: LiveCanvasRegistration
       geometry: VisibleWaveformCanvasGeometry
       needsRedraw: boolean
     }> = []
 
-    // Read every live rect first, then write every style. This avoids forcing a
-    // fresh layout between sibling waveform canvases on dense timelines.
+    // Timeline items use arithmetic from the shared live zoom/viewport snapshot.
+    // Only transformed items or legacy/malformed markup fall back to DOM reads.
+    // Read every fallback rect before writing any style to avoid layout thrash.
     for (const registration of liveCanvasRegistrations) {
       if (!registration.canvas.isConnected) continue
-      const geometry = measureLiveTimelineGeometry(
-        registration.canvas,
+      let geometry = computeLiveTimelineGeometryFromItem(
+        registration.timelineItem,
+        snapshot,
         registration.overscanPx,
       )
+      if (!geometry) {
+        viewportRectCache ??= new Map<HTMLElement, DOMRect>()
+        geometry = measureLiveTimelineGeometry(
+          registration.canvas,
+          registration.overscanPx,
+          registration.timelineViewport,
+          viewportRectCache,
+        )
+      }
       if (geometry && geometry.width > 0) {
         const currentWidth = Number.parseFloat(registration.canvas.style.width) || 0
         updates.push({
@@ -87,16 +181,19 @@ function scheduleLiveCanvasPositionUpdate(): void {
           geometry,
           needsRedraw:
             registration.canvas.style.display === 'none' ||
-            currentWidth + 0.5 < geometry.width,
+            currentWidth + 0.5 < geometry.width ||
+            Math.abs(registration.lastPixelsPerSecond - snapshot.pixelsPerSecond) > 0.001,
         })
       }
     }
     for (const update of updates) {
       if (update.needsRedraw) {
-        // A growing clip/window needs real new pixels. This is uncommon and
-        // redraws only the bounded intersection; changing CSS width alone would
-        // stretch and blur the old bitmap.
+        // A scale change needs real new pixels even when the bounded window is
+        // shrinking. Redraw imperatively from the current live store snapshot;
+        // React remains on settled geometry and therefore cannot fan out one
+        // state update per waveform during the wheel gesture.
         update.registration.redraw(update.geometry)
+        update.registration.lastPixelsPerSecond = snapshot.pixelsPerSecond
       } else {
         // Keep the existing sharp bitmap and backing size; only move it into the
         // new viewport window until the cadence-limited redraw catches up.
@@ -111,11 +208,28 @@ function registerLiveCanvasPositionUpdates(
   overscanPx: number,
   redraw: (geometry: VisibleWaveformCanvasGeometry) => void,
 ): () => void {
-  const registration = { canvas, overscanPx, redraw }
+  const registration = {
+    canvas,
+    timelineItem: canvas.closest<HTMLElement>('[data-timeline-item]'),
+    timelineViewport: canvas.closest<HTMLElement>('[data-timeline-scroll-container]'),
+    overscanPx,
+    lastPixelsPerSecond: useZoomStore.getState().pixelsPerSecond,
+    redraw,
+  }
   liveCanvasRegistrations.add(registration)
   if (!unsubscribeLiveCanvasZoom) {
     unsubscribeLiveCanvasZoom = useZoomStore.subscribe((state, previousState) => {
       if (state.pixelsPerSecond !== previousState.pixelsPerSecond) {
+        scheduleLiveCanvasPositionUpdate()
+      }
+    })
+  }
+  if (!unsubscribeLiveCanvasViewport) {
+    unsubscribeLiveCanvasViewport = useTimelineViewportStore.subscribe((state, previousState) => {
+      if (
+        state.scrollLeft !== previousState.scrollLeft ||
+        state.viewportWidth !== previousState.viewportWidth
+      ) {
         scheduleLiveCanvasPositionUpdate()
       }
     })
@@ -126,6 +240,10 @@ function registerLiveCanvasPositionUpdates(
     if (liveCanvasRegistrations.size === 0 && unsubscribeLiveCanvasZoom) {
       unsubscribeLiveCanvasZoom()
       unsubscribeLiveCanvasZoom = null
+    }
+    if (liveCanvasRegistrations.size === 0 && unsubscribeLiveCanvasViewport) {
+      unsubscribeLiveCanvasViewport()
+      unsubscribeLiveCanvasViewport = null
     }
   }
 }
@@ -142,18 +260,23 @@ export const VisibleWaveformCanvas = memo(function VisibleWaveformCanvas({
   height,
   visibleStartPx,
   visibleEndPx,
-  viewportVersion,
   version,
+  contentVersion,
   liveTimelineViewport = false,
   liveViewportOverscanPx = 0,
   renderWindow,
 }: VisibleWaveformCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const latestGeometryRef = useRef({ width, visibleStartPx, visibleEndPx })
-  latestGeometryRef.current = { width, visibleStartPx, visibleEndPx }
-  const redrawGeometryRef = useRef<(geometry: VisibleWaveformCanvasGeometry) => void>(
-    () => {},
-  )
+  const redrawGeometryRef = useRef<(geometry: VisibleWaveformCanvasGeometry) => void>(() => {})
+  const lastDrawRef = useRef<{
+    left: number
+    width: number
+    height: number
+    backingWidth: number
+    backingHeight: number
+    renderWindow: VisibleWaveformCanvasProps['renderWindow']
+    renderRevision: string | number | null
+  } | null>(null)
 
   useEffect(() => {
     if (!liveTimelineViewport) return
@@ -164,64 +287,100 @@ export const VisibleWaveformCanvas = memo(function VisibleWaveformCanvas({
     })
   }, [liveTimelineViewport, liveViewportOverscanPx])
 
-  redrawGeometryRef.current = (geometry) => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    if (geometry.width <= 0 || height <= 0) {
-      canvas.style.display = 'none'
-      return
-    }
+  const redrawGeometry = useCallback(
+    (geometry: VisibleWaveformCanvasGeometry) => {
+      const canvas = canvasRef.current
+      if (!canvas) return
+      if (geometry.width <= 0 || height <= 0) {
+        canvas.style.display = 'none'
+        lastDrawRef.current = null
+        return
+      }
 
-    const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1))
-    const backingWidth = Math.max(1, Math.ceil(geometry.width * dpr))
-    const backingHeight = Math.max(1, Math.ceil(height * dpr))
+      const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1))
+      const backingWidth = Math.max(1, Math.ceil(geometry.width * dpr))
+      const backingHeight = Math.max(1, Math.ceil(height * dpr))
+      const renderRevision = liveTimelineViewport
+        ? `${contentVersion ?? version}:${useZoomStore.getState().pixelsPerSecond}`
+        : version
+      const previousDraw = lastDrawRef.current
+      if (
+        canvas.style.display !== 'none' &&
+        previousDraw !== null &&
+        Math.abs(previousDraw.left - geometry.left) < 0.01 &&
+        Math.abs(previousDraw.width - geometry.width) < 0.01 &&
+        previousDraw.height === height &&
+        previousDraw.backingWidth === backingWidth &&
+        previousDraw.backingHeight === backingHeight &&
+        previousDraw.renderWindow === renderWindow &&
+        previousDraw.renderRevision === renderRevision
+      ) {
+        return
+      }
 
-    // Commit layout and backing dimensions together. Never mutate only the CSS
-    // width: that would resample and blur the previous bitmap.
-    canvas.style.display = 'block'
-    canvas.style.left = `${geometry.left}px`
-    canvas.style.width = `${geometry.width}px`
-    canvas.style.height = `${height}px`
-    canvas.width = backingWidth
-    canvas.height = backingHeight
+      // Assigning either backing dimension resets the 2D context even when the
+      // value is unchanged. Preserve it for content-only redraws while still
+      // resizing to the exact rounded DPR dimensions whenever geometry changes.
+      canvas.style.display = 'block'
+      canvas.style.left = `${geometry.left}px`
+      canvas.style.width = `${geometry.width}px`
+      canvas.style.height = `${height}px`
+      if (canvas.width !== backingWidth) {
+        canvas.width = backingWidth
+      }
+      if (canvas.height !== backingHeight) {
+        canvas.height = backingHeight
+      }
 
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return
 
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-    ctx.clearRect(0, 0, geometry.width, height)
-    renderWindow(ctx, geometry.left, geometry.width)
-  }
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      ctx.clearRect(0, 0, geometry.width, height)
+      renderWindow(ctx, geometry.left, geometry.width)
+      lastDrawRef.current = {
+        left: geometry.left,
+        width: geometry.width,
+        height,
+        backingWidth,
+        backingHeight,
+        renderWindow,
+        renderRevision,
+      }
+    },
+    [contentVersion, height, liveTimelineViewport, renderWindow, version],
+  )
 
   useLayoutEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
+    // Store-driven callbacks must keep using the last committed render. Refs
+    // are shared by current and work-in-progress fibers, so publishing this
+    // during render would let an abandoned zoom transition affect the canvas.
+    redrawGeometryRef.current = redrawGeometry
 
-    const latest = latestGeometryRef.current
-    let geometry = computeVisibleWaveformCanvasGeometry(
-      latest.width,
-      latest.visibleStartPx,
-      latest.visibleEndPx,
-    )
+    let geometry = computeVisibleWaveformCanvasGeometry(width, visibleStartPx, visibleEndPx)
     if (liveTimelineViewport) {
       geometry =
-        measureLiveTimelineGeometry(canvas, liveViewportOverscanPx) ?? geometry
+        computeLiveTimelineGeometryFromItem(
+          canvas.closest<HTMLElement>('[data-timeline-item]'),
+          getLiveTimelineSnapshot(),
+          liveViewportOverscanPx,
+        ) ??
+        measureLiveTimelineGeometry(canvas, liveViewportOverscanPx) ??
+        geometry
     }
-    redrawGeometryRef.current(geometry)
+    redrawGeometry(geometry)
   }, [
-    height,
     liveTimelineViewport,
     liveViewportOverscanPx,
-    renderWindow,
-    version,
-    viewportVersion,
+    redrawGeometry,
+    visibleEndPx,
+    visibleStartPx,
+    width,
   ])
 
   return (
-    <canvas
-      ref={canvasRef}
-      className="absolute top-0 pointer-events-none"
-      aria-hidden="true"
-    />
+    <canvas ref={canvasRef} className="absolute top-0 pointer-events-none" aria-hidden="true" />
   )
 })

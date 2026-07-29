@@ -87,11 +87,7 @@ describe('timeline navigator interaction', () => {
     scrollContainer.scrollLeft = 120
 
     const { getByTestId } = render(
-      <TimelineNavigator
-        actualDuration={10}
-        timelineWidth={1000}
-        scrollContainerRef={{ current: scrollContainer }}
-      />,
+      <TimelineNavigator actualDuration={10} scrollContainerRef={{ current: scrollContainer }} />,
     )
 
     fireEvent.click(getByTestId('timeline-navigator-thumb'))
@@ -102,11 +98,7 @@ describe('timeline navigator interaction', () => {
   it('does not React-render for scroll-only viewport publications', () => {
     const scrollContainer = document.createElement('div')
     render(
-      <TimelineNavigator
-        actualDuration={10}
-        timelineWidth={1000}
-        scrollContainerRef={{ current: scrollContainer }}
-      />,
+      <TimelineNavigator actualDuration={10} scrollContainerRef={{ current: scrollContainer }} />,
     )
     perfMarkMocks.mark.mockClear()
 
@@ -124,11 +116,7 @@ describe('timeline navigator interaction', () => {
     const scrollContainer = document.createElement('div')
 
     const { getByTestId } = render(
-      <TimelineNavigator
-        actualDuration={10}
-        timelineWidth={1240}
-        scrollContainerRef={{ current: scrollContainer }}
-      />,
+      <TimelineNavigator actualDuration={10} scrollContainerRef={{ current: scrollContainer }} />,
     )
 
     const thumb = getByTestId('timeline-navigator-thumb')
@@ -169,11 +157,7 @@ describe('timeline navigator interaction', () => {
     const scrollContainerRef = { current: scrollContainer }
 
     const { getByTestId, rerender } = render(
-      <TimelineNavigator
-        actualDuration={10}
-        timelineWidth={1000}
-        scrollContainerRef={scrollContainerRef}
-      />,
+      <TimelineNavigator actualDuration={10} scrollContainerRef={scrollContainerRef} />,
     )
 
     const thumb = getByTestId('timeline-navigator-thumb')
@@ -185,13 +169,7 @@ describe('timeline navigator interaction', () => {
     expect(previewWidth).not.toBe(initialWidth)
     expect(frameCallbacks).toHaveLength(1)
 
-    rerender(
-      <TimelineNavigator
-        actualDuration={10}
-        timelineWidth={1000}
-        scrollContainerRef={scrollContainerRef}
-      />,
-    )
+    rerender(<TimelineNavigator actualDuration={10} scrollContainerRef={scrollContainerRef} />)
     expect(thumb.style.width).toBe(previewWidth)
 
     fireEvent.mouseUp(window)
@@ -220,11 +198,7 @@ describe('timeline navigator interaction', () => {
     scrollContainer.addEventListener(TIMELINE_LIVE_SCROLL_EVENT, liveViewportChange)
 
     const { getByTestId } = render(
-      <TimelineNavigator
-        actualDuration={10}
-        timelineWidth={1000}
-        scrollContainerRef={{ current: scrollContainer }}
-      />,
+      <TimelineNavigator actualDuration={10} scrollContainerRef={{ current: scrollContainer }} />,
     )
 
     fireEvent.mouseDown(getByTestId('timeline-navigator-thumb'), { clientX: 200 })
@@ -259,11 +233,7 @@ describe('timeline navigator interaction', () => {
     scrollContainer.scrollLeft = 2000
 
     const { getByTestId } = render(
-      <TimelineNavigator
-        actualDuration={1000}
-        timelineWidth={100_240}
-        scrollContainerRef={{ current: scrollContainer }}
-      />,
+      <TimelineNavigator actualDuration={1000} scrollContainerRef={{ current: scrollContainer }} />,
     )
 
     const thumb = getByTestId('timeline-navigator-thumb')
@@ -316,11 +286,7 @@ describe('timeline navigator interaction', () => {
     scrollContainer.scrollLeft = 120
 
     const { getByTestId } = render(
-      <TimelineNavigator
-        actualDuration={10}
-        timelineWidth={1240}
-        scrollContainerRef={{ current: scrollContainer }}
-      />,
+      <TimelineNavigator actualDuration={10} scrollContainerRef={{ current: scrollContainer }} />,
     )
 
     const initialMetrics = getNavigatorThumbMetrics({

@@ -74,6 +74,7 @@ export const ClipFilmstrip = memo(function ClipFilmstrip({
   visibleStartRatio = 0,
   visibleEndRatio = 1,
   pixelsPerSecond,
+  preferImmediateRendering = false,
 }: ClipFilmstripProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [height, setHeight] = useState(0)
@@ -142,9 +143,7 @@ export const ClipFilmstrip = memo(function ClipFilmstrip({
         minimumPadTiles: VIEWPORT_PAD_TILES,
         minimumPadPx: VIEWPORT_PAD_PX,
         maxWindowWidth:
-          viewportWidth > 0
-            ? viewportWidth + CLIP_VISIBILITY_PREFETCH_MARGIN_PX * 2
-            : undefined,
+          viewportWidth > 0 ? viewportWidth + CLIP_VISIBILITY_PREFETCH_MARGIN_PX * 2 : undefined,
       }),
     [
       renderClipWidth,
@@ -270,63 +269,6 @@ export const ClipFilmstrip = memo(function ClipFilmstrip({
     [mediaId],
   )
 
-  // Build the pixel-aligned visible slot grid. The renderer paints these cached
-  // sources into one bounded canvas instead of mounting one DOM node per slot.
-  const tiles = useMemo(() => {
-    if (!renderFrames || renderFrames.length === 0 || renderPixelsPerSecond <= 0) return []
-    if (effectiveEnd <= effectiveStart) return []
-
-    const pixelsPerSourceSecond = renderPixelsPerSecond / Math.max(0.0001, speed)
-    const tileWidth = thumbnailWidth
-
-    const { startTile, endTile } = filmstripRenderWindow
-    if (endTile <= startTile) return []
-
-    const findClosestFrame = (targetTime: number): FilmstripFrame | null => {
-      if (renderFrames.length === 0) return null
-      let lo = 0
-      let hi = renderFrames.length - 1
-      let best = renderFrames[0]!
-      let bestDiff = Math.abs(best.index - targetTime)
-      while (lo <= hi) {
-        const mid = (lo + hi) >> 1
-        const f = renderFrames[mid]!
-        const diff = Math.abs(f.index - targetTime)
-        if (diff < bestDiff) {
-          best = f
-          bestDiff = diff
-        }
-        if (f.index < targetTime) lo = mid + 1
-        else hi = mid - 1
-      }
-      return best
-    }
-
-    const result: { slot: number; frame: FilmstripFrame; x: number; width: number }[] = []
-
-    for (let slot = startTile; slot < endTile; slot++) {
-      const slotX = slot * tileWidth
-      const slotCenterX = slotX + tileWidth * 0.5
-      const slotCenterTime = isReversed
-        ? effectiveEnd - slotCenterX / pixelsPerSourceSecond
-        : effectiveStart + slotCenterX / pixelsPerSourceSecond
-      const frame = findClosestFrame(slotCenterTime)
-      if (!frame) continue
-      result.push({ slot, frame, x: slotX, width: tileWidth })
-    }
-
-    return result
-  }, [
-    renderFrames,
-    renderPixelsPerSecond,
-    filmstripRenderWindow,
-    effectiveStart,
-    effectiveEnd,
-    isReversed,
-    speed,
-    thumbnailWidth,
-  ])
-
   // Share one stable fallback frame per media item. Every clip instance then
   // reuses the same decoded source across virtualization and zoom remounts.
   const coverFrame = useMemo(() => {
@@ -374,9 +316,17 @@ export const ClipFilmstrip = memo(function ClipFilmstrip({
         height={height}
         visibleStartPx={filmstripRenderWindow.paddedStartX}
         visibleEndPx={filmstripRenderWindow.paddedEndX}
-        tiles={tiles}
+        frames={renderFrames}
+        pixelsPerSecond={renderPixelsPerSecond}
+        effectiveStart={effectiveStart}
+        effectiveEnd={effectiveEnd}
+        speed={speed}
+        isReversed={isReversed}
+        tileWidth={thumbnailWidth}
         coverFrame={coverFrame}
         onSourceError={handleFrameSourceError}
+        liveTimelineViewport={!preferImmediateRendering && isVisible}
+        liveViewportOverscanPx={CLIP_VISIBILITY_PREFETCH_MARGIN_PX}
       />
     </div>
   )

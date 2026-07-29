@@ -8,7 +8,7 @@ interface TimelineItemHitTargetProps {
 }
 
 function getFramePositionStyle(frame: number): string {
-  return `calc(${frame} * var(--timeline-px-per-frame, 0px))`
+  return `calc(${frame} * var(--timeline-percent-per-frame, 0%))`
 }
 
 export const TimelineItemHitTarget = memo(function TimelineItemHitTarget({

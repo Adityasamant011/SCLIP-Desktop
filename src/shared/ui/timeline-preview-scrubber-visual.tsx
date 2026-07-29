@@ -17,6 +17,10 @@ interface ImperativeBooleanSignal {
   subscribe: (listener: () => void) => () => void
 }
 
+interface ImperativeSignal {
+  subscribe: (listener: () => void) => () => void
+}
+
 function isImperativelySuppressed(
   suppressRefs: ReadonlyArray<MutableRefObject<boolean>> | undefined,
   suppressSignal: ImperativeBooleanSignal | undefined,
@@ -46,6 +50,8 @@ interface TimelinePreviewScrubberVisualProps {
   suppressed?: boolean
   suppressRefs?: ReadonlyArray<MutableRefObject<boolean>>
   suppressSignal?: ImperativeBooleanSignal
+  /** Reposition from the live mapper when external geometry changes. */
+  repositionSignal?: ImperativeSignal
   /** Reposition from the live mapper whenever an external timeline scrolls. */
   positionSyncTargetRef?: RefObject<HTMLElement | null>
   zIndex?: number
@@ -62,6 +68,7 @@ export function TimelinePreviewScrubberVisual({
   suppressed = false,
   suppressRefs,
   suppressSignal,
+  repositionSignal,
   positionSyncTargetRef,
   zIndex = 20,
 }: TimelinePreviewScrubberVisualProps) {
@@ -137,6 +144,13 @@ export function TimelinePreviewScrubberVisual({
   }, [suppressSignal, updatePosition])
 
   useEffect(() => {
+    if (!repositionSignal) return
+    return repositionSignal.subscribe(() => {
+      updatePosition(usePlaybackStore.getState().previewFrame)
+    })
+  }, [repositionSignal, updatePosition])
+
+  useEffect(() => {
     const target = positionSyncTargetRef?.current
     if (!target) return
     const reposition = () => updatePosition(usePlaybackStore.getState().previewFrame)
@@ -146,7 +160,7 @@ export function TimelinePreviewScrubberVisual({
 
   useLayoutEffect(() => {
     updatePosition(usePlaybackStore.getState().previewFrame)
-  }, [frameToPixels, maxFrame, suppressed, updatePosition])
+  }, [fps, frameToPixels, maxFrame, suppressed, updatePosition])
 
   useEffect(() => {
     const updateColor = (tool: string) => {

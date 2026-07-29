@@ -1,3 +1,4 @@
+import { Profiler } from 'react'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it } from 'vite-plus/test'
 import type { Transition } from '@/types/transition'
@@ -97,8 +98,18 @@ describe('TransitionItem preview bridge motion', () => {
 
   it('keeps bridge geometry pinned to clips during live zoom', () => {
     setTransitionClips()
+    let updateCommits = 0
 
-    render(<TransitionItem transition={transition} />)
+    render(
+      <Profiler
+        id="transition"
+        onRender={(_id, phase) => {
+          if (phase === 'update') updateCommits++
+        }}
+      >
+        <TransitionItem transition={transition} />
+      </Profiler>,
+    )
 
     const overlay = screen.getByTitle('Fade (0.7s)')
     const initialLeft = Number.parseFloat(overlay.style.left)
@@ -109,6 +120,7 @@ describe('TransitionItem preview bridge motion', () => {
     expect(useZoomStore.getState().contentLevel).toBe(1)
     expect(Number.parseFloat(overlay.style.left)).toBeCloseTo(initialLeft * 1.5)
     expect(Number.parseFloat(overlay.style.width)).toBeCloseTo(initialWidth * 1.5)
+    expect(updateCommits).toBe(0)
   })
 
   it('updates bridge position in realtime while rolling preview delta changes', () => {

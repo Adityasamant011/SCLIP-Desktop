@@ -11,6 +11,10 @@ import { useTimelineSettingsStore } from '../stores/timeline-settings-store'
 import { useTimelineViewportStore, _resetViewportThrottle } from '../stores/timeline-viewport-store'
 import { useTransitionsStore } from '../stores/transitions-store'
 import { _resetZoomStoreForTest, useZoomStore } from '../stores/zoom-store'
+import {
+  DEFAULT_TIMELINE_ITEM_CULL_BUFFER_PX,
+  DENSE_TIMELINE_TRACK_ITEM_THRESHOLD,
+} from '../utils/timeline-dom-density'
 
 function makeItem(id: string, from: number, duration: number): VideoItem {
   return {
@@ -89,7 +93,7 @@ function getVisibleFrameRange(
   viewportWidth: number,
   pps: number,
   fps: number,
-  buffer = 500,
+  buffer = DEFAULT_TIMELINE_ITEM_CULL_BUFFER_PX,
 ) {
   const leftPx = scrollLeft - buffer
   const rightPx = scrollLeft + viewportWidth + buffer
@@ -139,14 +143,14 @@ describe('useVisibleItems filtering logic', () => {
 
   it('excludes items fully outside the buffered viewport', () => {
     const range = getVisibleFrameRange(0, 1000, pps, fps)
-    const items = [makeItem('a', 0, 30), makeItem('b', 600, 30)]
+    const items = [makeItem('a', 0, 30), makeItem('b', 1000, 30)]
     const visible = filterItems(items, range)
     expect(visible.map((item) => item.id)).toEqual(['a'])
   })
 
   it('includes items partially overlapping the left edge', () => {
-    const range = getVisibleFrameRange(2000, 1000, pps, fps)
-    const items = [makeItem('a', 440, 30), makeItem('b', 0, 30)]
+    const range = getVisibleFrameRange(4000, 1000, pps, fps)
+    const items = [makeItem('a', 590, 30), makeItem('b', 0, 30)]
     const visible = filterItems(items, range)
     expect(visible.map((item) => item.id)).toEqual(['a'])
   })
@@ -154,6 +158,19 @@ describe('useVisibleItems filtering logic', () => {
   it('returns empty array when no items exist', () => {
     const range = getVisibleFrameRange(0, 1000, pps, fps)
     expect(filterItems([], range)).toEqual([])
+  })
+
+  it('uses the stable dense-track buffer to avoid mounting distant split shells', () => {
+    const denseItems = Array.from({ length: DENSE_TIMELINE_TRACK_ITEM_THRESHOLD }, (_, index) =>
+      makeItem(`dense-${index}`, index * 30, 30),
+    )
+    useItemsStore.getState().setItems(denseItems)
+
+    render(createElement(VisibleItemsProbe, { onRender: vi.fn() }))
+
+    const visibleIds = screen.getByTestId('visible-items').textContent?.split(',').filter(Boolean)
+    expect(visibleIds).toHaveLength(16)
+    expect(visibleIds?.at(-1)).toBe('dense-15')
   })
 
   it('does not re-render when scroll stays within the same visible item window', () => {
@@ -215,7 +232,7 @@ describe('useVisibleItems filtering logic', () => {
     vi.useRealTimers()
   })
 
-  it('keeps the mounted item set stable during live zoom-in and culls on settle', () => {
+  it('keeps the mounted item set stable through zoom settle and prunes after quiet', () => {
     vi.useFakeTimers()
 
     useItemsStore.getState().setItems([
@@ -226,7 +243,7 @@ describe('useVisibleItems filtering logic', () => {
     const onRender = vi.fn()
     render(createElement(VisibleItemsProbe, { onRender }))
 
-    expect(screen.getByTestId('visible-items')).toHaveTextContent('a,b')
+    expect(screen.getByTestId('visible-items')).toHaveTextContent(/^a,b$/)
     expect(onRender).toHaveBeenCalledTimes(1)
 
     // Zoom in — keep the mounted set stable during the interaction so clips do
@@ -235,16 +252,101 @@ describe('useVisibleItems filtering logic', () => {
       useZoomStore.getState().setZoomLevelImmediate(2)
     })
 
-    expect(screen.getByTestId('visible-items')).toHaveTextContent('a,b')
+    expect(screen.getByTestId('visible-items')).toHaveTextContent(/^a,b$/)
     expect(onRender).toHaveBeenCalledTimes(1)
 
-    // After settle, recompute once in the committed coordinate space.
+    // The 200ms content settle does not retire a large cohort in the same task.
     act(() => {
-      vi.advanceTimersByTime(100)
+      vi.advanceTimersByTime(200)
     })
 
-    expect(screen.getByTestId('visible-items')).toHaveTextContent('a')
+    expect(screen.getByTestId('visible-items')).toHaveTextContent(/^a,b$/)
+    expect(onRender).toHaveBeenCalledTimes(1)
+
+    // Offscreen surplus retires later under the shared per-frame budget.
+    act(() => {
+      vi.advanceTimersByTime(620)
+    })
+
+    expect(screen.getByTestId('visible-items')).toHaveTextContent(/^a$/)
     expect(onRender).toHaveBeenCalledTimes(2)
+
+    vi.useRealTimers()
+  })
+
+  it('retires a dense zoom-in surplus under the shared per-frame budget', () => {
+    vi.useFakeTimers()
+
+    const denseItems = Array.from({ length: DENSE_TIMELINE_TRACK_ITEM_THRESHOLD }, (_, index) =>
+      makeItem(`dense-${index}`, index * 30, 30),
+    )
+    useItemsStore.getState().setItems(denseItems)
+
+    render(createElement(VisibleItemsProbe, { onRender: vi.fn() }))
+
+    const getVisibleIds = () =>
+      screen.getByTestId('visible-items').textContent?.split(',').filter(Boolean) ?? []
+
+    expect(getVisibleIds()).toHaveLength(16)
+
+    act(() => {
+      useZoomStore.getState().setZoomLevelImmediate(2)
+      vi.advanceTimersByTime(200)
+    })
+
+    // Content zoom has settled, but culling is still in its independent quiet
+    // window so the wheel task does not also tear down eight rich clip trees.
+    expect(getVisibleIds()).toHaveLength(16)
+
+    act(() => {
+      vi.advanceTimersByTime(616)
+    })
+
+    // One shared animation frame retires at most four clips across all tracks.
+    expect(getVisibleIds()).toHaveLength(12)
+
+    act(() => {
+      vi.advanceTimersByTime(16)
+    })
+
+    expect(getVisibleIds()).toHaveLength(8)
+
+    vi.useRealTimers()
+  })
+
+  it('cancels a pending dense contraction when a new zoom gesture starts', () => {
+    vi.useFakeTimers()
+
+    const denseItems = Array.from({ length: DENSE_TIMELINE_TRACK_ITEM_THRESHOLD }, (_, index) =>
+      makeItem(`dense-${index}`, index * 30, 30),
+    )
+    useItemsStore.getState().setItems(denseItems)
+
+    const onRender = vi.fn()
+    render(createElement(VisibleItemsProbe, { onRender }))
+
+    act(() => {
+      useZoomStore.getState().setZoomLevelImmediate(2)
+      vi.advanceTimersByTime(200)
+      vi.advanceTimersByTime(500)
+      useZoomStore.getState().setZoomLevelImmediate(1)
+      vi.advanceTimersByTime(200)
+    })
+
+    const visibleIds =
+      screen.getByTestId('visible-items').textContent?.split(',').filter(Boolean) ?? []
+    expect(visibleIds).toHaveLength(16)
+    expect(onRender).toHaveBeenCalledTimes(1)
+
+    // The canceled first timer cannot wake later and retire clips against the
+    // newer settled zoom target.
+    act(() => {
+      vi.advanceTimersByTime(620)
+    })
+    expect(
+      screen.getByTestId('visible-items').textContent?.split(',').filter(Boolean),
+    ).toHaveLength(16)
+    expect(onRender).toHaveBeenCalledTimes(1)
 
     vi.useRealTimers()
   })
@@ -280,7 +382,7 @@ describe('useVisibleItems filtering logic', () => {
     // synchronously.
     expect(screen.getByTestId('visible-items')).toHaveTextContent('a')
 
-    // Animation frames before the 100ms settle: the staged expansion mounts the
+    // Animation frames before the 200ms settle: the staged expansion mounts the
     // newly-visible clip — so it does NOT wait for settle.
     act(() => {
       vi.advanceTimersByTime(50)
@@ -290,7 +392,7 @@ describe('useVisibleItems filtering logic', () => {
 
     // Settle recomputes in the committed coordinate space; the set stays 'a,b'.
     act(() => {
-      vi.advanceTimersByTime(50)
+      vi.advanceTimersByTime(150)
     })
 
     expect(screen.getByTestId('visible-items')).toHaveTextContent('a,b')

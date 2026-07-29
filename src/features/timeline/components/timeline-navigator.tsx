@@ -12,7 +12,6 @@ import { getNavigatorResizeDragResult, getNavigatorThumbMetrics } from './timeli
 
 interface TimelineNavigatorProps {
   actualDuration: number
-  timelineWidth: number
   scrollContainerRef: React.RefObject<HTMLDivElement | null>
 }
 
@@ -144,11 +143,7 @@ function isNavigatorViewHandoffState(
   return timelineWidthIsExpected && scrollLeftIsExpected
 }
 
-export function TimelineNavigator({
-  actualDuration,
-  timelineWidth,
-  scrollContainerRef,
-}: TimelineNavigatorProps) {
+export function TimelineNavigator({ actualDuration, scrollContainerRef }: TimelineNavigatorProps) {
   perfMarkRender('TimelineNavigator')
   const trackRef = useRef<HTMLDivElement>(null)
   const thumbRef = useRef<HTMLDivElement>(null)
@@ -178,13 +173,10 @@ export function TimelineNavigator({
   // The timeline content deliberately defers its expensive settled geometry
   // while wheel zoom is active. The navigator is lightweight and should mirror
   // the live geometry so its thumb does not jump only after input settles.
-  const navigatorTimelineWidth =
-    viewportWidth > 0
-      ? getTimelineWidth({
-          contentWidth: contentDuration * livePixelsPerSecondRef.current,
-          viewportWidth,
-        })
-      : timelineWidth
+  const navigatorTimelineWidth = getTimelineWidth({
+    contentWidth: contentDuration * livePixelsPerSecondRef.current,
+    viewportWidth,
+  })
   const navigatorScrollLeft = liveScrollLeftRef.current
 
   const currentMetrics = getNavigatorThumbMetrics({
@@ -225,13 +217,10 @@ export function TimelineNavigator({
     const nextTrackWidth = trackRef.current?.clientWidth ?? trackWidth
     const nextPixelsPerSecond = useZoomStore.getState().pixelsPerSecond
     const nextScrollLeft = scrollContainerRef.current?.scrollLeft ?? liveScrollLeftRef.current
-    const nextTimelineWidth =
-      viewportWidth > 0
-        ? getTimelineWidth({
-            contentWidth: contentDuration * nextPixelsPerSecond,
-            viewportWidth,
-          })
-        : timelineWidth
+    const nextTimelineWidth = getTimelineWidth({
+      contentWidth: contentDuration * nextPixelsPerSecond,
+      viewportWidth,
+    })
 
     livePixelsPerSecondRef.current = nextPixelsPerSecond
     liveScrollLeftRef.current = nextScrollLeft
@@ -245,7 +234,7 @@ export function TimelineNavigator({
         scrollLeft: nextScrollLeft,
       }),
     }
-  }, [contentDuration, scrollContainerRef, timelineWidth, trackWidth, viewportWidth])
+  }, [contentDuration, scrollContainerRef, trackWidth, viewportWidth])
 
   const syncThumbToLiveGeometry = useCallback(() => {
     if (dragSnapshotRef.current || !thumbRef.current) return

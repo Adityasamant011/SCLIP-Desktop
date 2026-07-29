@@ -65,6 +65,11 @@ export function subscribeFilmstripImage(
   entry.listeners.add(listener)
   touch(url, entry)
   prune()
+  if (entry.status === 'ready') {
+    onChange()
+  } else if (entry.status === 'error') {
+    onError()
+  }
 
   return () => {
     entry.listeners.delete(listener)

@@ -1,12 +1,4 @@
-import {
-  memo,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { WaveformSkeleton } from './waveform-skeleton'
 import { VisibleWaveformCanvas } from './visible-waveform-canvas'
 import { useMediaLibraryStore } from '@/features/timeline/deps/media-library-store'
@@ -21,10 +13,6 @@ import { mixCompoundClipWaveformPeaks } from '../../utils/compound-clip-waveform
 import { computeWaveformRenderWindow } from './render-window'
 import { computeWaveformAmplitude } from './amplitude'
 import { getPreviewStartupDelayMs, schedulePreviewWork } from '../../hooks/preview-work-budget'
-import {
-  getWaveformActiveTileCount,
-  useAdaptiveWaveformPixelsPerSecond,
-} from './adaptive-render-version'
 import { observeParentElementHeight } from '../measure-parent-height'
 import { useTimelineViewportStore } from '../../stores/timeline-viewport-store'
 import { useZoomStore } from '../../stores/zoom-store'
@@ -42,7 +30,6 @@ interface CompoundClipWaveformProps {
   isVisible: boolean
   visibleStartRatio?: number
   visibleEndRatio?: number
-  pixelsPerSecond: number
 }
 
 export const CompoundClipWaveform = memo(function CompoundClipWaveform({
@@ -54,7 +41,6 @@ export const CompoundClipWaveform = memo(function CompoundClipWaveform({
   isVisible,
   visibleStartRatio = 0,
   visibleEndRatio = 1,
-  pixelsPerSecond,
 }: CompoundClipWaveformProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const requestTokenRef = useRef(0)
@@ -118,21 +104,6 @@ export const CompoundClipWaveform = memo(function CompoundClipWaveform({
       visibleStartRatio,
     ],
   )
-  const settledActiveTileCount = useMemo(
-    () =>
-      getWaveformActiveTileCount({
-        renderWidth: settledRenderClipWidth,
-        visibleStartPx: settledRenderWindow.visibleStartPx,
-        visibleEndPx: settledRenderWindow.visibleEndPx,
-      }),
-    [settledRenderClipWidth, settledRenderWindow],
-  )
-  const renderPixelsPerSecond = useAdaptiveWaveformPixelsPerSecond({
-    pixelsPerSecond,
-    activeTileCount: settledActiveTileCount,
-    phaseKey: mediaIdsKey,
-    enabled: true,
-  })
   useEffect(() => {
     requestTokenRef.current += 1
     const requestToken = requestTokenRef.current
@@ -311,9 +282,12 @@ export const CompoundClipWaveform = memo(function CompoundClipWaveform({
     [height, normalizationPeak, peaks, sampleRate, sourceDuration, sourceStart],
   )
 
-  const renderVersion = `${peaks?.length ?? 0}:${height}:${waveformsByMediaId.size}:e${Math.round(
-    renderPixelsPerSecond * 1000,
-  )}:w${Math.round(settledRenderClipWidth)}`
+  // Live timeline canvases redraw imperatively from the current zoom store.
+  // Keeping adaptive zoom state here would only rerender this React subtree;
+  // content and geometry revisions already cover every required canvas draw.
+  const renderVersion = `${peaks?.length ?? 0}:${height}:${waveformsByMediaId.size}:w${Math.round(
+    settledRenderClipWidth,
+  )}`
 
   if (hasError) {
     return (
@@ -343,6 +317,7 @@ export const CompoundClipWaveform = memo(function CompoundClipWaveform({
       <VisibleWaveformCanvas
         width={settledRenderClipWidth}
         height={height}
+        contentVersion={`${peaks?.length ?? 0}:${waveformsByMediaId.size}`}
         liveTimelineViewport
         liveViewportOverscanPx={CLIP_VISIBILITY_PREFETCH_MARGIN_PX}
         renderWindow={renderWindow}

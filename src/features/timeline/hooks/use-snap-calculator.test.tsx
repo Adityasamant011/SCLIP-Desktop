@@ -14,9 +14,7 @@ function setupStores() {
   useZoomStore.setState({ level: 0.3, pixelsPerSecond: 30 })
   useItemsStore
     .getState()
-    .setTracks([
-      makeTimelineTrack({ id: 'track-v1', name: 'V1', kind: 'video', order: 0 }),
-    ])
+    .setTracks([makeTimelineTrack({ id: 'track-v1', name: 'V1', kind: 'video', order: 0 })])
   useItemsStore
     .getState()
     .setItems([
