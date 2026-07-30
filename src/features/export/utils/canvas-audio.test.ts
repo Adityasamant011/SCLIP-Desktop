@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import type { CompositionInputProps } from '@/types/export'
 import type { AudioItem, CompositionItem, TimelineTrack, VideoItem } from '@/types/timeline'
+import type { Transition } from '@/types/transition'
 import { useCompositionsStore } from '@/features/export/deps/timeline-compositions'
 
 const { inputConstructor } = vi.hoisted(() => ({ inputConstructor: vi.fn() }))
@@ -232,6 +233,86 @@ describe('extractAudioSegments', () => {
       mediaDependencyIds: [],
       mediaDependencyVersion: 0,
     })
+  })
+
+  it('yields embedded video audio when the composition has no transitions', () => {
+    // Regression: buildManagedTransitionAudioSegments used to bail out on an
+    // empty `transitions`, silently dropping ALL embedded video audio (the
+    // export then produced a file with no audio track at all).
+    const video = makeVideoItem({ volume: 0 })
+    const composition: CompositionInputProps = {
+      fps: 30,
+      durationInFrames: 90,
+      width: 1920,
+      height: 1080,
+      tracks: [makeTrack({ id: 'track-v1', order: 0, kind: 'video', items: [video] })],
+      transitions: [],
+      keyframes: [],
+    }
+
+    const segments = extractAudioSegments(composition, composition.fps)
+
+    expect(segments).toHaveLength(1)
+    expect(segments[0]).toMatchObject({
+      itemId: 'video-1',
+      type: 'video',
+      startFrame: 0,
+      durationFrames: 90,
+      muted: false,
+    })
+  })
+
+  it('is invariant to a transition between unrelated clips', () => {
+    // A transition between two OTHER clips must not change the mix segments of
+    // an uninvolved video (its existence used to resurrect/alter other audio).
+    const voice = makeVideoItem({ id: 'voice', trackId: 'track-v1', volume: 0 })
+    const docLeft = makeVideoItem({
+      id: 'doc2',
+      trackId: 'track-top',
+      from: 0,
+      durationInFrames: 45,
+      embeddedAudioMuted: true,
+    })
+    const docRight = makeVideoItem({
+      id: 'doc3',
+      trackId: 'track-top',
+      from: 45,
+      durationInFrames: 45,
+      embeddedAudioMuted: true,
+    })
+    const buildComposition = (withTransition: boolean): CompositionInputProps => ({
+      fps: 30,
+      durationInFrames: 90,
+      width: 1920,
+      height: 1080,
+      tracks: [
+        makeTrack({ id: 'track-v1', order: 0, kind: 'video', items: [voice] }),
+        makeTrack({ id: 'track-top', order: 1, kind: 'video', items: [docLeft, docRight] }),
+      ],
+      transitions: withTransition
+        ? [
+            {
+              id: 'tr-1',
+              type: 'fade',
+              presentation: 'fade',
+              timing: 'linear',
+              leftClipId: 'doc2',
+              rightClipId: 'doc3',
+              trackId: 'track-top',
+              durationInFrames: 2,
+            } as unknown as Transition,
+          ]
+        : [],
+      keyframes: [],
+    })
+
+    const without = extractAudioSegments(buildComposition(false), 30)
+    const withUnrelated = extractAudioSegments(buildComposition(true), 30)
+
+    const voiceWithout = without.filter((s) => s.itemId === 'voice')
+    const voiceWith = withUnrelated.filter((s) => s.itemId === 'voice')
+    expect(voiceWithout).toHaveLength(1)
+    expect(voiceWith).toEqual(voiceWithout)
   })
 
   it('skips root video audio when a linked audio companion exists', () => {
