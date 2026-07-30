@@ -58,7 +58,10 @@ import {
 import { editProject } from './edit'
 import { seedMediaLibrary } from './seed-media'
 import { ensureFontsLoaded } from '@/shared/typography/font-loader'
-import { collectVisibleTextFontFamilies } from '@/runtime/composition-runtime/utils/scene-assembly'
+import {
+  collectVisibleTextFontFamilies,
+  resolveTrackRenderState,
+} from '@/runtime/composition-runtime/utils/scene-assembly'
 
 const log = createLogger('Headless')
 
@@ -138,6 +141,34 @@ async function awaitFontsApplied(
   // Let the compositor settle one frame before the first rasterisation.
   await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)))
   return unresolved
+}
+
+/**
+ * The one font gate for every rasterising entry point: load the families each
+ * visible text item needs, then block until they are really being applied.
+ *
+ * Single function on purpose. Without this the entry points drift — a caller
+ * that awaits but drops the unresolved list reports success while drawing in
+ * the fallback family, which is precisely the silent failure being fixed here.
+ */
+async function prepareFonts(
+  tracks: CompositionInputProps['tracks'],
+): Promise<HeadlessRenderWarning[]> {
+  const families = collectVisibleTextFontFamilies(tracks)
+  // Without this the Canvas text renderer draws with an unregistered family and
+  // Chrome silently falls back to a generic sans-serif. No-ops offline.
+  await ensureFontsLoaded(families, HEADLESS_FONT_WEIGHTS)
+  const unresolved = await awaitFontsApplied(families, HEADLESS_FONT_WEIGHTS)
+  if (unresolved.length === 0) return []
+  return [
+    {
+      code: 'FONTS_NOT_APPLIED',
+      message:
+        `Fonts never became active within the budget: ${unresolved.join(', ')} — ` +
+        'text is rasterised with a fallback family and its geometry will not match dumpLayout',
+      details: { unresolved },
+    },
+  ]
 }
 
 interface HeadlessMediaSource {
@@ -418,27 +449,7 @@ async function renderTimeline(input: HeadlessTimelineInput): Promise<HeadlessRen
     masterBusDb,
   )
 
-  // Load the web fonts every visible text item needs BEFORE rasterizing. Without this
-  // the Canvas text renderer draws with an unregistered family and Chrome silently
-  // falls back to generic sans-serif (only the default resembled Inter). No-ops offline.
-  await ensureFontsLoaded(collectVisibleTextFontFamilies(composition.tracks), HEADLESS_FONT_WEIGHTS)
-  // ...and until they are really being applied — see awaitFontsApplied. Without
-  // this the opening seconds rasterise with the fallback family, silently.
-  {
-    const unresolved = await awaitFontsApplied(
-      collectVisibleTextFontFamilies(composition.tracks),
-      HEADLESS_FONT_WEIGHTS,
-    )
-    if (unresolved.length > 0) {
-      warnings.push({
-        code: 'FONTS_NOT_APPLIED',
-        message:
-          `Fonts never became active within the budget: ${unresolved.join(', ')} — ` +
-          'text is rasterised with a fallback family and its geometry will not match dumpLayout',
-        details: { unresolved },
-      })
-    }
-  }
+  warnings.push(...(await prepareFonts(composition.tracks)))
 
   // Fail loudly if the project needs WebGPU (effects) but it isn't available.
   warnings.push(...(await assertGpuForComposition(composition, compositions)))
@@ -542,6 +553,8 @@ interface HeadlessFrameSummary {
   format: string
   fileSize: number
   fileName: string
+  /** Same diagnostic channel as a full render — a frame grab can degrade too. */
+  warnings: HeadlessRenderWarning[]
 }
 
 /** Inspect the computed on-canvas layout (bounding boxes) at a frame. */
@@ -658,9 +671,9 @@ async function renderFrame(input: HeadlessFrameInput): Promise<HeadlessFrameSumm
   seedMediaLibrary(input.media)
 
   const composition = buildComposition(view)
-  // Same font preload as the full render — single frame grabs must match font fidelity.
-  await ensureFontsLoaded(collectVisibleTextFontFamilies(composition.tracks), HEADLESS_FONT_WEIGHTS)
-  await awaitFontsApplied(collectVisibleTextFontFamilies(composition.tracks), HEADLESS_FONT_WEIGHTS)
+  // Same font gate as the full render — a single frame grab that quietly used the
+  // fallback family would be indistinguishable from a correct one.
+  const warnings = await prepareFonts(composition.tracks)
   await assertGpuForComposition(composition, view.compositions)
   composition.tracks = await resolveMediaUrls(composition.tracks, { useProxy: false })
 
@@ -696,6 +709,7 @@ async function renderFrame(input: HeadlessFrameInput): Promise<HeadlessFrameSumm
     format,
     fileSize: blob.size,
     fileName,
+    warnings,
   }
 }
 
@@ -722,13 +736,19 @@ function dumpLayout(input: HeadlessLayoutInput): HeadlessLayoutResult {
   const canvas = { width: view.width, height: view.height, fps: view.fps }
   const keyframesMap = buildKeyframesMap(composition.keyframes)
 
+  // Track visibility comes from the SAME resolver the render path uses, so a
+  // soloed track set makes `visible` agree with what a render would actually
+  // draw. Reimplementing the rule here would drift: solo overrides `visible`
+  // entirely (a soloed-but-hidden track still renders).
+  const { visibleTrackIds } = resolveTrackRenderState(composition.tracks)
+
   const items: LayoutBox[] = []
   let z = 0
   // composition.tracks is already sorted descending by order (topmost track
   // last), matching the export draw order; within a track, items draw in array
   // order. Together these give the true z-stack (later = on top).
   for (const track of composition.tracks) {
-    const trackVisible = track.visible !== false
+    const trackVisible = visibleTrackIds.has(track.id)
     for (const item of track.items ?? []) {
       if (item.type === 'audio') continue
       const active = frame >= item.from && frame < item.from + item.durationInFrames

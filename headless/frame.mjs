@@ -103,6 +103,10 @@ async function main() {
         `(${summary.width}x${summary.height} ${summary.format}, ` +
         `${(summary.fileSize / 1000).toFixed(1)} KB, ${Date.now() - started}ms)`,
     )
+    // Same channel a full render uses: a frame that degraded (fallback fonts,
+    // for instance) must not look identical to a clean one.
+    for (const warning of summary.warnings ?? [])
+      console.warn(`  WARNING [${warning.code ?? 'UNKNOWN'}]: ${warning.message}`)
   } finally {
     await browser.close()
     await closeServers()
