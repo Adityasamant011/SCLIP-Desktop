@@ -5,6 +5,10 @@ import type { TimelineItem } from '@/types/timeline'
 import type { MediaMetadata } from '@/types/storage'
 import type { Transition } from '@/types/transition'
 import {
+  CANVAS_FALLBACK_PRESENTATIONS,
+  resolveTransitionRenderPath,
+} from '@/features/export/utils/canvas-transitions'
+import {
   buildMediaMetadataMap,
   collectSourceRangeFindings,
   collectTransitionFindings,
@@ -191,6 +195,45 @@ describe('collectTransitionFindings', () => {
     expect(
       collectTransitionFindings([makeTransition({ direction: 'from-left' })], adjacentPair()),
     ).toEqual([])
+  })
+
+  it('flags a declared preset that no available path can draw', () => {
+    // BuiltinTransitionPresentation declares far more presets than the Canvas2D
+    // fallback implements. Without a GPU the rest reach `default:` and render a
+    // plain cut — silently, which is what this warning exists to stop.
+    const findings = collectTransitionFindings(
+      [makeTransition({ presentation: 'glitch' as Transition['presentation'] })],
+      adjacentPair(),
+      { gpuAvailable: false },
+    )
+    expect(findings[0]).toMatchObject({
+      kind: 'unsupported_presentation',
+      transitionId: 'tr-1',
+    })
+    expect(findings[0]!.message).toContain('glitch')
+    expect(findings[0]!.message).toContain('HARD CUT')
+    // The message names what IS drawable, so the caller can pick a substitute.
+    expect(findings[0]!.message).toContain('fade')
+  })
+
+  it('does not flag presets the Canvas2D fallback actually implements', () => {
+    for (const presentation of ['fade', 'wipe', 'slide', 'flip', 'clockWipe', 'iris']) {
+      expect(
+        collectTransitionFindings(
+          [makeTransition({ presentation: presentation as Transition['presentation'] })],
+          adjacentPair(),
+          { gpuAvailable: false },
+        ),
+      ).toEqual([])
+    }
+  })
+
+  it('every Canvas2D fallback preset resolves to a real path (guards list/switch drift)', () => {
+    // CANVAS_FALLBACK_PRESENTATIONS is hand-maintained next to the switch it
+    // mirrors. If someone removes a `case` without updating the set, this fails.
+    for (const presentation of CANVAS_FALLBACK_PRESENTATIONS) {
+      expect(resolveTransitionRenderPath(presentation, { gpuAvailable: false })).not.toBe('cut')
+    }
   })
 
   it('flags a missing presentation (renders as a hard cut)', () => {

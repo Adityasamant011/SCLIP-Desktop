@@ -282,6 +282,7 @@ interface HeadlessRenderWarning {
     | 'TRANSITION_NOT_ADJACENT'
     | 'TRANSITION_MISSING_PRESENTATION'
     | 'TRANSITION_INVALID_DIRECTION'
+    | 'TRANSITION_UNSUPPORTED_PRESENTATION'
     | 'TRANSFORM_PARENT_NOT_FOUND'
     | 'TRANSFORM_PARENT_CYCLE'
     | 'TRANSFORM_PARENT_INVALID_TYPE'
@@ -327,14 +328,18 @@ const TRANSITION_WARNING_CODES = {
   not_adjacent: 'TRANSITION_NOT_ADJACENT',
   missing_presentation: 'TRANSITION_MISSING_PRESENTATION',
   invalid_direction: 'TRANSITION_INVALID_DIRECTION',
+  unsupported_presentation: 'TRANSITION_UNSUPPORTED_PRESENTATION',
 } as const
 
 /** Transitions that would silently never render (or degrade to a hard cut). */
 function transitionWarnings(
   transitions: readonly Transition[] | undefined,
   items: readonly TimelineItem[],
+  // Which presentations can actually be drawn depends on the GPU: without it the
+  // Canvas2D fallback covers only a handful and the rest become hard cuts.
+  options: { gpuAvailable: boolean } = { gpuAvailable: false },
 ): HeadlessRenderWarning[] {
-  return collectTransitionFindings(transitions ?? [], items).map((f) => ({
+  return collectTransitionFindings(transitions ?? [], items, options).map((f) => ({
     code: TRANSITION_WARNING_CODES[f.kind],
     message: f.message,
     details: { transitionId: f.transitionId },
@@ -386,11 +391,12 @@ function runLoadValidation(
   compositions: readonly SubComposition[] | undefined,
   fps: number,
   mediaById: Map<string, MediaMetadata>,
+  gpuAvailable: boolean,
 ): HeadlessRenderWarning[] {
   const validationWarnings = [
     ...(input.validationWarnings ?? []),
     ...sourceRangeWarnings(items, compositions, mediaById, fps),
-    ...transitionWarnings(input.transitions, items),
+    ...transitionWarnings(input.transitions, items, { gpuAvailable }),
     ...transformParentWarnings(items),
   ]
   reportValidationWarnings(validationWarnings, input.strict, 'render')
@@ -459,6 +465,13 @@ function defaultFileName(settings: ClientExportSettings): string {
 function effectiveFileName(requested: string | undefined, settings: ClientExportSettings): string {
   if (!requested) return defaultFileName(settings)
   return `${requested.replace(/\.[^./\\]+$/, '')}.${settings.container}`
+}
+
+let webGpuAvailable: Promise<boolean> | null = null
+/** Memoised: validation, the GPU assert and the render path all ask the same question. */
+function detectWebGpuOnce(): Promise<boolean> {
+  webGpuAvailable ??= detectWebGpu()
+  return webGpuAvailable
 }
 
 async function detectWebGpu(): Promise<boolean> {
@@ -613,7 +626,9 @@ async function renderTimeline(input: HeadlessTimelineInput): Promise<HeadlessRen
   // Load-time validation: caller-collected findings (project normalization)
   // plus source-overrun checks. Logged always; fatal before render in --strict.
   const mediaById = buildMediaMetadataMap(media)
-  warnings.unshift(...runLoadValidation(input, items, compositions, fps, mediaById))
+  warnings.unshift(
+    ...runLoadValidation(input, items, compositions, fps, mediaById, await detectWebGpuOnce()),
+  )
 
   const composition: CompositionInputProps = convertTimelineToComposition(
     tracks,
@@ -907,6 +922,7 @@ function buildComposition(view: MigratedTimelineView): CompositionInputProps {
 // fallow-ignore-next-line complexity
 async function renderFrame(input: HeadlessFrameInput): Promise<HeadlessFrameSummary> {
   const view = extractTimeline(input.project)
+  const gpuAvailable = await detectWebGpuOnce()
   const frame = resolveTargetFrame(view, input)
   const validationWarnings = [
     ...projectWarningsToHeadless(view.projectWarnings),
@@ -916,7 +932,7 @@ async function renderFrame(input: HeadlessFrameInput): Promise<HeadlessFrameSumm
       buildMediaMetadataMap(input.media),
       view.fps,
     ),
-    ...transitionWarnings(view.transitions, view.items),
+    ...transitionWarnings(view.transitions, view.items, { gpuAvailable }),
     ...transformParentWarnings(view.items),
   ]
   reportValidationWarnings(validationWarnings, input.strict, 'frame')
@@ -1057,6 +1073,7 @@ function computeTextLayout(
 // fallow-ignore-next-line complexity
 async function dumpLayout(input: HeadlessLayoutInput): Promise<HeadlessLayoutResult> {
   const view = extractTimeline(input.project)
+  const gpuAvailable = await detectWebGpuOnce()
   const frame = resolveTargetFrame(view, input)
   const validationWarnings = [
     ...projectWarningsToHeadless(view.projectWarnings),
@@ -1066,7 +1083,7 @@ async function dumpLayout(input: HeadlessLayoutInput): Promise<HeadlessLayoutRes
       buildMediaMetadataMap(input.media),
       view.fps,
     ),
-    ...transitionWarnings(view.transitions, view.items),
+    ...transitionWarnings(view.transitions, view.items, { gpuAvailable }),
     ...transformParentWarnings(view.items),
   ]
   reportValidationWarnings(validationWarnings, input.strict, 'layout')
