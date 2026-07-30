@@ -1172,6 +1172,134 @@ describe('sidechain ducking', () => {
     expect(nested).toEqual(atRoot)
   })
 
+  it('a hidden but unmuted nested track still ducks (the mix still plays it)', () => {
+    // The audio expansion only consults `muted`; excluding hidden tracks here
+    // would leave an audible source attenuating nothing.
+    const subComp = {
+      id: 'sub-hidden',
+      name: 'Hidden',
+      items: [
+        makeAudioItem({
+          id: 'hidden-sting',
+          trackId: 'sub-a1',
+          from: 0,
+          durationInFrames: 20,
+          audioDucking: { duckOthersDb: -9 },
+        }),
+      ],
+      tracks: [{ ...makeTrack({ id: 'sub-a1', order: 0, kind: 'audio' }), visible: false }],
+      transitions: [],
+      keyframes: [],
+      fps: FPS,
+      width: 1920,
+      height: 1080,
+      durationInFrames: 90,
+    }
+    useCompositionsStore.setState({
+      compositions: [subComp],
+      compositionById: { [subComp.id]: subComp },
+      mediaDependencyIds: [],
+      mediaDependencyVersion: 0,
+    })
+
+    const sources = collectDuckingSources(
+      {
+        fps: FPS,
+        durationInFrames: 200,
+        width: 1920,
+        height: 1080,
+        tracks: [
+          makeTrack({
+            id: 'root-a1',
+            order: 0,
+            kind: 'audio',
+            items: [
+              {
+                id: 'wrapper',
+                type: 'composition',
+                compositionId: subComp.id,
+                trackId: 'root-a1',
+                from: 0,
+                durationInFrames: 90,
+                label: 'Hidden',
+                compositionWidth: 1920,
+                compositionHeight: 1080,
+                transform: { x: 0, y: 0, rotation: 0, opacity: 1 },
+              } as unknown as CompositionItem,
+            ],
+          }),
+        ],
+        transitions: [],
+        keyframes: [],
+      },
+      FPS,
+    )
+    expect(sources.map((s) => s.itemId)).toEqual(['hidden-sting'])
+  })
+
+  it('a composition-backed audio item keeps its OWN ducking as well as its children', () => {
+    // Regression: intercepting composition items for recursion used to skip
+    // `duckingSourceFromItem` on the wrapper, silently dropping its own settings.
+    const subComp = {
+      id: 'sub-both',
+      name: 'Both',
+      items: [
+        makeAudioItem({
+          id: 'child',
+          trackId: 'sub-a1',
+          from: 5,
+          durationInFrames: 10,
+          audioDucking: { duckOthersDb: -6 },
+        }),
+      ],
+      tracks: [makeTrack({ id: 'sub-a1', order: 0, kind: 'audio' })],
+      transitions: [],
+      keyframes: [],
+      fps: FPS,
+      width: 1920,
+      height: 1080,
+      durationInFrames: 90,
+    }
+    useCompositionsStore.setState({
+      compositions: [subComp],
+      compositionById: { [subComp.id]: subComp },
+      mediaDependencyIds: [],
+      mediaDependencyVersion: 0,
+    })
+
+    const sources = collectDuckingSources(
+      {
+        fps: FPS,
+        durationInFrames: 200,
+        width: 1920,
+        height: 1080,
+        tracks: [
+          makeTrack({
+            id: 'root-a1',
+            order: 0,
+            kind: 'audio',
+            items: [
+              makeAudioItem({
+                id: 'wrapper',
+                trackId: 'root-a1',
+                from: 0,
+                durationInFrames: 90,
+                audioDucking: { duckOthersDb: -3 },
+                compositionId: subComp.id,
+              } as Partial<AudioItem>),
+            ],
+          }),
+        ],
+        transitions: [],
+        keyframes: [],
+      },
+      FPS,
+    )
+    expect(sources.map((s) => s.itemId).sort()).toEqual(['child', 'wrapper'])
+    expect(sources.find((s) => s.itemId === 'wrapper')!.duckDb).toBe(-3)
+    expect(sources.find((s) => s.itemId === 'child')!.duckDb).toBe(-6)
+  })
+
   it('a self-referencing pre-comp does not hang the duck-source scan', () => {
     const cyclic = {
       id: 'cyclic',

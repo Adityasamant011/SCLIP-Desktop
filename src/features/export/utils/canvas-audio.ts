@@ -690,6 +690,41 @@ function mapNestedItemWindow(
   }
 }
 
+/**
+ * Rebuild a nested composition item as a wrapper expressed in PARENT coordinates.
+ *
+ * Shared with the duck-source scan for the same reason the window mapping is: the
+ * `sourceEnd` remap in particular is easy to omit, and omitting it makes a
+ * clipped intermediate composition report a different window on each side.
+ */
+function buildNestedWrapper(
+  subItem: TimelineItem,
+  window: NestedItemWindow,
+  wrapper: CompositionWrapperTiming,
+): CompositionItem | (AudioItem & { compositionId: string }) {
+  const { wrapperSpeed, wrapperSourceFps } = wrapper
+  return {
+    ...subItem,
+    from: window.effectiveStart,
+    durationInFrames: window.effectiveDuration,
+    speed: (subItem.speed ?? 1) * wrapperSpeed,
+    sourceStart: window.effectiveSourceStart,
+    sourceFps: subItem.sourceFps ?? wrapperSourceFps,
+    ...(subItem.sourceEnd !== undefined && {
+      sourceEnd: Math.max(
+        window.effectiveSourceStart + 1,
+        subItem.sourceEnd -
+          timelineToSourceFrames(
+            subItem.from + subItem.durationInFrames - window.overlapEnd,
+            subItem.speed ?? 1,
+            wrapperSourceFps,
+            subItem.sourceFps ?? wrapperSourceFps,
+          ),
+      ),
+    }),
+  } as CompositionItem | (AudioItem & { compositionId: string })
+}
+
 function appendCompositionAudioSegments(params: {
   segments: AudioSegment[]
   track: CompositionInputProps['tracks'][number]
@@ -739,26 +774,7 @@ function appendCompositionAudioSegments(params: {
       const nestedSubComp = useCompositionsStore.getState().getComposition(subItem.compositionId)
       if (!nestedSubComp) continue
 
-      const nestedWrapper = {
-        ...subItem,
-        from: effectiveStart,
-        durationInFrames: effectiveDuration,
-        speed: (subItem.speed ?? 1) * wrapperSpeed,
-        sourceStart: effectiveSourceStart,
-        sourceFps: subItem.sourceFps ?? wrapperSourceFps,
-        ...(subItem.sourceEnd !== undefined && {
-          sourceEnd: Math.max(
-            effectiveSourceStart + 1,
-            subItem.sourceEnd -
-              timelineToSourceFrames(
-                subItem.from + subItem.durationInFrames - overlapEnd,
-                subItem.speed ?? 1,
-                wrapperSourceFps,
-                subItem.sourceFps ?? wrapperSourceFps,
-              ),
-          ),
-        }),
-      } as CompositionItem | (AudioItem & { compositionId: string })
+      const nestedWrapper = buildNestedWrapper(subItem, window, wrapper)
 
       // Volumes are dB offsets — sum them so nested levels accumulate correctly.
       const nestedVisited = new Set(visited)
@@ -1495,23 +1511,26 @@ function collectNestedDuckingSources(
   const sources: DuckingSource[] = []
   for (const subItem of subComp.items) {
     const subTrack = subComp.tracks.find((candidate) => candidate.id === subItem.trackId)
-    // A muted or hidden sub-track contributes no audio, so it cannot duck.
-    if (subTrack?.muted === true || subTrack?.visible === false) continue
+    // Only `muted` silences a nested track — the expansion above ignores `visible`,
+    // so excluding hidden tracks here would leave audible sources not ducking.
+    if (subTrack?.muted === true) continue
 
     const window = mapNestedItemWindow(subItem, wrapper, fps)
     if (!window) continue
 
     if (subItem.type === 'composition' || isCompositionAudioItem(subItem)) {
+      // A composition-backed AudioItem can carry `audioDucking` of its own, and it
+      // is audible in its own right — collect it as well as descending.
+      const wrapperSource = duckingSourceFromItem(
+        subItem as DuckSourceCandidate,
+        rootTrackId,
+        fps,
+        { startFrame: window.effectiveStart, endFrame: window.effectiveEnd },
+      )
+      if (wrapperSource) sources.push(wrapperSource)
       sources.push(
         ...collectNestedDuckingSources(
-          {
-            ...subItem,
-            from: window.effectiveStart,
-            durationInFrames: window.effectiveDuration,
-            speed: (subItem.speed ?? 1) * wrapper.wrapperSpeed,
-            sourceStart: window.effectiveSourceStart,
-            sourceFps: subItem.sourceFps ?? wrapper.wrapperSourceFps,
-          } as CompositionItem | (AudioItem & { compositionId: string }),
+          buildNestedWrapper(subItem, window, wrapper),
           rootTrackId,
           fps,
           nestedVisited,
@@ -1540,16 +1559,22 @@ export function collectDuckingSources(
     .filter((track) => track.visible !== false && track.muted !== true)
     .flatMap((track) =>
       (track.items ?? []).flatMap((item) => {
+        // The item's own `audioDucking` counts even when it is a composition
+        // wrapper — it is audible in its own right — so collect it either way
+        // and additionally descend when it wraps a pre-comp.
+        const own = duckingSourceFromItem(item as DuckSourceCandidate, track.id, fps)
+        const sources = own ? [own] : []
         if (item.type === 'composition' || isCompositionAudioItem(item)) {
-          return collectNestedDuckingSources(
-            item as CompositionItem | (AudioItem & { compositionId: string }),
-            track.id,
-            fps,
-            new Set<string>(),
+          sources.push(
+            ...collectNestedDuckingSources(
+              item as CompositionItem | (AudioItem & { compositionId: string }),
+              track.id,
+              fps,
+              new Set<string>(),
+            ),
           )
         }
-        const source = duckingSourceFromItem(item as DuckSourceCandidate, track.id, fps)
-        return source ? [source] : []
+        return sources
       }),
     )
 }
