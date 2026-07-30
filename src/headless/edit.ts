@@ -170,6 +170,35 @@ function requireTransition(id: string, field = 'id'): Transition {
   return transition
 }
 
+/**
+ * Confirm an `updateTransition` actually landed.
+ *
+ * `updateTransition` runs handle validation for `durationInFrames` / `alignment`
+ * and, on rejection, only logs — its signature is `void`, so a caller cannot tell
+ * a rejected edit from an applied one. Comparing against the post-update state
+ * catches every rejection path, present and future, without changing the shared
+ * store API.
+ */
+function assertTransitionUpdateApplied(
+  id: string,
+  updates: Parameters<typeof updateTransition>[1],
+): void {
+  const applied = requireTransition(id)
+  const rejected = Object.entries(updates)
+    .filter(([field, requested]) => {
+      const actual = (applied as unknown as Record<string, unknown>)[field]
+      // `properties` is a plain object; the rest are scalars.
+      return JSON.stringify(actual) !== JSON.stringify(requested)
+    })
+    .map(([field, requested]) => `${field}=${JSON.stringify(requested)}`)
+
+  if (rejected.length === 0) return
+  throw new Error(
+    `updateTransition("${id}") was rejected: ${rejected.join(', ')} — the transition is unchanged. ` +
+      'Duration and alignment must fit the handles available on both clips.',
+  )
+}
+
 function requireTrack(id: string, field = 'trackId'): TimelineTrack {
   const track = tracks().find((candidate) => candidate.id === id)
   if (!track) throw new Error(`${field}: track "${id}" does not exist`)
@@ -377,6 +406,12 @@ function applyOp(op: EditOp): unknown {
       if (Object.keys(updates).length === 0)
         throw new Error('updateTransition requires at least one field to change')
       updateTransition(id, updates)
+      // The store action validates handles for duration/alignment and, when the
+      // requested value doesn't fit, logs a warning and leaves the transition
+      // untouched — it returns void, so the rejection is invisible from here.
+      // Verify against the resulting state so a rejected edit fails loudly
+      // instead of reporting ok with the old value still in place.
+      assertTransitionUpdateApplied(id, updates)
       return { id }
     }
     case 'removeTransition': {

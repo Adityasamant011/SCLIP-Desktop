@@ -323,6 +323,27 @@ describe('editProject', () => {
     expect(removed.project.timeline!.transitions ?? []).toHaveLength(0)
   })
 
+  it('updateTransition fails loudly when the store rejects the new duration', async () => {
+    // Regression: the store action validates against the handles available on
+    // both clips and, on rejection, only logs — it returns void. The op used to
+    // report ok while the transition kept its old duration.
+    await expect(
+      editProject({
+        project: baseProject(adjacentVideoTimeline()),
+        media: [{ mediaId: 'm-vid', metadata: videoMedia }],
+        ops: [
+          { op: 'addTransition', leftClipId: 'A', rightClipId: 'B', callerId: 'tr' } as EditOp,
+          {
+            op: 'updateTransition',
+            id: { $ref: 'tr#/detail/id' },
+            // Far longer than either clip, so no handle arrangement can fit it.
+            durationInFrames: 100_000,
+          } as EditOp,
+        ],
+      }),
+    ).rejects.toThrow(/was rejected: durationInFrames=100000/)
+  })
+
   it('removeTransition on an unknown id fails loudly', async () => {
     await expect(
       editProject({
