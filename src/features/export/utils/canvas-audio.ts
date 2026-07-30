@@ -600,6 +600,96 @@ interface AudioProcessingConfig {
   totalFrames: number
 }
 
+/** The wrapper composition item's timing, resolved once per expansion. */
+interface CompositionWrapperTiming {
+  compFrom: number
+  wrapperSpeed: number
+  wrapperSourceFps: number
+  sourceOffset: number
+  wrapperSourceEnd: number
+}
+
+function resolveCompositionWrapper(
+  compositionItem: { from: number; durationInFrames: number } & Partial<{
+    speed: number
+    sourceFps: number
+    sourceStart: number
+    trimStart: number
+    sourceEnd: number
+  }>,
+  fps: number,
+): CompositionWrapperTiming {
+  const wrapperSpeed = compositionItem.speed ?? 1
+  const wrapperSourceFps = compositionItem.sourceFps ?? fps
+  const sourceOffset = compositionItem.sourceStart ?? compositionItem.trimStart ?? 0
+  return {
+    compFrom: compositionItem.from,
+    wrapperSpeed,
+    wrapperSourceFps,
+    sourceOffset,
+    wrapperSourceEnd:
+      compositionItem.sourceEnd ??
+      sourceOffset +
+        timelineToSourceFrames(compositionItem.durationInFrames, wrapperSpeed, fps, wrapperSourceFps),
+  }
+}
+
+/** One nested item's visible window, expressed in PARENT timeline frames. */
+interface NestedItemWindow {
+  overlapStart: number
+  overlapEnd: number
+  effectiveStart: number
+  effectiveEnd: number
+  effectiveDuration: number
+  effectiveSourceStart: number
+}
+
+/**
+ * Map a sub-composition item into parent-timeline coordinates, honouring the
+ * wrapper's trim, speed and source fps. Returns null when the item falls
+ * entirely outside the wrapper's visible source range.
+ *
+ * Shared on purpose. The audio mix and the ducking-source scan both have to
+ * agree on where a nested item sits, and a second implementation is how they
+ * would silently drift apart — a source could be expanded into the mix while
+ * not being seen as a duck source, which is precisely the bug this fixes.
+ */
+function mapNestedItemWindow(
+  subItem: TimelineItem,
+  wrapper: CompositionWrapperTiming,
+  fps: number,
+): NestedItemWindow | null {
+  const { compFrom, wrapperSpeed, wrapperSourceFps, sourceOffset, wrapperSourceEnd } = wrapper
+  const overlapStart = Math.max(subItem.from, sourceOffset)
+  const overlapEnd = Math.min(subItem.from + subItem.durationInFrames, wrapperSourceEnd)
+  if (overlapEnd <= overlapStart) return null
+
+  const effectiveStart =
+    compFrom + sourceToTimelineFrames(overlapStart - sourceOffset, wrapperSpeed, wrapperSourceFps, fps)
+  const effectiveEnd =
+    compFrom + sourceToTimelineFrames(overlapEnd - sourceOffset, wrapperSpeed, wrapperSourceFps, fps)
+  const effectiveDuration = Math.max(1, effectiveEnd - effectiveStart)
+
+  const baseSourceStart = subItem.sourceStart ?? subItem.trimStart ?? 0
+  const effectiveSourceStart =
+    baseSourceStart +
+    timelineToSourceFrames(
+      overlapStart - subItem.from,
+      subItem.speed ?? 1,
+      wrapperSourceFps,
+      subItem.sourceFps ?? wrapperSourceFps,
+    )
+
+  return {
+    overlapStart,
+    overlapEnd,
+    effectiveStart,
+    effectiveEnd,
+    effectiveDuration,
+    effectiveSourceStart,
+  }
+}
+
 function appendCompositionAudioSegments(params: {
   segments: AudioSegment[]
   track: CompositionInputProps['tracks'][number]
@@ -624,43 +714,19 @@ function appendCompositionAudioSegments(params: {
   const wrapperAudioPitchShiftSemitones =
     (params.audioPitchShiftSemitones ?? 0) + getAudioPitchShiftSemitones(compositionItem)
   const linkedSubCompVideoIds = getLinkedVideoIdsWithAudio(subComp.items)
-  const compFrom = compositionItem.from
-  const wrapperSpeed = compositionItem.speed ?? 1
-  const wrapperSourceFps = compositionItem.sourceFps ?? fps
-  const sourceOffset = compositionItem.sourceStart ?? compositionItem.trimStart ?? 0
-  const wrapperSourceEnd =
-    compositionItem.sourceEnd ??
-    sourceOffset +
-      timelineToSourceFrames(compositionItem.durationInFrames, wrapperSpeed, fps, wrapperSourceFps)
+  const wrapper = resolveCompositionWrapper(compositionItem, fps)
+  const { wrapperSpeed, wrapperSourceFps } = wrapper
   const trackMuted = track.muted ?? false
 
   for (const subItem of subComp.items) {
     const subTrack = subComp.tracks.find((candidate) => candidate.id === subItem.trackId)
     const subTrackMuted = subTrack?.muted ?? false
-    const overlapStart = Math.max(subItem.from, sourceOffset)
-    const overlapEnd = Math.min(subItem.from + subItem.durationInFrames, wrapperSourceEnd)
-    if (overlapEnd <= overlapStart) continue
+    const window = mapNestedItemWindow(subItem, wrapper, fps)
+    if (!window) continue
+    const { overlapStart, overlapEnd, effectiveStart, effectiveDuration } = window
 
-    const effectiveStart =
-      compFrom +
-      sourceToTimelineFrames(overlapStart - sourceOffset, wrapperSpeed, wrapperSourceFps, fps)
-    const effectiveEnd =
-      compFrom +
-      sourceToTimelineFrames(overlapEnd - sourceOffset, wrapperSpeed, wrapperSourceFps, fps)
-    const effectiveDuration = Math.max(1, effectiveEnd - effectiveStart)
-    if (effectiveDuration <= 0) continue
-
-    const subItemClipStart = overlapStart - subItem.from
-    const baseSourceStart = subItem.sourceStart ?? subItem.trimStart ?? 0
     const speed = (subItem.speed ?? 1) * wrapperSpeed
-    const effectiveSourceStart =
-      baseSourceStart +
-      timelineToSourceFrames(
-        subItemClipStart,
-        subItem.speed ?? 1,
-        wrapperSourceFps,
-        subItem.sourceFps ?? wrapperSourceFps,
-      )
+    const effectiveSourceStart = window.effectiveSourceStart
 
     if (subItem.type === 'composition' || isCompositionAudioItem(subItem)) {
       if (
@@ -1384,6 +1450,8 @@ function duckingSourceFromItem(
   item: DuckSourceCandidate,
   trackId: string,
   fps: number,
+  /** Parent-timeline window, for items reached through a pre-composition. */
+  window?: { startFrame: number; endFrame: number },
 ): DuckingSource | null {
   const ducking = item.audioDucking
   if (!ducking || !(ducking.duckOthersDb < 0)) return null
@@ -1392,13 +1460,75 @@ function duckingSourceFromItem(
   return {
     itemId: item.id,
     trackId,
-    startFrame: item.from,
-    endFrame: item.from + item.durationInFrames,
+    startFrame: window?.startFrame ?? item.from,
+    endFrame: window?.endFrame ?? item.from + item.durationInFrames,
     duckDb: ducking.duckOthersDb,
     attackFrames: (ducking.attackSec ?? DUCKING_DEFAULT_ATTACK_SEC) * fps,
     releaseFrames: (ducking.releaseSec ?? DUCKING_DEFAULT_RELEASE_SEC) * fps,
     ...(ducking.targetTrackIds ? { targetTrackIds: ducking.targetTrackIds } : {}),
   }
+}
+
+/**
+ * Collect duck sources nested inside a pre-composition, in PARENT timeline frames.
+ *
+ * The mix expands nested composition audio, so a source living one level down is
+ * audible; scanning only the root tracks would leave it audible but not ducking,
+ * making the same arrangement sound different at root level and inside a
+ * pre-comp. The window mapping is shared with `appendCompositionAudioSegments`
+ * so the two cannot disagree about where a nested item sits.
+ */
+function collectNestedDuckingSources(
+  compositionItem: CompositionItem | (AudioItem & { compositionId: string }),
+  rootTrackId: string,
+  fps: number,
+  visited: ReadonlySet<string>,
+): DuckingSource[] {
+  if (visited.has(compositionItem.compositionId)) return []
+  const subComp = useCompositionsStore.getState().getComposition(compositionItem.compositionId)
+  if (!subComp) return []
+
+  const wrapper = resolveCompositionWrapper(compositionItem, fps)
+  const nestedVisited = new Set(visited)
+  nestedVisited.add(compositionItem.compositionId)
+
+  const sources: DuckingSource[] = []
+  for (const subItem of subComp.items) {
+    const subTrack = subComp.tracks.find((candidate) => candidate.id === subItem.trackId)
+    // A muted or hidden sub-track contributes no audio, so it cannot duck.
+    if (subTrack?.muted === true || subTrack?.visible === false) continue
+
+    const window = mapNestedItemWindow(subItem, wrapper, fps)
+    if (!window) continue
+
+    if (subItem.type === 'composition' || isCompositionAudioItem(subItem)) {
+      sources.push(
+        ...collectNestedDuckingSources(
+          {
+            ...subItem,
+            from: window.effectiveStart,
+            durationInFrames: window.effectiveDuration,
+            speed: (subItem.speed ?? 1) * wrapper.wrapperSpeed,
+            sourceStart: window.effectiveSourceStart,
+            sourceFps: subItem.sourceFps ?? wrapper.wrapperSourceFps,
+          } as CompositionItem | (AudioItem & { compositionId: string }),
+          rootTrackId,
+          fps,
+          nestedVisited,
+        ),
+      )
+      continue
+    }
+
+    // Nested sources belong to the ROOT track: that is the track their audio is
+    // mixed onto, so it is also what "never duck yourself" must compare against.
+    const source = duckingSourceFromItem(subItem as DuckSourceCandidate, rootTrackId, fps, {
+      startFrame: window.effectiveStart,
+      endFrame: window.effectiveEnd,
+    })
+    if (source) sources.push(source)
+  }
+  return sources
 }
 
 /** Collect duck-source windows from composition items carrying `audioDucking`. */
@@ -1410,6 +1540,14 @@ export function collectDuckingSources(
     .filter((track) => track.visible !== false && track.muted !== true)
     .flatMap((track) =>
       (track.items ?? []).flatMap((item) => {
+        if (item.type === 'composition' || isCompositionAudioItem(item)) {
+          return collectNestedDuckingSources(
+            item as CompositionItem | (AudioItem & { compositionId: string }),
+            track.id,
+            fps,
+            new Set<string>(),
+          )
+        }
         const source = duckingSourceFromItem(item as DuckSourceCandidate, track.id, fps)
         return source ? [source] : []
       }),
