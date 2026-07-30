@@ -204,6 +204,45 @@ describe('inline span flow (spanLayout: inline)', () => {
     expect(runs[1]!.underline).toBe(true)
   })
 
+  it('preserves authored spacing verbatim (DOM preview uses white-space: pre-wrap)', () => {
+    // Regression: tokenisation used to treat every space as a pure delimiter and
+    // rebuild exactly one between words, so repeated/leading/trailing spaces
+    // vanished from canvas, GPU and dumpLayout while the DOM preview still showed
+    // them — different text, different width, different wrap points.
+    const item = inlineItem({
+      text: '  двойной  пробел  ',
+      textSpans: [
+        { text: '  двойной  ', color: '#ffffff' },
+        { text: 'пробел  ', color: '#ff7a00' },
+      ],
+    })
+    const layout = layoutTextBlock(item, 4000, 200, makeMeasurer())
+
+    expect(layout.lines).toHaveLength(1)
+    const line = layout.lines[0]!
+    expect(line.text).toBe('  двойной  пробел  ')
+    // Width must account for every authored space, not a normalised one.
+    expect(line.width).toBeCloseTo(makeMeasurer().measure('  двойной  пробел  ', '58px x', 0))
+    // Spaces keep the style of the span that authored them, so an underlined or
+    // recoloured span does not lose its own whitespace to the neighbour.
+    expect(line.runs?.map((run) => run.text)).toEqual(['  двойной  ', 'пробел  '])
+  })
+
+  it('drops only the space run consumed by a wrap, not authored indentation', () => {
+    const item = inlineItem({
+      text: '  раз два',
+      textSpans: [{ text: '  раз два', color: '#ffffff' }],
+    })
+    // Narrow enough to force a break between the two words.
+    const layout = layoutTextBlock(item, makeMeasurer().measure('  раз', '58px x', 0) + 1, 400, makeMeasurer())
+
+    expect(layout.lines).toHaveLength(2)
+    // Paragraph indent survives on the first line...
+    expect(layout.lines[0]!.text).toBe('  раз')
+    // ...while the space that caused the break hangs rather than indenting line 2.
+    expect(layout.lines[1]!.text).toBe('два')
+  })
+
   it('keeps the default stack flow untouched when spanLayout is absent', () => {
     const layout = layoutTextBlock(
       baseTextItem({

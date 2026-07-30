@@ -126,31 +126,67 @@ interface InlineWord {
   text: string
   /** Style index (into spans) per character of `text`. */
   charStyles: number[]
+  /**
+   * The exact run of spaces authored before this word, kept verbatim.
+   *
+   * The DOM preview renders span text with `white-space: pre-wrap`, so repeated,
+   * leading and trailing spaces are all visible there. Normalising them to a
+   * single separator here would make canvas/GPU export and `dumpLayout` measure
+   * and wrap differently from what the preview shows — the exact silent
+   * divergence this layout path exists to avoid.
+   */
+  leading: string
+  /** Style index per character of `leading`. */
+  leadingStyles: number[]
 }
 
 /** Split concatenated inline spans into paragraphs of words with per-char style ids. */
 function tokenizeInlineSpans(spans: ReturnType<typeof resolveSpanStyles>): InlineWord[][] {
   const paragraphs: InlineWord[][] = [[]]
   let currentWord: InlineWord | null = null
+  let pendingSpaces = ''
+  let pendingSpaceStyles: number[] = []
+
+  const startWord = (): InlineWord => {
+    const word: InlineWord = {
+      text: '',
+      charStyles: [],
+      leading: pendingSpaces,
+      leadingStyles: pendingSpaceStyles,
+    }
+    pendingSpaces = ''
+    pendingSpaceStyles = []
+    return word
+  }
   const flushWord = () => {
     if (currentWord) paragraphs[paragraphs.length - 1]!.push(currentWord)
     currentWord = null
   }
+  // Spaces with nothing after them still occupy the line (pre-wrap keeps them),
+  // so they are emitted as a text-less word rather than dropped.
+  const flushDanglingSpaces = () => {
+    if (pendingSpaces.length > 0) paragraphs[paragraphs.length - 1]!.push(startWord())
+  }
+
   for (let spanIndex = 0; spanIndex < spans.length; spanIndex++) {
     for (const char of spans[spanIndex]!.text) {
       if (char === '\n') {
         flushWord()
+        flushDanglingSpaces()
         paragraphs.push([])
       } else if (char === ' ') {
         flushWord()
+        pendingSpaces += char
+        pendingSpaceStyles.push(spanIndex)
       } else {
-        if (!currentWord) currentWord = { text: '', charStyles: [] }
+        if (!currentWord) currentWord = startWord()
         currentWord.text += char
         currentWord.charStyles.push(spanIndex)
       }
     }
   }
   flushWord()
+  flushDanglingSpaces()
   return paragraphs
 }
 
@@ -203,14 +239,20 @@ function layoutInlineSpanLines(
   const measure = (text: string) => measurer.measure(text, base.cssFont, base.letterSpacing)
 
   const lines: LaidOutLine[] = []
-  const pushLine = (words: InlineWord[]) => {
+  /**
+   * `isContinuation` marks a line produced by wrapping rather than by a newline.
+   * The space run that caused the break is consumed by it — pre-wrap hangs those
+   * spaces at the end of the previous line instead of indenting the next one —
+   * whereas spaces at the start of an authored paragraph are a real indent and
+   * are kept.
+   */
+  const pushLine = (words: InlineWord[], isContinuation = false) => {
     let text = ''
     const charStyles: number[] = []
     for (const [wordIndex, word] of words.entries()) {
-      if (wordIndex > 0) {
-        text += ' '
-        // A space inherits the style of the character before it.
-        charStyles.push(charStyles[charStyles.length - 1] ?? word.charStyles[0] ?? 0)
+      if (wordIndex > 0 || !isContinuation) {
+        text += word.leading
+        charStyles.push(...word.leadingStyles)
       }
       text += word.text
       charStyles.push(...word.charStyles)
@@ -241,10 +283,16 @@ function layoutInlineSpanLines(
     }
     let lineWords: InlineWord[] = []
     let lineText = ''
+    let isContinuation = false
     for (const word of words) {
-      const testText = lineText ? `${lineText} ${word.text}` : word.text
+      // Measure with the authored spacing, not a normalised single space —
+      // otherwise a run of spaces wraps at the wrong point. The condition must
+      // match pushLine's exactly, or measurement and output disagree.
+      const leading = lineWords.length > 0 || !isContinuation ? word.leading : ''
+      const testText = lineText + leading + word.text
       if (measure(testText) > availableWidth && lineWords.length > 0) {
-        pushLine(lineWords)
+        pushLine(lineWords, isContinuation)
+        isContinuation = true
         lineWords = [word]
         lineText = word.text
       } else {
@@ -254,7 +302,7 @@ function layoutInlineSpanLines(
       // Overlong single words fall through un-broken (rare for inline accents);
       // the stack path's char-breaking can be ported here if it ever matters.
     }
-    if (lineWords.length > 0) pushLine(lineWords)
+    if (lineWords.length > 0) pushLine(lineWords, isContinuation)
   }
 
   return lines
