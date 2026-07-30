@@ -14,6 +14,7 @@ import {
   CANVAS_FALLBACK_PRESENTATIONS,
   resolveTransitionRenderPath,
 } from '@/features/export/utils/canvas-transitions'
+import { getGpuTransition } from '@/infrastructure/gpu-transitions'
 
 export interface SourceRangeFinding {
   itemId: string
@@ -173,7 +174,14 @@ function unsupportedPresentationFinding(
   gpuAvailable: boolean,
 ): TransitionFinding | null {
   if (!transition.presentation) return null
-  if (resolveTransitionRenderPath(transition.presentation, { gpuAvailable }) !== 'cut') return null
+  const path = resolveTransitionRenderPath(transition.presentation, {
+    gpuAvailable,
+    // The pipeline can only ever compile ids the GPU registry knows, so an id it
+    // does not carry can never take the GPU path — checkable here, before any
+    // pipeline exists. `TransitionPipeline.render` applies the same condition.
+    hasGpuTransition: (id) => Boolean(getGpuTransition(id)),
+  })
+  if (path !== 'cut') return null
   return {
     transitionId: transition.id,
     kind: 'unsupported_presentation',

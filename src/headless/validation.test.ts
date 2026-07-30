@@ -9,6 +9,7 @@ import {
   resolveTransitionRenderPath,
 } from '@/features/export/utils/canvas-transitions'
 import { transitionRegistry } from '@/shared/timeline/transitions/registry'
+import { getGpuTransitionIds } from '@/infrastructure/gpu-transitions'
 import {
   buildMediaMetadataMap,
   collectSourceRangeFindings,
@@ -258,6 +259,57 @@ describe('collectTransitionFindings', () => {
       expect(resolveTransitionRenderPath('gpuOnlyProbe', { gpuAvailable: false })).toBe('cut')
     } finally {
       transitionRegistry.unregister('gpuOnlyProbe')
+    }
+  })
+
+  it('validation itself applies the pipeline probe, not just adapter presence', () => {
+    // The probe existing on resolveTransitionRenderPath is not enough — the
+    // finding is only honest if collectTransitionFindings actually passes one.
+    // A presentation whose gpuTransitionId is absent from the GPU registry can
+    // never be compiled, so it must still be flagged even with a GPU present.
+    transitionRegistry.register(
+      'ghostGpuPreset',
+      { id: 'ghostGpuPreset' } as never,
+      { gpuTransitionId: 'not-in-the-gpu-registry' } as never,
+    )
+    try {
+      const findings = collectTransitionFindings(
+        [makeTransition({ presentation: 'ghostGpuPreset' as Transition['presentation'] })],
+        adjacentPair(),
+        { gpuAvailable: true },
+      )
+      expect(findings.map((f) => f.kind)).toContain('unsupported_presentation')
+    } finally {
+      transitionRegistry.unregister('ghostGpuPreset')
+    }
+  })
+
+  it('a preset backed by a REAL gpu transition is not flagged when a GPU is present', () => {
+    const gpuId = getGpuTransitionIds()[0]
+    expect(gpuId).toBeTruthy()
+    transitionRegistry.register(
+      'realGpuPreset',
+      { id: 'realGpuPreset' } as never,
+      { gpuTransitionId: gpuId } as never,
+    )
+    try {
+      expect(
+        collectTransitionFindings(
+          [makeTransition({ presentation: 'realGpuPreset' as Transition['presentation'] })],
+          adjacentPair(),
+          { gpuAvailable: true },
+        ),
+      ).toEqual([])
+      // ...and the same preset IS flagged once the GPU is gone.
+      expect(
+        collectTransitionFindings(
+          [makeTransition({ presentation: 'realGpuPreset' as Transition['presentation'] })],
+          adjacentPair(),
+          { gpuAvailable: false },
+        ).map((f) => f.kind),
+      ).toContain('unsupported_presentation')
+    } finally {
+      transitionRegistry.unregister('realGpuPreset')
     }
   })
 
