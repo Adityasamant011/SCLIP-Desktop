@@ -1024,6 +1024,455 @@ describe('sidechain ducking', () => {
     })
   })
 
+  it('collectDuckingSources finds sources inside a pre-composition, in parent frames', () => {
+    // Regression: the mix expands nested composition audio, but the source scan
+    // only walked the root tracks — so the same arrangement ducked at root level
+    // and silently did not one level down.
+    const nestedSource = makeAudioItem({
+      id: 'nested-sting',
+      trackId: 'sub-a1',
+      from: 10,
+      durationInFrames: 20,
+      audioDucking: { duckOthersDb: -9, attackSec: 0.1, releaseSec: 0.1 },
+    })
+    const subComp = {
+      id: 'sub-duck',
+      name: 'Sting',
+      items: [nestedSource],
+      tracks: [makeTrack({ id: 'sub-a1', order: 0, kind: 'audio' })],
+      transitions: [],
+      keyframes: [],
+      fps: FPS,
+      width: 1920,
+      height: 1080,
+      durationInFrames: 90,
+    }
+    useCompositionsStore.setState({
+      compositions: [subComp],
+      compositionById: { [subComp.id]: subComp },
+      mediaDependencyIds: [],
+      mediaDependencyVersion: 0,
+    })
+
+    const compositionItem = {
+      id: 'comp-item',
+      type: 'composition',
+      compositionId: subComp.id,
+      trackId: 'root-v1',
+      from: 40,
+      durationInFrames: 90,
+      label: 'Sting',
+      compositionWidth: 1920,
+      compositionHeight: 1080,
+      transform: { x: 0, y: 0, rotation: 0, opacity: 1 },
+    } as unknown as CompositionItem
+
+    const composition: CompositionInputProps = {
+      fps: FPS,
+      durationInFrames: 200,
+      width: 1920,
+      height: 1080,
+      tracks: [makeTrack({ id: 'root-v1', order: 0, kind: 'video', items: [compositionItem] })],
+      transitions: [],
+      keyframes: [],
+    }
+
+    const sources = collectDuckingSources(composition, FPS)
+    expect(sources).toHaveLength(1)
+    expect(sources[0]).toMatchObject({
+      itemId: 'nested-sting',
+      // The ROOT track, because that is the track the nested audio is mixed onto
+      // and therefore what "never duck yourself" must compare against.
+      trackId: 'root-v1',
+      // Wrapper starts at 40, item sits at 10 inside it → 50..70 in parent frames.
+      startFrame: 40 + 10,
+      endFrame: 40 + 30,
+      duckDb: -9,
+    })
+  })
+
+  it('a duck source gives the same window at root level and inside a pre-comp', () => {
+    const ducking = { duckOthersDb: -12, attackSec: 0.1, releaseSec: 0.2 }
+    const atRoot = collectDuckingSources(
+      {
+        fps: FPS,
+        durationInFrames: 200,
+        width: 1920,
+        height: 1080,
+        tracks: [
+          makeTrack({
+            id: 'root-a1',
+            order: 0,
+            kind: 'audio',
+            items: [
+              makeAudioItem({ id: 'sting', trackId: 'root-a1', from: 55, durationInFrames: 20, audioDucking: ducking }),
+            ],
+          }),
+        ],
+        transitions: [],
+        keyframes: [],
+      },
+      FPS,
+    )
+
+    const subComp = {
+      id: 'sub-equiv',
+      name: 'Equivalent',
+      items: [
+        makeAudioItem({ id: 'sting', trackId: 'sub-a1', from: 15, durationInFrames: 20, audioDucking: ducking }),
+      ],
+      tracks: [makeTrack({ id: 'sub-a1', order: 0, kind: 'audio' })],
+      transitions: [],
+      keyframes: [],
+      fps: FPS,
+      width: 1920,
+      height: 1080,
+      durationInFrames: 90,
+    }
+    useCompositionsStore.setState({
+      compositions: [subComp],
+      compositionById: { [subComp.id]: subComp },
+      mediaDependencyIds: [],
+      mediaDependencyVersion: 0,
+    })
+    const nested = collectDuckingSources(
+      {
+        fps: FPS,
+        durationInFrames: 200,
+        width: 1920,
+        height: 1080,
+        tracks: [
+          makeTrack({
+            id: 'root-a1',
+            order: 0,
+            kind: 'audio',
+            items: [
+              {
+                id: 'wrapper',
+                type: 'composition',
+                compositionId: subComp.id,
+                trackId: 'root-a1',
+                from: 40, // 40 + 15 == 55, the root-level position
+                durationInFrames: 90,
+                label: 'Equivalent',
+                compositionWidth: 1920,
+                compositionHeight: 1080,
+                transform: { x: 0, y: 0, rotation: 0, opacity: 1 },
+              } as unknown as CompositionItem,
+            ],
+          }),
+        ],
+        transitions: [],
+        keyframes: [],
+      },
+      FPS,
+    )
+
+    // Same arrangement, same balance — this equality is the whole point.
+    expect(nested).toEqual(atRoot)
+  })
+
+  it('a hidden but unmuted nested track still ducks (the mix still plays it)', () => {
+    // The audio expansion only consults `muted`; excluding hidden tracks here
+    // would leave an audible source attenuating nothing.
+    const subComp = {
+      id: 'sub-hidden',
+      name: 'Hidden',
+      items: [
+        makeAudioItem({
+          id: 'hidden-sting',
+          trackId: 'sub-a1',
+          from: 0,
+          durationInFrames: 20,
+          audioDucking: { duckOthersDb: -9 },
+        }),
+      ],
+      tracks: [{ ...makeTrack({ id: 'sub-a1', order: 0, kind: 'audio' }), visible: false }],
+      transitions: [],
+      keyframes: [],
+      fps: FPS,
+      width: 1920,
+      height: 1080,
+      durationInFrames: 90,
+    }
+    useCompositionsStore.setState({
+      compositions: [subComp],
+      compositionById: { [subComp.id]: subComp },
+      mediaDependencyIds: [],
+      mediaDependencyVersion: 0,
+    })
+
+    const sources = collectDuckingSources(
+      {
+        fps: FPS,
+        durationInFrames: 200,
+        width: 1920,
+        height: 1080,
+        tracks: [
+          makeTrack({
+            id: 'root-a1',
+            order: 0,
+            kind: 'audio',
+            items: [
+              {
+                id: 'wrapper',
+                type: 'composition',
+                compositionId: subComp.id,
+                trackId: 'root-a1',
+                from: 0,
+                durationInFrames: 90,
+                label: 'Hidden',
+                compositionWidth: 1920,
+                compositionHeight: 1080,
+                transform: { x: 0, y: 0, rotation: 0, opacity: 1 },
+              } as unknown as CompositionItem,
+            ],
+          }),
+        ],
+        transitions: [],
+        keyframes: [],
+      },
+      FPS,
+    )
+    expect(sources.map((s) => s.itemId)).toEqual(['hidden-sting'])
+  })
+
+  it('a composition-backed audio item keeps its OWN ducking as well as its children', () => {
+    // Regression: intercepting composition items for recursion used to skip
+    // `duckingSourceFromItem` on the wrapper, silently dropping its own settings.
+    const subComp = {
+      id: 'sub-both',
+      name: 'Both',
+      items: [
+        makeAudioItem({
+          id: 'child',
+          trackId: 'sub-a1',
+          from: 5,
+          durationInFrames: 10,
+          audioDucking: { duckOthersDb: -6 },
+        }),
+      ],
+      tracks: [makeTrack({ id: 'sub-a1', order: 0, kind: 'audio' })],
+      transitions: [],
+      keyframes: [],
+      fps: FPS,
+      width: 1920,
+      height: 1080,
+      durationInFrames: 90,
+    }
+    useCompositionsStore.setState({
+      compositions: [subComp],
+      compositionById: { [subComp.id]: subComp },
+      mediaDependencyIds: [],
+      mediaDependencyVersion: 0,
+    })
+
+    const sources = collectDuckingSources(
+      {
+        fps: FPS,
+        durationInFrames: 200,
+        width: 1920,
+        height: 1080,
+        tracks: [
+          makeTrack({
+            id: 'root-a1',
+            order: 0,
+            kind: 'audio',
+            items: [
+              makeAudioItem({
+                id: 'wrapper',
+                trackId: 'root-a1',
+                from: 0,
+                durationInFrames: 90,
+                audioDucking: { duckOthersDb: -3 },
+                compositionId: subComp.id,
+              } as Partial<AudioItem>),
+            ],
+          }),
+        ],
+        transitions: [],
+        keyframes: [],
+      },
+      FPS,
+    )
+    expect(sources.map((s) => s.itemId).sort()).toEqual(['child', 'wrapper'])
+    expect(sources.find((s) => s.itemId === 'wrapper')!.duckDb).toBe(-3)
+    expect(sources.find((s) => s.itemId === 'child')!.duckDb).toBe(-6)
+  })
+
+  it('a clipped intermediate composition gives the duck scan the SAME window as the mix', () => {
+    // Two levels deep with a `sourceEnd` clip on the middle wrapper — the case
+    // where an omitted sourceEnd remap in the recursion shows up. Asserted against
+    // the audio segment rather than a hand-computed number, because "the mix and
+    // the duck scan agree" is the actual contract, not any particular frame.
+    const inner = {
+      id: 'inner',
+      name: 'Inner',
+      items: [
+        makeAudioItem({
+          id: 'deep-sting',
+          trackId: 'inner-a1',
+          from: 0,
+          durationInFrames: 60,
+          audioDucking: { duckOthersDb: -9 },
+        }),
+      ],
+      tracks: [makeTrack({ id: 'inner-a1', order: 0, kind: 'audio' })],
+      transitions: [],
+      keyframes: [],
+      fps: FPS,
+      width: 1920,
+      height: 1080,
+      durationInFrames: 60,
+    }
+    const middle = {
+      id: 'middle',
+      name: 'Middle',
+      items: [
+        {
+          id: 'inner-wrapper',
+          type: 'composition',
+          compositionId: 'inner',
+          trackId: 'middle-a1',
+          from: 0,
+          durationInFrames: 60,
+          // Clipped: only the first 25 frames of `inner` are used.
+          sourceStart: 0,
+          sourceEnd: 25,
+          label: 'Inner',
+          compositionWidth: 1920,
+          compositionHeight: 1080,
+          transform: { x: 0, y: 0, rotation: 0, opacity: 1 },
+        } as unknown as CompositionItem,
+      ],
+      tracks: [makeTrack({ id: 'middle-a1', order: 0, kind: 'audio' })],
+      transitions: [],
+      keyframes: [],
+      fps: FPS,
+      width: 1920,
+      height: 1080,
+      durationInFrames: 60,
+    }
+    useCompositionsStore.setState({
+      compositions: [inner, middle],
+      compositionById: { inner, middle },
+      mediaDependencyIds: [],
+      mediaDependencyVersion: 0,
+    })
+
+    const composition: CompositionInputProps = {
+      fps: FPS,
+      durationInFrames: 200,
+      width: 1920,
+      height: 1080,
+      tracks: [
+        makeTrack({
+          id: 'root-a1',
+          order: 0,
+          kind: 'audio',
+          items: [
+            {
+              id: 'middle-wrapper',
+              type: 'composition',
+              compositionId: 'middle',
+              trackId: 'root-a1',
+              from: 30,
+              durationInFrames: 20,
+              // Clipped at BOTH levels: this is what makes the recursive
+              // sourceEnd remap observable — without it the inner wrapper keeps
+              // an end that outruns the window the mix actually uses.
+              sourceStart: 0,
+              sourceEnd: 20,
+              label: 'Middle',
+              compositionWidth: 1920,
+              compositionHeight: 1080,
+              transform: { x: 0, y: 0, rotation: 0, opacity: 1 },
+            } as unknown as CompositionItem,
+          ],
+        }),
+      ],
+      transitions: [],
+      keyframes: [],
+    }
+
+    const segment = extractAudioSegments(composition, FPS).find((s) => s.itemId === 'deep-sting')
+    const source = collectDuckingSources(composition, FPS).find((s) => s.itemId === 'deep-sting')
+
+    expect(segment).toBeDefined()
+    expect(source).toBeDefined()
+    expect(source!.startFrame).toBe(segment!.startFrame)
+    expect(source!.endFrame).toBe(segment!.startFrame + segment!.durationFrames)
+  })
+
+  it('a self-referencing pre-comp does not hang the duck-source scan', () => {
+    const cyclic = {
+      id: 'cyclic',
+      name: 'Cyclic',
+      items: [
+        {
+          id: 'self',
+          type: 'composition',
+          compositionId: 'cyclic',
+          trackId: 'sub-a1',
+          from: 0,
+          durationInFrames: 30,
+          label: 'self',
+          compositionWidth: 1920,
+          compositionHeight: 1080,
+          transform: { x: 0, y: 0, rotation: 0, opacity: 1 },
+        } as unknown as CompositionItem,
+      ],
+      tracks: [makeTrack({ id: 'sub-a1', order: 0, kind: 'audio' })],
+      transitions: [],
+      keyframes: [],
+      fps: FPS,
+      width: 1920,
+      height: 1080,
+      durationInFrames: 90,
+    }
+    useCompositionsStore.setState({
+      compositions: [cyclic],
+      compositionById: { [cyclic.id]: cyclic },
+      mediaDependencyIds: [],
+      mediaDependencyVersion: 0,
+    })
+
+    expect(() =>
+      collectDuckingSources(
+        {
+          fps: FPS,
+          durationInFrames: 200,
+          width: 1920,
+          height: 1080,
+          tracks: [
+            makeTrack({
+              id: 'root-a1',
+              order: 0,
+              kind: 'audio',
+              items: [
+                {
+                  id: 'wrapper',
+                  type: 'composition',
+                  compositionId: 'cyclic',
+                  trackId: 'root-a1',
+                  from: 0,
+                  durationInFrames: 30,
+                  label: 'Cyclic',
+                  compositionWidth: 1920,
+                  compositionHeight: 1080,
+                  transform: { x: 0, y: 0, rotation: 0, opacity: 1 },
+                } as unknown as CompositionItem,
+              ],
+            }),
+          ],
+          transitions: [],
+          keyframes: [],
+        },
+        FPS,
+      ),
+    ).not.toThrow()
+  })
+
   it('processAudio ducks a constant target under the duck window (real pipeline)', async () => {
     clearAudioDecodeCache()
     const composition: CompositionInputProps = {
