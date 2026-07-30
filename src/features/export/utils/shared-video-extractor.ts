@@ -32,6 +32,8 @@ export interface VideoFrameSource {
   getLastFailureKind(): VideoFrameFailureKind
   getDimensions(): { width: number; height: number }
   getDuration(): number
+  /** Whether the source may carry alpha (transparent video). False until init resolves it. */
+  getCanBeTransparent(): boolean
   prewarmBatch(
     ctx: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D,
     timestamps: number[],
@@ -216,6 +218,10 @@ class SharedItemVideoSource implements VideoFrameSource {
 
   getDuration(): number {
     return this.pool.getItemDuration(this.itemId, this.src)
+  }
+
+  getCanBeTransparent(): boolean {
+    return this.pool.getItemCanBeTransparent(this.itemId, this.src)
   }
 
   prewarmBatch(
@@ -432,6 +438,11 @@ export class SharedVideoExtractorPool {
   getItemDuration(itemId: string, src: string): number {
     const extractor = this.getExtractorForItem(itemId, src)
     return extractor?.getDuration() ?? this.sourceStates.get(src)?.duration ?? 0
+  }
+
+  getItemCanBeTransparent(itemId: string, src: string): boolean {
+    const extractor = this.getExtractorForItem(itemId, src)
+    return extractor?.getCanBeTransparent() ?? false
   }
 
   /**

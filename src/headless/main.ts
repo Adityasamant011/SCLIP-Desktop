@@ -38,7 +38,9 @@ import { convertTimelineToComposition } from '@/features/export/utils/timeline-t
 import {
   renderComposition,
   renderAudioOnly,
+  renderSingleFrame,
 } from '@/features/export/utils/canvas-render-orchestrator'
+import { getAnimatedTransform, buildKeyframesMap } from '@/features/export/utils/canvas-keyframes'
 import type { ClientExportSettings, RenderProgress } from '@/features/export/utils/client-renderer'
 import {
   getSupportedCodecs,
@@ -55,8 +57,137 @@ import {
 } from '@/features/export/deps/timeline-compositions'
 import { editProject } from './edit'
 import { seedMediaLibrary } from './seed-media'
+import { ensureFontsLoaded } from '@/shared/typography/font-loader'
+import {
+  collectVisibleTextFontFamilies,
+  resolveTrackRenderState,
+} from '@/runtime/composition-runtime/utils/scene-assembly'
 
 const log = createLogger('Headless')
+
+// Weights spanning the families the montage uses (medium 500 / bold 700 / heavy 800)
+// plus 400/600 for safety. The editor preloads fonts via React preview mounts; the
+// headless harness mounts none of those, so we must load fonts explicitly here.
+const HEADLESS_FONT_WEIGHTS = [400, 500, 600, 700, 800]
+
+/**
+ * Block until the requested families are actually being APPLIED by the canvas
+ * text renderer, not merely until their FontFace promises settled.
+ *
+ * Why this exists. `ensureFontsLoaded` awaits `document.fonts.load(...)`, and
+ * that is not sufficient: Chrome resolves those promises a beat before the
+ * export canvas starts picking the face up, so the first frames rasterise with
+ * the fallback family. It is silent — no error, no warning, correct-looking
+ * output — and it only shows up as geometry.
+ *
+ * Measured on the channel opener (2026-07-27): `dumpLayout` reported the word
+ * "ИИ АГЕНТЫ" at 549.8px, while the render drew it at 575px for the first ~45
+ * frames and 551px afterwards, i.e. 4.6% wider glyphs for the first 1.8s. The
+ * switch frame MOVED WITH RENDER SPEED (frame 45 at --quality high, frame 29 at
+ * --quality low), which is what proves it is a race rather than a fixed offset.
+ *
+ * Detection is by metrics, because that is the only thing that reflects what the
+ * canvas will really draw: a loaded-but-not-yet-applied family measures exactly
+ * like the generic fallback it is stacked on. We compare against two different
+ * generics so a family that happens to match one of them cannot fool the check.
+ */
+async function awaitFontsApplied(
+  families: readonly string[],
+  weights: readonly number[],
+  timeoutMs = 8000,
+): Promise<string[]> {
+  const unresolved: string[] = []
+  if (families.length === 0 || typeof document === 'undefined') return unresolved
+
+  const canvas = document.createElement('canvas')
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return unresolved
+
+  const deadline = Date.now() + timeoutMs
+  const measure = (font: string): number => {
+    ctx.font = font
+    return ctx.measureText(PROBE).width
+  }
+
+  for (const family of new Set(families)) {
+    const bare = family.replace(/^["']|["']$/g, '')
+    for (const weight of weights) {
+      if (!(await waitForFaceApplied(measure, bare, weight, deadline))) {
+        unresolved.push(`${bare}:${weight}`)
+      }
+    }
+  }
+  // Let the compositor settle one frame before the first rasterisation.
+  await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)))
+  return unresolved
+}
+
+// Glyph-rich probe: Latin + Cyrillic + digits, so a family that only ships a
+// partial subset cannot pass on a handful of shared glyphs.
+const PROBE = 'HAMBURGEFONTSIVЖЯЦЩ0123456789'
+const GENERICS = ['monospace', 'serif'] as const
+
+/**
+ * True once ONE family+weight measurably differs from the generics it is
+ * stacked on, twice in a row.
+ *
+ * Two consecutive passes, not one: a single pass flips true the moment the face
+ * lands in the font cache while the raster path can still be a beat behind —
+ * measured as the switch merely MOVING EARLIER (frame 44 -> ~22) rather than
+ * disappearing. Requiring the metric to hold across a gap covers the raster path.
+ */
+async function waitForFaceApplied(
+  measure: (font: string) => number,
+  family: string,
+  weight: number,
+  deadline: number,
+): Promise<boolean> {
+  const STABLE_PASSES = 2
+  // A family still falling back measures identically to the generic it is stacked
+  // on. Differing from BOTH generics means the face is really in use.
+  const isApplied = (): boolean =>
+    GENERICS.every(
+      (generic) =>
+        measure(`${weight} 100px "${family}", ${generic}`) !== measure(`${weight} 100px ${generic}`),
+    )
+
+  let streak = 0
+  while (streak < STABLE_PASSES) {
+    streak = isApplied() ? streak + 1 : 0
+    if (streak >= STABLE_PASSES) return true
+    if (Date.now() >= deadline) return false
+    await new Promise((resolve) => setTimeout(resolve, 60))
+  }
+  return true
+}
+
+/**
+ * The one font gate for every rasterising entry point: load the families each
+ * visible text item needs, then block until they are really being applied.
+ *
+ * Single function on purpose. Without this the entry points drift — a caller
+ * that awaits but drops the unresolved list reports success while drawing in
+ * the fallback family, which is precisely the silent failure being fixed here.
+ */
+async function prepareFonts(
+  tracks: CompositionInputProps['tracks'],
+): Promise<HeadlessRenderWarning[]> {
+  const families = collectVisibleTextFontFamilies(tracks)
+  // Without this the Canvas text renderer draws with an unregistered family and
+  // Chrome silently falls back to a generic sans-serif. No-ops offline.
+  await ensureFontsLoaded(families, HEADLESS_FONT_WEIGHTS)
+  const unresolved = await awaitFontsApplied(families, HEADLESS_FONT_WEIGHTS)
+  if (unresolved.length === 0) return []
+  return [
+    {
+      code: 'FONTS_NOT_APPLIED',
+      message:
+        `Fonts never became active within the budget: ${unresolved.join(', ')} — ` +
+        'text is rasterised with a fallback family and its geometry will not match dumpLayout',
+      details: { unresolved },
+    },
+  ]
+}
 
 interface HeadlessMediaSource {
   mediaId: string
@@ -120,7 +251,7 @@ interface HeadlessRenderSummary {
 }
 
 interface HeadlessRenderWarning {
-  code: 'CODEC_FALLBACK' | 'WEBGPU_TRANSITION_FALLBACK'
+  code: 'CODEC_FALLBACK' | 'WEBGPU_TRANSITION_FALLBACK' | 'FONTS_NOT_APPLIED'
   message: string
   details?: Record<string, unknown>
 }
@@ -336,6 +467,8 @@ async function renderTimeline(input: HeadlessTimelineInput): Promise<HeadlessRen
     masterBusDb,
   )
 
+  warnings.push(...(await prepareFonts(composition.tracks)))
+
   // Fail loudly if the project needs WebGPU (effects) but it isn't available.
   warnings.push(...(await assertGpuForComposition(composition, compositions)))
 
@@ -409,10 +542,281 @@ async function renderProject(input: HeadlessProjectInput): Promise<HeadlessRende
   })
 }
 
+// ---------------------------------------------------------------------------
+// Fast-iteration helpers: single-frame grab + layout inspection
+// ---------------------------------------------------------------------------
+
+/** Grab one frame from a Project as an image (default: full-res PNG). */
+interface HeadlessFrameInput {
+  project: Project
+  media?: HeadlessMediaSource[]
+  /** Project-frame index to render. Takes precedence over `atSeconds`. */
+  frame?: number
+  /** Time (seconds) to render; converted to a frame with the project fps. */
+  atSeconds?: number
+  /** Output size. Defaults to the project resolution (full quality). */
+  width?: number
+  height?: number
+  format?: 'image/png' | 'image/jpeg' | 'image/webp'
+  quality?: number
+  outputFileName?: string
+}
+
+interface HeadlessFrameSummary {
+  ok: true
+  frame: number
+  atSeconds: number
+  width: number
+  height: number
+  format: string
+  fileSize: number
+  fileName: string
+  /** Same diagnostic channel as a full render — a frame grab can degrade too. */
+  warnings: HeadlessRenderWarning[]
+}
+
+/** Inspect the computed on-canvas layout (bounding boxes) at a frame. */
+interface HeadlessLayoutInput {
+  project: Project
+  media?: HeadlessMediaSource[]
+  frame?: number
+  atSeconds?: number
+}
+
+interface LayoutBox {
+  id: string
+  type: TimelineItem['type']
+  trackId: string
+  from: number
+  durationInFrames: number
+  /** Canvas-space top-left corner (px), origin at canvas top-left. */
+  x: number
+  y: number
+  /** Bounding-box size (px). For text this is the (auto-expanded) text box. */
+  width: number
+  height: number
+  opacity: number
+  rotation: number
+  cornerRadius: number
+  /** Active at this frame, on a visible track, not fully transparent. */
+  visible: boolean
+  /** Draw order (higher = composited on top). */
+  z: number
+  text?: string
+  textAlign?: string
+  verticalAlign?: string
+  fontSize?: number
+}
+
+interface HeadlessLayoutResult {
+  frame: number
+  atSeconds: number
+  canvas: { width: number; height: number; fps: number }
+  items: LayoutBox[]
+  /** Font failures make the reported text boxes untrustworthy — say so. */
+  warnings: HeadlessRenderWarning[]
+}
+
+interface MigratedTimelineView {
+  tracks: TimelineTrack[]
+  items: TimelineItem[]
+  transitions: Transition[]
+  keyframes: ItemKeyframes[]
+  compositions: SubComposition[]
+  fps: number
+  width: number
+  height: number
+  backgroundColor?: string
+  busAudioEq?: AudioEqSettings
+  masterBusDb?: number
+}
+
+/** Migrate a raw project and extract the fields the composition builder needs. */
+function extractTimeline(rawProject: Project): MigratedTimelineView {
+  const { project } = migrateProject(rawProject)
+  const timeline = project.timeline
+  if (!timeline) throw new Error('Project has no timeline')
+  const meta = project.metadata
+  return {
+    tracks: (timeline.tracks ?? []) as unknown as TimelineTrack[],
+    items: (timeline.items ?? []) as unknown as TimelineItem[],
+    transitions: (timeline.transitions ?? []) as Transition[],
+    keyframes: (timeline.keyframes ?? []) as unknown as ItemKeyframes[],
+    compositions: (timeline.compositions ?? []) as unknown as SubComposition[],
+    fps: meta?.fps ?? 30,
+    width: meta?.width ?? 1920,
+    height: meta?.height ?? 1080,
+    backgroundColor: meta?.backgroundColor,
+    busAudioEq: timeline.busAudioEq,
+    masterBusDb: timeline.masterBusDb,
+  }
+}
+
+function resolveTargetFrame(
+  view: MigratedTimelineView,
+  input: HeadlessFrameInput | HeadlessLayoutInput,
+): number {
+  if (input.frame != null) return Math.max(0, Math.round(input.frame))
+  return Math.max(0, Math.round((input.atSeconds ?? 0) * view.fps))
+}
+
+function buildComposition(view: MigratedTimelineView): CompositionInputProps {
+  return convertTimelineToComposition(
+    view.tracks,
+    view.items,
+    view.transitions,
+    view.fps,
+    view.width,
+    view.height,
+    null,
+    null,
+    view.keyframes,
+    view.backgroundColor,
+    view.busAudioEq,
+    view.masterBusDb,
+  )
+}
+
+/**
+ * Render a single project frame straight to an image Blob (default: full-res
+ * PNG). Much faster than encoding a short clip + extracting a frame with
+ * ffmpeg: no muxer, no encoder, no audio pipeline — just one composited frame.
+ */
+async function renderFrame(input: HeadlessFrameInput): Promise<HeadlessFrameSummary> {
+  const view = extractTimeline(input.project)
+  const frame = resolveTargetFrame(view, input)
+
+  useCompositionsStore.getState().setCompositions(view.compositions)
+  registerMediaUrls(input.media)
+  seedMediaLibrary(input.media)
+
+  const composition = buildComposition(view)
+  // Same font gate as the full render — a single frame grab that quietly used the
+  // fallback family would be indistinguishable from a correct one.
+  const warnings = await prepareFonts(composition.tracks)
+  await assertGpuForComposition(composition, view.compositions)
+  composition.tracks = await resolveMediaUrls(composition.tracks, { useProxy: false })
+
+  const outWidth = input.width ?? view.width
+  const outHeight = input.height ?? view.height
+  const format = input.format ?? 'image/png'
+  const blob = await renderSingleFrame({
+    composition,
+    frame,
+    width: outWidth,
+    height: outHeight,
+    format,
+    quality: input.quality ?? 1,
+  })
+  const ext = format === 'image/jpeg' ? 'jpg' : format === 'image/webp' ? 'webp' : 'png'
+  const fileName = input.outputFileName ?? `freecut-frame-${frame}.${ext}`
+  triggerDownload(blob, fileName)
+
+  log.info('Headless frame grab complete', {
+    frame,
+    width: outWidth,
+    height: outHeight,
+    format,
+    fileSize: blob.size,
+  })
+
+  return {
+    ok: true,
+    frame,
+    atSeconds: frame / view.fps,
+    width: outWidth,
+    height: outHeight,
+    format,
+    fileSize: blob.size,
+    fileName,
+    warnings,
+  }
+}
+
+function round1(n: number): number {
+  return Math.round(n * 10) / 10
+}
+
+/**
+ * Dump the computed on-canvas bounding box of every visible item at a frame,
+ * WITHOUT rendering. Reuses the exact transform resolver the export path uses
+ * (`getAnimatedTransform`), so the coordinates match what a render would draw —
+ * letting a caller verify positioning without a render round-trip.
+ */
+async function dumpLayout(input: HeadlessLayoutInput): Promise<HeadlessLayoutResult> {
+  const view = extractTimeline(input.project)
+  const frame = resolveTargetFrame(view, input)
+
+  // Source dimensions (video/image) feed the fit-to-canvas default, so seed the
+  // media store. No blob URLs / GPU needed — this is pure transform math.
+  useCompositionsStore.getState().setCompositions(view.compositions)
+  seedMediaLibrary(input.media)
+
+  const composition = buildComposition(view)
+
+  // Text boxes are NOT pure math: the transform resolver runs text items through
+  // expandTextTransformToFitContent, which measures with a real canvas 2D context.
+  // Without the same font gate the render path uses, the boxes reported here are
+  // fallback-font measurements and silently disagree with what /frame draws.
+  const warnings = await prepareFonts(composition.tracks)
+  const canvas = { width: view.width, height: view.height, fps: view.fps }
+  const keyframesMap = buildKeyframesMap(composition.keyframes)
+
+  // Track visibility comes from the SAME resolver the render path uses, so a
+  // soloed track set makes `visible` agree with what a render would actually
+  // draw. Reimplementing the rule here would drift: solo overrides `visible`
+  // entirely (a soloed-but-hidden track still renders).
+  const { visibleTrackIds } = resolveTrackRenderState(composition.tracks)
+
+  const items: LayoutBox[] = []
+  let z = 0
+  // composition.tracks is already sorted descending by order (topmost track
+  // last), matching the export draw order; within a track, items draw in array
+  // order. Together these give the true z-stack (later = on top).
+  for (const track of composition.tracks) {
+    const trackVisible = visibleTrackIds.has(track.id)
+    for (const item of track.items ?? []) {
+      if (item.type === 'audio') continue
+      const active = frame >= item.from && frame < item.from + item.durationInFrames
+      if (!active) continue
+      const t = getAnimatedTransform(item, keyframesMap.get(item.id), frame, canvas)
+      const left = canvas.width / 2 + t.x - t.width / 2
+      const top = canvas.height / 2 + t.y - t.height / 2
+      const box: LayoutBox = {
+        id: item.id,
+        type: item.type,
+        trackId: item.trackId,
+        from: item.from,
+        durationInFrames: item.durationInFrames,
+        x: round1(left),
+        y: round1(top),
+        width: round1(t.width),
+        height: round1(t.height),
+        opacity: Math.round(t.opacity * 1000) / 1000,
+        rotation: t.rotation,
+        cornerRadius: t.cornerRadius,
+        visible: trackVisible && t.opacity > 0,
+        z: z++,
+      }
+      if (item.type === 'text') {
+        box.text = item.text
+        box.textAlign = item.textAlign
+        box.verticalAlign = item.verticalAlign
+        box.fontSize = item.fontSize
+      }
+      items.push(box)
+    }
+  }
+
+  return { frame, atSeconds: frame / view.fps, canvas, items, warnings }
+}
+
 interface FreecutHeadlessApi {
   ready: true
   renderTimeline: typeof renderTimeline
   renderProject: typeof renderProject
+  renderFrame: typeof renderFrame
+  dumpLayout: typeof dumpLayout
   editProject: typeof editProject
   normalizeProject: typeof normalizeProjectForHeadless
   probeMedia: typeof probeMedia
@@ -499,6 +903,8 @@ window.freecut = {
   ready: true,
   renderTimeline,
   renderProject,
+  renderFrame,
+  dumpLayout,
   editProject,
   normalizeProject: normalizeProjectForHeadless,
   probeMedia,

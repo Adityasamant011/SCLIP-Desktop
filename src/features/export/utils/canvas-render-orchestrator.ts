@@ -709,10 +709,19 @@ export async function renderComposition(options: RenderEngineOptions): Promise<C
     throw new Error('Failed to create OffscreenCanvas 2D context')
   }
 
+  // High-quality smoothing: media is often drawn scaled (e.g. cover-fill upscale),
+  // and the default ('low') visibly softens fine detail like small slide text.
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
+
   // Create output canvas at EXPORT resolution (for encoding)
   // If no scaling needed, we'll use renderCanvas directly
   const outputCanvas = needsScaling ? new OffscreenCanvas(exportWidth, exportHeight) : renderCanvas
   const outputCtx = needsScaling ? outputCanvas.getContext('2d')! : ctx
+  if (needsScaling) {
+    outputCtx.imageSmoothingEnabled = true
+    outputCtx.imageSmoothingQuality = 'high'
+  }
 
   onProgress({
     phase: 'preparing',
@@ -1049,6 +1058,11 @@ export async function renderSingleFrame(options: SingleFrameOptions): Promise<Bl
   if (!renderCtx) {
     throw new Error('Failed to get 2d context')
   }
+
+  // Match the export composition context so single-frame output is
+  // pixel-consistent with the final render (scaled media draws stay sharp).
+  renderCtx.imageSmoothingEnabled = true
+  renderCtx.imageSmoothingQuality = 'high'
 
   // Use the SAME renderer as export – single source of truth
   const renderer = await createCompositionRenderer(composition, renderCanvas, renderCtx)

@@ -15,10 +15,18 @@
 //                                      -> the rendered video/audio file (attachment)
 //   POST /edit    { project|projectObject, ops, ... }
 //                                      -> { ok, project, applied, results } (edited project JSON)
+//   POST /frame   { project|projectObject, at?|frame?, width?, height?, format?, quality? }
+//                                      -> one composited frame image (attachment; default full-res PNG)
+//   POST /layout  { project|projectObject, at?|frame? }
+//                                      -> [{ id, type, x, y, width, height, opacity, z, ... }] (no render)
 //
 // Example:
 //   curl -X POST localhost:8787/render -H 'content-type: application/json' \
 //     -d '{"project":"<id>","codec":"vp9","duration":5}' -o out.webm
+//   curl -X POST localhost:8787/frame -H 'content-type: application/json' \
+//     -d '{"project":"<id>","at":12.5}' -o shot.png
+//   curl -s -X POST localhost:8787/layout -H 'content-type: application/json' \
+//     -d '{"project":"<id>","at":12.5}' | jq '.items[] | select(.type=="text")'
 import http from 'node:http'
 import os from 'node:os'
 import fs from 'node:fs'
@@ -37,6 +45,8 @@ import {
   renderJob,
   startHarness,
   warningsHeaderValue,
+  loadJobProject,
+  resolveProjectMedia,
 } from './lib/render-core.mjs'
 import { OperationQueue, OperationQueueError } from './lib/operation-queue.mjs'
 import { PageSession, probeGpu } from './lib/page-session.mjs'
@@ -101,6 +111,19 @@ export function resolveHost(args = {}, env = process.env) {
     throw new Error('Host must be a non-empty string (--host or FREECUT_HOST)')
   }
   return host.trim()
+}
+
+const IMAGE_MIME_BY_FORMAT = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  webp: 'image/webp',
+}
+const IMAGE_EXT_BY_MIME = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' }
+
+/** Strip non-ASCII so a value is always a legal HTTP header (never 500s a response). */
+function asciiHeader(value) {
+  return JSON.stringify(value).replace(/[^\t\x20-\x7E]/g, ' ')
 }
 
 function sendJson(res, status, obj) {
@@ -454,6 +477,82 @@ async function main() {
     })
   }
 
+  // Grab a single composited frame (default: full-res PNG) — no encoder/muxer,
+  // much faster than /render + extract for eyeballing a position on a warm page.
+  const handleFrame = async (req, res) => {
+    const body = await readJsonBody(req)
+    if (body.project) assertSinglePathComponent(body.project, 'project id')
+    const project =
+      body.projectObject ?? loadJobProject(workspace, { project: body.project }).project
+    const { media, missing } = resolveProjectMedia(workspace, project, mediaUrlOf, null)
+    const format = (body.format ?? 'png').toLowerCase()
+    const mime = IMAGE_MIME_BY_FORMAT[format] ?? 'image/png'
+    const outPath = path.join(
+      tmpDir,
+      `frame-${process.pid}-${++counter}.${IMAGE_EXT_BY_MIME[mime]}`,
+    )
+
+    const t0 = Date.now()
+    const summary = await queue.enqueue(
+      async () => {
+        const downloadPromise = session.page.waitForEvent('download', { timeout: 5 * 60_000 })
+        downloadPromise.catch(() => {})
+        const s = await session.page.evaluate((payload) => window.freecut.renderFrame(payload), {
+          project,
+          media,
+          frame: body.frame,
+          atSeconds: body.at ?? body.atSeconds,
+          width: body.width,
+          height: body.height,
+          format: mime,
+          quality: body.quality,
+        })
+        const download = await downloadPromise
+        await download.saveAs(outPath)
+        return s
+      },
+      { timeoutMs: renderTimeoutMs, kind: 'frame' },
+    )
+    console.log(
+      `frame ${project.name ?? project.id} @${summary.frame} (${summary.atSeconds.toFixed(3)}s) -> ` +
+        `${summary.width}x${summary.height} ${IMAGE_EXT_BY_MIME[mime]} ` +
+        `(${(summary.fileSize / 1000).toFixed(1)}KB) in ${Date.now() - t0}ms`,
+    )
+
+    res.writeHead(200, {
+      'Content-Type': mime,
+      'Content-Length': fs.statSync(outPath).size,
+      'Content-Disposition': `attachment; filename="${path.basename(outPath)}"`,
+      'X-Freecut-Frame': String(summary.frame),
+      ...(missing.length ? { 'X-Freecut-Missing-Media': asciiHeader(missing) } : {}),
+    })
+    const stream = fs.createReadStream(outPath)
+    stream.pipe(res)
+    stream.on('close', () => fs.rm(outPath, () => {}))
+  }
+
+  // Dump computed on-canvas bounding boxes at a frame (no render/GPU) — trust
+  // coordinates without a render round-trip.
+  const handleLayout = async (req, res) => {
+    const body = await readJsonBody(req)
+    if (body.project) assertSinglePathComponent(body.project, 'project id')
+    const project =
+      body.projectObject ?? loadJobProject(workspace, { project: body.project }).project
+    // Only metadata (source dimensions) is used; media URLs are never fetched.
+    const { media } = resolveProjectMedia(workspace, project, mediaUrlOf, null)
+    const layout = await queue.enqueue(
+      () =>
+        session.page.evaluate((payload) => window.freecut.dumpLayout(payload), {
+          project,
+          media,
+          frame: body.frame,
+          atSeconds: body.at ?? body.atSeconds,
+        }),
+      { timeoutMs: editTimeoutMs, kind: 'layout' },
+    )
+    sendJson(res, 200, layout)
+  }
+
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost')
     const route = `${req.method} ${url.pathname}`
@@ -551,7 +650,11 @@ async function main() {
                                     ? () => handleRender(req, res)
                                     : route === 'POST /edit'
                                       ? () => handleEdit(req, res)
-                                      : null
+                                      : route === 'POST /frame'
+                                        ? () => handleFrame(req, res)
+                                        : route === 'POST /layout'
+                                          ? () => handleLayout(req, res)
+                                          : null
     if (!handler) {
       sendJson(res, 404, { error: `No route: ${route}` })
       return
@@ -598,7 +701,9 @@ async function main() {
   // Network exposure must be an explicit CLI/environment configuration choice.
   await new Promise((resolve) => server.listen(port, host, resolve))
   console.log(`FreeCut render service on http://${host}:${port}  (workspace: ${workspace})`)
-  console.log(`  GET /health  GET /capabilities  GET /projects  POST /render  POST /edit`)
+  console.log(
+    `  GET /health  GET /capabilities  GET /projects  POST /render  POST /edit  POST /frame  POST /layout`,
+  )
 
   let shuttingDown
   const shutdown = () =>
