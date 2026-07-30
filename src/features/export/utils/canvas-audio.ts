@@ -283,7 +283,10 @@ function buildManagedTransitionAudioSegments<TItem extends TransitionAudioItem>(
   transitions: Transition[],
   fps: number,
 ): AudioSegment[] {
-  if (entriesById.size === 0 || transitions.length === 0) return []
+  // Entries that don't participate in any transition still yield plain segments below
+  // (zero extensions) — bailing out on empty `transitions` would silently drop the
+  // embedded audio of every video item in compositions without transitions.
+  if (entriesById.size === 0) return []
 
   const extensionByClipId = new Map<
     string,
