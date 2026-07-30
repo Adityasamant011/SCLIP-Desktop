@@ -10,6 +10,11 @@ import type { TimelineItem } from '@/types/timeline'
 import type { MediaMetadata } from '@/types/storage'
 import type { CompositionInputProps } from '@/types/export'
 import type { Transition } from '@/types/transition'
+import {
+  CANVAS_FALLBACK_PRESENTATIONS,
+  resolveTransitionRenderPath,
+} from '@/features/export/utils/canvas-transitions'
+import { getGpuTransition } from '@/infrastructure/gpu-transitions'
 
 export interface SourceRangeFinding {
   itemId: string
@@ -77,6 +82,7 @@ export interface TransitionFinding {
     | 'not_adjacent'
     | 'missing_presentation'
     | 'invalid_direction'
+    | 'unsupported_presentation'
   message: string
 }
 
@@ -154,14 +160,51 @@ function degradationTransitionFindings(transition: Transition): TransitionFindin
   return findings
 }
 
+/**
+ * A declared presentation that no available path can draw renders as a hard cut.
+ *
+ * `BuiltinTransitionPresentation` declares far more presets than the Canvas2D
+ * fallback implements, and without a GPU the rest reach `default:` and produce a
+ * plain cut — no error, no warning, just a project that silently looks wrong.
+ * The generic WEBGPU_TRANSITION_FALLBACK warning does not name which transitions
+ * degraded, which is the part a caller actually needs.
+ */
+function unsupportedPresentationFinding(
+  transition: Transition,
+  gpuAvailable: boolean,
+): TransitionFinding | null {
+  if (!transition.presentation) return null
+  const path = resolveTransitionRenderPath(transition.presentation, {
+    gpuAvailable,
+    // The pipeline can only ever compile ids the GPU registry knows, so an id it
+    // does not carry can never take the GPU path — checkable here, before any
+    // pipeline exists. `TransitionPipeline.render` applies the same condition.
+    hasGpuTransition: (id) => Boolean(getGpuTransition(id)),
+  })
+  if (path !== 'cut') return null
+  return {
+    transitionId: transition.id,
+    kind: 'unsupported_presentation',
+    message:
+      `Transition "${transition.id}" uses presentation "${transition.presentation}", which has no ` +
+      `${gpuAvailable ? '' : 'Canvas2D '}implementation here — it renders as a HARD CUT, not a transition` +
+      (gpuAvailable ? '' : '. Presets drawable without a GPU: ') +
+      (gpuAvailable ? '' : [...CANVAS_FALLBACK_PRESENTATIONS].filter((p) => p !== 'none').join(', ')),
+  }
+}
+
 export function collectTransitionFindings(
   transitions: readonly Transition[],
   items: readonly TimelineItem[],
+  options: { gpuAvailable: boolean } = { gpuAvailable: false },
 ): TransitionFinding[] {
   const itemById = new Map(items.map((item) => [item.id, item]))
   return transitions.flatMap((transition) => {
     const structural = structuralTransitionFinding(transition, itemById)
-    return structural ? [structural] : degradationTransitionFindings(transition)
+    if (structural) return [structural]
+    const degradations = degradationTransitionFindings(transition)
+    const unsupported = unsupportedPresentationFinding(transition, options.gpuAvailable)
+    return unsupported ? [...degradations, unsupported] : degradations
   })
 }
 

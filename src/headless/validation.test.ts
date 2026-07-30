@@ -5,6 +5,12 @@ import type { TimelineItem } from '@/types/timeline'
 import type { MediaMetadata } from '@/types/storage'
 import type { Transition } from '@/types/transition'
 import {
+  CANVAS_FALLBACK_PRESENTATIONS,
+  resolveTransitionRenderPath,
+} from '@/features/export/utils/canvas-transitions'
+import { transitionRegistry } from '@/shared/timeline/transitions/registry'
+import { getGpuTransitionIds } from '@/infrastructure/gpu-transitions'
+import {
   buildMediaMetadataMap,
   collectSourceRangeFindings,
   collectTransitionFindings,
@@ -191,6 +197,128 @@ describe('collectTransitionFindings', () => {
     expect(
       collectTransitionFindings([makeTransition({ direction: 'from-left' })], adjacentPair()),
     ).toEqual([])
+  })
+
+  it('flags a declared preset that no available path can draw', () => {
+    // BuiltinTransitionPresentation declares far more presets than the Canvas2D
+    // fallback implements. Without a GPU the rest reach `default:` and render a
+    // plain cut — silently, which is what this warning exists to stop.
+    const findings = collectTransitionFindings(
+      [makeTransition({ presentation: 'glitch' as Transition['presentation'] })],
+      adjacentPair(),
+      { gpuAvailable: false },
+    )
+    expect(findings[0]).toMatchObject({
+      kind: 'unsupported_presentation',
+      transitionId: 'tr-1',
+    })
+    expect(findings[0]!.message).toContain('glitch')
+    expect(findings[0]!.message).toContain('HARD CUT')
+    // The message names what IS drawable, so the caller can pick a substitute.
+    expect(findings[0]!.message).toContain('fade')
+  })
+
+  it('does not flag presets the Canvas2D fallback actually implements', () => {
+    for (const presentation of ['fade', 'wipe', 'slide', 'flip', 'clockWipe', 'iris']) {
+      expect(
+        collectTransitionFindings(
+          [makeTransition({ presentation: presentation as Transition['presentation'] })],
+          adjacentPair(),
+          { gpuAvailable: false },
+        ),
+      ).toEqual([])
+    }
+  })
+
+  it('an uncompiled GPU pipeline does not count as GPU coverage', () => {
+    // renderTransition needs BOTH a gpuTransitionId and gpuTransitionPipeline
+    // .has(id). An adapter alone must not suppress the warning, or a preset whose
+    // Canvas fallback is a hard cut renders wrong with nothing said.
+    // Registered explicitly rather than relying on whatever the ambient registry
+    // happens to hold in this environment.
+    transitionRegistry.register(
+      'gpuOnlyProbe',
+      { id: 'gpuOnlyProbe' } as never,
+      { gpuTransitionId: 'gpu-only-probe' } as never,
+    )
+    try {
+      expect(
+        resolveTransitionRenderPath('gpuOnlyProbe', {
+          gpuAvailable: true,
+          hasGpuTransition: () => true,
+        }),
+      ).toBe('gpu')
+      // Adapter present, pipeline never compiled this id → really a hard cut.
+      expect(
+        resolveTransitionRenderPath('gpuOnlyProbe', {
+          gpuAvailable: true,
+          hasGpuTransition: () => false,
+        }),
+      ).toBe('cut')
+      // No GPU at all, and no Canvas fallback for it either.
+      expect(resolveTransitionRenderPath('gpuOnlyProbe', { gpuAvailable: false })).toBe('cut')
+    } finally {
+      transitionRegistry.unregister('gpuOnlyProbe')
+    }
+  })
+
+  it('validation itself applies the pipeline probe, not just adapter presence', () => {
+    // The probe existing on resolveTransitionRenderPath is not enough — the
+    // finding is only honest if collectTransitionFindings actually passes one.
+    // A presentation whose gpuTransitionId is absent from the GPU registry can
+    // never be compiled, so it must still be flagged even with a GPU present.
+    transitionRegistry.register(
+      'ghostGpuPreset',
+      { id: 'ghostGpuPreset' } as never,
+      { gpuTransitionId: 'not-in-the-gpu-registry' } as never,
+    )
+    try {
+      const findings = collectTransitionFindings(
+        [makeTransition({ presentation: 'ghostGpuPreset' as Transition['presentation'] })],
+        adjacentPair(),
+        { gpuAvailable: true },
+      )
+      expect(findings.map((f) => f.kind)).toContain('unsupported_presentation')
+    } finally {
+      transitionRegistry.unregister('ghostGpuPreset')
+    }
+  })
+
+  it('a preset backed by a REAL gpu transition is not flagged when a GPU is present', () => {
+    const gpuId = getGpuTransitionIds()[0]
+    expect(gpuId).toBeTruthy()
+    transitionRegistry.register(
+      'realGpuPreset',
+      { id: 'realGpuPreset' } as never,
+      { gpuTransitionId: gpuId } as never,
+    )
+    try {
+      expect(
+        collectTransitionFindings(
+          [makeTransition({ presentation: 'realGpuPreset' as Transition['presentation'] })],
+          adjacentPair(),
+          { gpuAvailable: true },
+        ),
+      ).toEqual([])
+      // ...and the same preset IS flagged once the GPU is gone.
+      expect(
+        collectTransitionFindings(
+          [makeTransition({ presentation: 'realGpuPreset' as Transition['presentation'] })],
+          adjacentPair(),
+          { gpuAvailable: false },
+        ).map((f) => f.kind),
+      ).toContain('unsupported_presentation')
+    } finally {
+      transitionRegistry.unregister('realGpuPreset')
+    }
+  })
+
+  it('every Canvas2D fallback preset resolves to a real path (guards list/switch drift)', () => {
+    // CANVAS_FALLBACK_PRESENTATIONS is hand-maintained next to the switch it
+    // mirrors. If someone removes a `case` without updating the set, this fails.
+    for (const presentation of CANVAS_FALLBACK_PRESENTATIONS) {
+      expect(resolveTransitionRenderPath(presentation, { gpuAvailable: false })).not.toBe('cut')
+    }
   })
 
   it('flags a missing presentation (renders as a hard cut)', () => {
