@@ -8,6 +8,7 @@ import {
   CANVAS_FALLBACK_PRESENTATIONS,
   resolveTransitionRenderPath,
 } from '@/features/export/utils/canvas-transitions'
+import { transitionRegistry } from '@/shared/timeline/transitions/registry'
 import {
   buildMediaMetadataMap,
   collectSourceRangeFindings,
@@ -225,6 +226,38 @@ describe('collectTransitionFindings', () => {
           { gpuAvailable: false },
         ),
       ).toEqual([])
+    }
+  })
+
+  it('an uncompiled GPU pipeline does not count as GPU coverage', () => {
+    // renderTransition needs BOTH a gpuTransitionId and gpuTransitionPipeline
+    // .has(id). An adapter alone must not suppress the warning, or a preset whose
+    // Canvas fallback is a hard cut renders wrong with nothing said.
+    // Registered explicitly rather than relying on whatever the ambient registry
+    // happens to hold in this environment.
+    transitionRegistry.register(
+      'gpuOnlyProbe',
+      { id: 'gpuOnlyProbe' } as never,
+      { gpuTransitionId: 'gpu-only-probe' } as never,
+    )
+    try {
+      expect(
+        resolveTransitionRenderPath('gpuOnlyProbe', {
+          gpuAvailable: true,
+          hasGpuTransition: () => true,
+        }),
+      ).toBe('gpu')
+      // Adapter present, pipeline never compiled this id → really a hard cut.
+      expect(
+        resolveTransitionRenderPath('gpuOnlyProbe', {
+          gpuAvailable: true,
+          hasGpuTransition: () => false,
+        }),
+      ).toBe('cut')
+      // No GPU at all, and no Canvas fallback for it either.
+      expect(resolveTransitionRenderPath('gpuOnlyProbe', { gpuAvailable: false })).toBe('cut')
+    } finally {
+      transitionRegistry.unregister('gpuOnlyProbe')
     }
   })
 

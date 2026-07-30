@@ -462,11 +462,24 @@ export type TransitionRenderPath = 'gpu' | 'registry-canvas' | 'builtin' | 'cut'
  */
 export function resolveTransitionRenderPath(
   presentation: string | undefined,
-  options: { gpuAvailable: boolean },
+  options: {
+    gpuAvailable: boolean
+    /**
+     * Probe for whether the transition pipeline actually carries this id.
+     * `renderTransition` requires BOTH a `gpuTransitionId` and
+     * `gpuTransitionPipeline.has(id)` — an adapter alone does not mean the
+     * pipeline compiled. Pass this wherever a pipeline exists; without it the
+     * GPU path is only assumed when a `gpuTransitionId` is registered.
+     */
+    hasGpuTransition?: (gpuTransitionId: string) => boolean
+  },
 ): TransitionRenderPath {
   if (!presentation) return 'cut'
   const renderer = transitionRegistry.getRenderer(presentation)
-  if (renderer?.gpuTransitionId && options.gpuAvailable) return 'gpu'
+  if (renderer?.gpuTransitionId && options.gpuAvailable) {
+    const compiled = options.hasGpuTransition?.(renderer.gpuTransitionId) ?? true
+    if (compiled) return 'gpu'
+  }
   if (renderer?.renderCanvas) return 'registry-canvas'
   if (CANVAS_FALLBACK_PRESENTATIONS.has(presentation)) return 'builtin'
   return 'cut'

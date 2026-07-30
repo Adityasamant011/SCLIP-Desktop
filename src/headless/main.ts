@@ -478,7 +478,14 @@ async function detectWebGpu(): Promise<boolean> {
   try {
     if (!('gpu' in navigator) || !navigator.gpu) return false
     const adapter = await navigator.gpu.requestAdapter()
-    return Boolean(adapter)
+    if (!adapter) return false
+    // An adapter is not enough: device acquisition is what actually fails on
+    // headless/software stacks, and reporting "GPU available" on the strength of
+    // an adapter alone would suppress warnings for presets that then fall back.
+    const device = await adapter.requestDevice()
+    if (!device) return false
+    device.destroy()
+    return true
   } catch {
     return false
   }
