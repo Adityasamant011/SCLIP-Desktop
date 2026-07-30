@@ -80,7 +80,9 @@ vi.mock('mediabunny', () => {
 })
 
 import {
+  applyDucking,
   clearAudioDecodeCache,
+  collectDuckingSources,
   downmixToOutputChannels,
   extractAudioSegments,
   getAudioPacketPassthroughPlan,
@@ -88,6 +90,7 @@ import {
   processAudio,
   processAudioWindows,
   supportsWindowedAudioProcessing,
+  type DuckingSource,
 } from './canvas-audio'
 
 function makeTrack(params: {
@@ -898,5 +901,167 @@ describe('audio DSP through processAudio (real pipeline, mocked decode)', () => 
     const muted = dspComposition({})
     muted.tracks[0]! = { ...muted.tracks[0]!, muted: true }
     await expect(hasAudioContent(muted)).resolves.toBe(false)
+  })
+})
+
+describe('sidechain ducking', () => {
+  const FPS = 30
+  const RATE = 48_000
+  const gainDb = (db: number) => Math.pow(10, db / 20)
+
+  const source = (overrides: Partial<DuckingSource> = {}): DuckingSource => ({
+    itemId: 'duck-src',
+    trackId: 'track-sfx',
+    startFrame: 30,
+    endFrame: 60,
+    duckDb: -12,
+    attackFrames: 3,
+    releaseFrames: 6,
+    ...overrides,
+  })
+
+  const ones = (seconds: number) => new Float32Array(RATE * seconds).fill(1)
+  const at = (samples: Float32Array, frame: number) => samples[Math.round((frame / FPS) * RATE)]!
+
+  it('applyDucking dips to duckDb inside the window with attack/release ramps', () => {
+    const out = applyDucking(ones(3), [source()], { itemId: 't', trackId: 'a' }, 0, FPS, RATE)
+    expect(at(out, 10)).toBeCloseTo(1, 5) // before window
+    expect(at(out, 45)).toBeCloseTo(gainDb(-12), 4) // fully ducked
+    expect(at(out, 31.5)).toBeCloseTo(gainDb(-6), 2) // mid-attack (half depth)
+    expect(at(out, 63)).toBeCloseTo(gainDb(-6), 2) // mid-release
+    expect(at(out, 75)).toBeCloseTo(1, 5) // recovered
+  })
+
+  it('applyDucking never ducks the source itself and honors targetTrackIds', () => {
+    const untouched = applyDucking(
+      ones(3),
+      [source()],
+      { itemId: 'duck-src', trackId: 'track-sfx' },
+      0,
+      FPS,
+      RATE,
+    )
+    expect(at(untouched, 45)).toBeCloseTo(1, 5)
+
+    const scoped = applyDucking(
+      ones(3),
+      [source({ targetTrackIds: ['track-music'] })],
+      { itemId: 't', trackId: 'track-speech' },
+      0,
+      FPS,
+      RATE,
+    )
+    expect(at(scoped, 45)).toBeCloseTo(1, 5)
+  })
+
+  it('overlapping sources take the deepest gain, offset segments align by timeline frame', () => {
+    const two = [source(), source({ itemId: 'duck-2', duckDb: -20, startFrame: 40, endFrame: 50 })]
+    const out = applyDucking(ones(3), two, { itemId: 't', trackId: 'a' }, 0, FPS, RATE)
+    expect(at(out, 36)).toBeCloseTo(gainDb(-12), 4)
+    expect(at(out, 45)).toBeCloseTo(gainDb(-20), 4)
+    // Segment that starts mid-timeline: samples[0] maps to frame 40.
+    const offset = applyDucking(ones(1), [source()], { itemId: 't', trackId: 'a' }, 40, FPS, RATE)
+    expect(offset[0]!).toBeCloseTo(gainDb(-12), 4)
+  })
+
+  it('collectDuckingSources picks audible flagged items and skips muted/positive/videos without audio', () => {
+    const composition: CompositionInputProps = {
+      fps: FPS,
+      durationInFrames: 300,
+      width: 1920,
+      height: 1080,
+      tracks: [
+        makeTrack({
+          id: 'track-sfx',
+          order: 0,
+          kind: 'audio',
+          items: [
+            makeAudioItem({
+              id: 'meme',
+              from: 60,
+              durationInFrames: 45,
+              audioDucking: { duckOthersDb: -9, attackSec: 0.1, targetTrackIds: ['track-a1'] },
+            }),
+            makeAudioItem({
+              id: 'bad-positive',
+              from: 150,
+              audioDucking: { duckOthersDb: 3 },
+            }),
+          ],
+        }),
+        makeTrack({
+          id: 'track-muted',
+          order: 1,
+          kind: 'audio',
+          items: [makeAudioItem({ id: 'silent', audioDucking: { duckOthersDb: -9 } })],
+        }),
+        makeTrack({
+          id: 'track-v',
+          order: 2,
+          items: [
+            makeVideoItem({
+              id: 'muted-video',
+              embeddedAudioMuted: true,
+              audioDucking: { duckOthersDb: -9 },
+            }),
+          ],
+        }),
+      ],
+      transitions: [],
+      keyframes: [],
+    }
+    composition.tracks[1] = { ...composition.tracks[1]!, muted: true }
+    const sources = collectDuckingSources(composition, FPS)
+    expect(sources).toHaveLength(1)
+    expect(sources[0]).toMatchObject({
+      itemId: 'meme',
+      trackId: 'track-sfx',
+      startFrame: 60,
+      endFrame: 105,
+      duckDb: -9,
+      attackFrames: 3,
+      targetTrackIds: ['track-a1'],
+    })
+  })
+
+  it('processAudio ducks a constant target under the duck window (real pipeline)', async () => {
+    clearAudioDecodeCache()
+    const composition: CompositionInputProps = {
+      fps: FPS,
+      durationInFrames: 90,
+      width: 1920,
+      height: 1080,
+      tracks: [
+        makeTrack({
+          id: 'track-a1',
+          order: 0,
+          kind: 'audio',
+          items: [makeAudioItem({ id: 'speech', durationInFrames: 90 })],
+        }),
+        makeTrack({
+          id: 'track-sfx',
+          order: 1,
+          kind: 'audio',
+          items: [
+            makeAudioItem({
+              id: 'stinger',
+              from: 30,
+              durationInFrames: 30,
+              volume: -60, // keep the source near-silent so probes isolate the ducked target
+              audioDucking: { duckOthersDb: -12, attackSec: 0.1, releaseSec: 0.1 },
+            }),
+          ],
+        }),
+      ],
+      transitions: [],
+      keyframes: [],
+    }
+    const result = await processAudio(composition)
+    expect(result).not.toBeNull()
+    const samples = result!.samples[0]!
+    const probe = (sec: number) => samples[Math.round(sec * 48_000)]!
+    expect(probe(0.5)).toBeCloseTo(0.1, 2) // before window: untouched
+    expect(probe(1.5)).toBeCloseTo(0.1 * gainDb(-12), 2) // mid window: ducked
+    expect(probe(2.7)).toBeCloseTo(0.1, 2) // after release: recovered
   })
 })

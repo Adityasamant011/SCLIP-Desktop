@@ -51,6 +51,13 @@ const samples = {
     easing: 'linear',
   },
   removeKeyframes: { op: 'removeKeyframes', itemId: 'i', property: 'effect:gpu-blur:e1:radius' },
+  setTransformParent: {
+    op: 'setTransformParent',
+    id: 'arm',
+    parentItemId: 'body',
+    behavior: 'preserve-world',
+    frame: 0,
+  },
   addEffect: {
     op: 'addEffect',
     itemId: 'i',

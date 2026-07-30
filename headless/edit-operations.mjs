@@ -282,6 +282,17 @@ const cases = [
     failure: { op: 'removeTransition', id: 'ghost' },
   },
   {
+    name: 'setTransformParent',
+    op: { op: 'setTransformParent', id: 'clip-right', parentItemId: 'clip-left' },
+    assert: (project) => {
+      const child = item(project, 'clip-right')
+      assert.equal(child.transformParent?.parentItemId, 'clip-left')
+      assert.ok(child.transformParent.childLocalReference.width > 0)
+      assert.ok(child.transformParent.childWorldReference.width > 0)
+    },
+    failure: { op: 'setTransformParent', id: 'clip-right', parentItemId: 'missing' },
+  },
+  {
     name: 'addTrack',
     op: { op: 'addTrack', kind: 'audio', order: 9 },
     assert: (project) =>

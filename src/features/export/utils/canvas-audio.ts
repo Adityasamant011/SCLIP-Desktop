@@ -9,6 +9,7 @@ import type { CompositionInputProps } from '@/types/export'
 import type {
   VideoItem,
   AudioItem,
+  AudioDuckingSettings,
   CompositionItem,
   TimelineItem,
   TimelineTrack,
@@ -1349,6 +1350,121 @@ function dbToGain(db: number): number {
   return Math.pow(10, db / 20)
 }
 
+// ---------------------------------------------------------------------------
+// Sidechain ducking: while a duck-source item is audible, other audio is
+// attenuated by its `duckOthersDb` with attack/release ramps. Applied as a
+// third per-segment gain layer (after volume/fades, before the additive mix),
+// so the source itself and out-of-scope tracks stay untouched.
+// ---------------------------------------------------------------------------
+
+const DUCKING_DEFAULT_ATTACK_SEC = 0.08
+const DUCKING_DEFAULT_RELEASE_SEC = 0.25
+
+export interface DuckingSource {
+  itemId: string
+  trackId: string
+  /** Audible span on the timeline, in project frames. */
+  startFrame: number
+  endFrame: number
+  /** Attenuation while audible, dB (negative). */
+  duckDb: number
+  attackFrames: number
+  releaseFrames: number
+  /** Restrict ducking to these tracks (default: every other track). */
+  targetTrackIds?: string[]
+}
+
+type DuckSourceCandidate = CompositionInputProps['tracks'][number]['items'][number] & {
+  audioDucking?: AudioDuckingSettings
+  embeddedAudioMuted?: boolean
+}
+
+/** Map one item to a duck source, or null when it cannot duck anything. */
+function duckingSourceFromItem(
+  item: DuckSourceCandidate,
+  trackId: string,
+  fps: number,
+): DuckingSource | null {
+  const ducking = item.audioDucking
+  if (!ducking || !(ducking.duckOthersDb < 0)) return null
+  const carriesAudio = item.type === 'audio' || (item.type === 'video' && !item.embeddedAudioMuted)
+  if (!carriesAudio) return null
+  return {
+    itemId: item.id,
+    trackId,
+    startFrame: item.from,
+    endFrame: item.from + item.durationInFrames,
+    duckDb: ducking.duckOthersDb,
+    attackFrames: (ducking.attackSec ?? DUCKING_DEFAULT_ATTACK_SEC) * fps,
+    releaseFrames: (ducking.releaseSec ?? DUCKING_DEFAULT_RELEASE_SEC) * fps,
+    ...(ducking.targetTrackIds ? { targetTrackIds: ducking.targetTrackIds } : {}),
+  }
+}
+
+/** Collect duck-source windows from composition items carrying `audioDucking`. */
+export function collectDuckingSources(
+  composition: CompositionInputProps,
+  fps: number,
+): DuckingSource[] {
+  return composition.tracks
+    .filter((track) => track.visible !== false && track.muted !== true)
+    .flatMap((track) =>
+      (track.items ?? []).flatMap((item) => {
+        const source = duckingSourceFromItem(item as DuckSourceCandidate, track.id, fps)
+        return source ? [source] : []
+      }),
+    )
+}
+
+/** Piecewise duck gain of one source at a timeline frame, in dB (0 = no duck). */
+function duckingSourceGainDb(frame: number, source: DuckingSource): number {
+  if (frame < source.startFrame || frame > source.endFrame + source.releaseFrames) return 0
+  if (frame < source.startFrame + source.attackFrames) {
+    const progress = (frame - source.startFrame) / source.attackFrames
+    return source.duckDb * progress
+  }
+  if (frame <= source.endFrame) return source.duckDb
+  const progress = (frame - source.endFrame) / source.releaseFrames
+  return source.duckDb * (1 - progress)
+}
+
+/**
+ * Multiply the ducking envelope into one channel of a target segment.
+ * `segmentStartFrame` is the absolute timeline frame of `samples[0]` (same
+ * mapping as `applyAnimatedVolume`). The source item never ducks itself;
+ * overlapping sources take the deepest (minimum dB) gain.
+ */
+export function applyDucking(
+  samples: Float32Array,
+  sources: readonly DuckingSource[],
+  segment: { itemId: string; trackId: string },
+  segmentStartFrame: number,
+  fps: number,
+  sampleRate: number,
+): Float32Array {
+  const spanFrames = (samples.length / sampleRate) * fps
+  const applicable = sources.filter(
+    (source) =>
+      source.itemId !== segment.itemId &&
+      (!source.targetTrackIds || source.targetTrackIds.includes(segment.trackId)) &&
+      source.startFrame < segmentStartFrame + spanFrames &&
+      source.endFrame + source.releaseFrames > segmentStartFrame,
+  )
+  if (applicable.length === 0) return samples
+
+  const output = new Float32Array(samples.length)
+  for (let i = 0; i < samples.length; i++) {
+    const frame = segmentStartFrame + (i / sampleRate) * fps
+    let db = 0
+    for (const source of applicable) {
+      const sourceDb = duckingSourceGainDb(frame, source)
+      if (sourceDb < db) db = sourceDb
+    }
+    output[i] = db === 0 ? samples[i]! : samples[i]! * dbToGain(db)
+  }
+  return output
+}
+
 /**
  * Apply volume (in dB) to audio samples.
  */
@@ -1966,6 +2082,8 @@ export function getAudioPacketPassthroughPlan(
     return null
   }
 
+  // Ducking needs no guard here: passthrough requires exactly ONE audible
+  // segment, and a lone duck source has nothing to duck.
   const segments = extractAudioSegments(composition, composition.fps).filter(
     (segment) => !segment.muted,
   )
@@ -2206,6 +2324,7 @@ async function processAudioWindowChannels(
   intersection: AudioWindowIntersection,
   sampleRate: number,
   fps: number,
+  duckingSources: readonly DuckingSource[] = [],
 ): Promise<Float32Array[]> {
   const processed = decoded.samples
   const decodedSegmentOffset = Math.floor(
@@ -2238,6 +2357,16 @@ async function processAudioWindowChannels(
       decoded.sampleRate,
       fps,
     )
+    if (duckingSources.length > 0) {
+      samples = applyDucking(
+        samples,
+        duckingSources,
+        segment,
+        (intersection.intersectionStart / sampleRate) * fps,
+        fps,
+        decoded.sampleRate,
+      )
+    }
     if (decoded.sampleRate !== sampleRate) {
       samples = await resample(samples, decoded.sampleRate, sampleRate)
     }
@@ -2275,8 +2404,10 @@ async function mixSegmentIntoAudioWindow(params: {
   sampleRate: number
   fps: number
   decoderPool: WindowedAudioDecoderPool
+  duckingSources: readonly DuckingSource[]
 }): Promise<void> {
-  const { segment, mixed, chunkStart, chunkEnd, sampleRate, fps, decoderPool } = params
+  const { segment, mixed, chunkStart, chunkEnd, sampleRate, fps, decoderPool, duckingSources } =
+    params
   const intersection = resolveAudioWindowIntersection(
     segment,
     chunkStart,
@@ -2300,6 +2431,7 @@ async function mixSegmentIntoAudioWindow(params: {
     intersection,
     sampleRate,
     fps,
+    duckingSources,
   )
   mixAudioWindowChannels(
     mixed,
@@ -2344,6 +2476,8 @@ export async function* processAudioWindows(
       ? dbToGain(composition.masterBusDb)
       : 1
 
+  const duckingSources = collectDuckingSources(composition, fps)
+
   const decoderPool = await createWindowedAudioDecoderPool()
   try {
     for (let chunkStart = 0; chunkStart < totalSamples; chunkStart += chunkSamples) {
@@ -2362,6 +2496,7 @@ export async function* processAudioWindows(
           sampleRate,
           fps,
           decoderPool,
+          duckingSources,
         })
       }
 
@@ -2410,6 +2545,8 @@ export async function processAudio(
     await ensureAc3DecoderRegistered()
     log.debug('AC-3 decoder pre-registered for export audio decode')
   }
+
+  const duckingSources = collectDuckingSources(composition, fps)
 
   // Configuration
   const config: AudioProcessingConfig = {
@@ -2551,6 +2688,17 @@ export async function processAudio(
             crossfadeFadeInSamples,
             crossfadeFadeOutSamples,
             true,
+          )
+        }
+
+        if (duckingSources.length > 0) {
+          channelSamples = applyDucking(
+            channelSamples,
+            duckingSources,
+            segment,
+            segment.startFrame,
+            fps,
+            decoded.sampleRate,
           )
         }
 

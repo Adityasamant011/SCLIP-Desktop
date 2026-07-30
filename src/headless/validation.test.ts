@@ -8,6 +8,7 @@ import {
   buildMediaMetadataMap,
   collectSourceRangeFindings,
   collectTransitionFindings,
+  collectTransformParentFindings,
   hasAudioCapableItems,
   videoCarriesAudio,
 } from './validation'
@@ -198,5 +199,54 @@ describe('collectTransitionFindings', () => {
     expect(collectTransitionFindings([transition], adjacentPair())[0]).toMatchObject({
       kind: 'missing_presentation',
     })
+  })
+})
+
+describe('collectTransformParentFindings', () => {
+  const rigPair = (childOverrides = {}) => [
+    makeVideo({ id: 'body' }),
+    makeVideo({
+      id: 'arm',
+      transformParent: {
+        parentItemId: 'body',
+        childLocalReference: { x: 0, y: 0, width: 100, height: 100, rotation: 0 },
+        childWorldReference: { x: 0, y: 0, width: 100, height: 100, rotation: 0 },
+        parentReference: { x: 0, y: 0, width: 200, height: 200, rotation: 0 },
+      },
+      ...childOverrides,
+    }),
+  ]
+
+  it('accepts a valid binding and unparented items', () => {
+    expect(collectTransformParentFindings(rigPair())).toEqual([])
+    expect(collectTransformParentFindings([makeVideo({ id: 'solo' })])).toEqual([])
+  })
+
+  it('flags a missing parent (child renders unparented)', () => {
+    const items = rigPair()
+    ;(items[1] as { transformParent: { parentItemId: string } }).transformParent.parentItemId =
+      'ghost'
+    expect(collectTransformParentFindings(items)[0]).toMatchObject({
+      itemId: 'arm',
+      kind: 'parent_not_found',
+    })
+  })
+
+  it('flags audio/adjustment participants', () => {
+    const items = rigPair()
+    ;(items[0] as { type: string }).type = 'audio'
+    expect(collectTransformParentFindings(items)[0]).toMatchObject({ kind: 'invalid_type' })
+  })
+
+  it('flags a parent cycle', () => {
+    const items = rigPair()
+    ;(items[0] as Record<string, unknown>).transformParent = {
+      parentItemId: 'arm',
+      childLocalReference: { x: 0, y: 0, width: 100, height: 100, rotation: 0 },
+      childWorldReference: { x: 0, y: 0, width: 100, height: 100, rotation: 0 },
+    }
+    const findings = collectTransformParentFindings(items)
+    expect(findings.length).toBeGreaterThanOrEqual(1)
+    expect(findings.every((finding) => finding.kind === 'cycle')).toBe(true)
   })
 })

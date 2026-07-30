@@ -109,6 +109,23 @@ const easing = z.enum([
   'cubic-bezier',
   'spring',
 ])
+const easingConfigSchema = z
+  .object({
+    type: easing,
+    bezier: z
+      .object({ x1: finite, y1: finite, x2: finite, y2: finite })
+      .strict()
+      .optional(),
+    spring: z
+      .object({
+        tension: z.number().min(0).max(500),
+        friction: z.number().min(0).max(100),
+        mass: z.number().min(0.1).max(10),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict()
 const transform = z
   .object({
     x: finite.optional(),
@@ -230,9 +247,19 @@ const opSchemas = [
       frame,
       value: finite,
       easing: easing.optional(),
+      easingConfig: easingConfigSchema.optional(),
     })
     .strict(),
   z.object({ op: z.literal('removeKeyframes'), itemId: id, property: animatableProperty }).strict(),
+  z
+    .object({
+      op: z.literal('setTransformParent'),
+      id,
+      parentItemId: id.nullable(),
+      behavior: z.enum(['preserve-world', 'snap-to-parent', 'restore-local']).optional(),
+      frame: frame.optional(),
+    })
+    .strict(),
   z.union([
     z.object({ op: z.literal('addEffect'), itemId: id, effect }).strict(),
     z
@@ -273,6 +300,7 @@ export const EDIT_OPERATION_NAMES = [
   'addClip',
   'addKeyframe',
   'removeKeyframes',
+  'setTransformParent',
   'addEffect',
   'removeEffect',
   'setTransform',
@@ -298,6 +326,7 @@ function samplesDescription(name) {
     addClip: 'Add workspace media as a clip',
     addKeyframe: 'Add a property keyframe',
     removeKeyframes: 'Remove keyframes for a property',
+    setTransformParent: 'Parent an item transform to another item (null detaches)',
     addEffect: 'Add a registered GPU effect',
     removeEffect: 'Remove an existing item effect',
     setTransform: 'Update an item transform',
