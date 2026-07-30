@@ -103,44 +103,62 @@ async function awaitFontsApplied(
   const ctx = canvas.getContext('2d')
   if (!ctx) return unresolved
 
-  // Glyph-rich probe: Latin + Cyrillic + digits, so a family that only ships a
-  // partial subset cannot pass on a handful of shared glyphs.
-  const PROBE = 'HAMBURGEFONTSIVЖЯЦЩ0123456789'
-  const GENERICS = ['monospace', 'serif'] as const
   const deadline = Date.now() + timeoutMs
-
   const measure = (font: string): number => {
     ctx.font = font
     return ctx.measureText(PROBE).width
   }
 
-  // Two consecutive passes, not one. A single pass flips true the moment the
-  // face lands in the font cache, while the raster path can still be a beat
-  // behind — measured as the switch merely MOVING EARLIER (frame 44 -> ~22)
-  // rather than disappearing. Requiring the metric to hold across a gap is what
-  // makes the wait cover the raster path too.
-  const STABLE_PASSES = 2
   for (const family of new Set(families)) {
     const bare = family.replace(/^["']|["']$/g, '')
     for (const weight of weights) {
-      let streak = 0
-      while (Date.now() < deadline && streak < STABLE_PASSES) {
-        // A family still falling back measures identically to the generic it is
-        // stacked on. Differing from BOTH generics means the face is really in use.
-        const applied = GENERICS.every(
-          (generic) =>
-            measure(`${weight} 100px "${bare}", ${generic}`) !==
-            measure(`${weight} 100px ${generic}`),
-        )
-        streak = applied ? streak + 1 : 0
-        if (streak < STABLE_PASSES) await new Promise((resolve) => setTimeout(resolve, 60))
+      if (!(await waitForFaceApplied(measure, bare, weight, deadline))) {
+        unresolved.push(`${bare}:${weight}`)
       }
-      if (streak < STABLE_PASSES) unresolved.push(`${bare}:${weight}`)
     }
   }
   // Let the compositor settle one frame before the first rasterisation.
   await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)))
   return unresolved
+}
+
+// Glyph-rich probe: Latin + Cyrillic + digits, so a family that only ships a
+// partial subset cannot pass on a handful of shared glyphs.
+const PROBE = 'HAMBURGEFONTSIVЖЯЦЩ0123456789'
+const GENERICS = ['monospace', 'serif'] as const
+
+/**
+ * True once ONE family+weight measurably differs from the generics it is
+ * stacked on, twice in a row.
+ *
+ * Two consecutive passes, not one: a single pass flips true the moment the face
+ * lands in the font cache while the raster path can still be a beat behind —
+ * measured as the switch merely MOVING EARLIER (frame 44 -> ~22) rather than
+ * disappearing. Requiring the metric to hold across a gap covers the raster path.
+ */
+async function waitForFaceApplied(
+  measure: (font: string) => number,
+  family: string,
+  weight: number,
+  deadline: number,
+): Promise<boolean> {
+  const STABLE_PASSES = 2
+  // A family still falling back measures identically to the generic it is stacked
+  // on. Differing from BOTH generics means the face is really in use.
+  const isApplied = (): boolean =>
+    GENERICS.every(
+      (generic) =>
+        measure(`${weight} 100px "${family}", ${generic}`) !== measure(`${weight} 100px ${generic}`),
+    )
+
+  let streak = 0
+  while (streak < STABLE_PASSES) {
+    streak = isApplied() ? streak + 1 : 0
+    if (streak >= STABLE_PASSES) return true
+    if (Date.now() >= deadline) return false
+    await new Promise((resolve) => setTimeout(resolve, 60))
+  }
+  return true
 }
 
 /**
