@@ -17,13 +17,14 @@
 //   --format <f>          png|jpg|webp (default: png)
 //   --width/--height <n>  Output size (default: project resolution — full quality)
 //   --quality <0..1>      Encoder quality for jpg/webp (default: 1)
+//   --strict              Fail (before rendering) on any project validation warning
 //   --head                Run headed (visible browser) for debugging
 //   --build               Build dist/ first if the harness isn't built
 //   --harness-url <url>   Dev mode: drive a running Vite dev server instead of dist/
-import { chromium } from 'playwright'
 import fs from 'node:fs'
 import path from 'node:path'
 import { parseArgs, chromeLaunchArgs } from './lib/cli.mjs'
+import { withHarnessPage } from './lib/page-session.mjs'
 import { startHarness, loadJobProject, resolveProjectMedia } from './lib/render-core.mjs'
 
 const MIME_BY_FORMAT = {
@@ -34,6 +35,8 @@ const MIME_BY_FORMAT = {
 }
 const EXT_BY_MIME = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' }
 
+// CLI arg wiring; exercised end-to-end by headless/test.mjs
+// fallow-ignore-next-line complexity
 async function main() {
   const args = parseArgs(process.argv.slice(2))
   const workspace = args.workspace
@@ -57,60 +60,58 @@ async function main() {
   })
   console.log(`Harness: ${harnessUrl}`)
 
-  const browser = await chromium.launch({
-    channel: 'chrome',
-    headless: !args.head,
-    args: chromeLaunchArgs(),
-  })
   try {
-    const context = await browser.newContext({ acceptDownloads: true })
-    const page = await context.newPage()
-    page.on('pageerror', (e) => console.error('  [pageerror]', e.message))
-    page.on('console', (m) => {
-      if (m.type() === 'error' && !m.text().includes('Video load error')) {
-        console.error('  [page:error]', m.text())
-      }
-    })
-    await page.goto(harnessUrl, { waitUntil: 'load', timeout: 60_000 })
-    await page.waitForFunction(() => Boolean(window.freecut?.ready), { timeout: 30_000 })
-
-    const { project } = loadJobProject(workspace, { project: args.project })
-    const { media, missing } = resolveProjectMedia(workspace, project, mediaUrlOf, null)
-    if (missing.length > 0) {
-      console.warn(
-        `  WARNING: ${missing.length} media source(s) not found on disk: ${missing.join(', ')}`,
-      )
-    }
-
-    fs.mkdirSync(path.dirname(outPath), { recursive: true })
-    const started = Date.now()
-    const downloadPromise = page.waitForEvent('download', { timeout: 5 * 60_000 })
-    downloadPromise.catch(() => {})
-    const summary = await page.evaluate((payload) => window.freecut.renderFrame(payload), {
-      project,
-      media,
-      frame,
-      atSeconds,
-      width: args.width ? Number(args.width) : undefined,
-      height: args.height ? Number(args.height) : undefined,
-      format: mime,
-      quality: args.quality ? Number(args.quality) : undefined,
-    })
-    const download = await downloadPromise
-    await download.saveAs(outPath)
-    console.log(
-      `  Frame ${summary.frame} (${summary.atSeconds.toFixed(3)}s) -> ${outPath}  ` +
-        `(${summary.width}x${summary.height} ${summary.format}, ` +
-        `${(summary.fileSize / 1000).toFixed(1)} KB, ${Date.now() - started}ms)`,
+    await withHarnessPage(
+      {
+        harnessUrl,
+        headless: !args.head,
+        launchArgs: chromeLaunchArgs(),
+        acceptDownloads: true,
+        ignoreConsoleError: (text) => text.includes('Video load error'),
+      },
+      (page) => grabFrame(page, { args, workspace, mediaUrlOf, outPath, mime, frame, atSeconds }),
     )
-    // Same channel a full render uses: a frame that degraded (fallback fonts,
-    // for instance) must not look identical to a clean one.
-    for (const warning of summary.warnings ?? [])
-      console.warn(`  WARNING [${warning.code ?? 'UNKNOWN'}]: ${warning.message}`)
   } finally {
-    await browser.close()
     await closeServers()
   }
+}
+
+// One-shot render driver; exercised end-to-end by headless/test.mjs
+// fallow-ignore-next-line complexity
+async function grabFrame(page, { args, workspace, mediaUrlOf, outPath, mime, frame, atSeconds }) {
+  const { project } = loadJobProject(workspace, { project: args.project })
+  const { media, missing } = resolveProjectMedia(workspace, project, mediaUrlOf, null)
+  if (missing.length > 0) {
+    console.warn(
+      `  WARNING: ${missing.length} media source(s) not found on disk: ${missing.join(', ')}`,
+    )
+  }
+
+  fs.mkdirSync(path.dirname(outPath), { recursive: true })
+  const started = Date.now()
+  const downloadPromise = page.waitForEvent('download', { timeout: 5 * 60_000 })
+  downloadPromise.catch(() => {})
+  const summary = await page.evaluate((payload) => window.freecut.renderFrame(payload), {
+    project,
+    media,
+    frame,
+    atSeconds,
+    width: args.width ? Number(args.width) : undefined,
+    height: args.height ? Number(args.height) : undefined,
+    format: mime,
+    quality: args.quality ? Number(args.quality) : undefined,
+    strict: Boolean(args.strict),
+  })
+  for (const w of summary.warnings ?? []) {
+    console.warn(`  WARNING [${w.code ?? 'UNKNOWN'}]: ${w.message}`)
+  }
+  const download = await downloadPromise
+  await download.saveAs(outPath)
+  console.log(
+    `  Frame ${summary.frame} (${summary.atSeconds.toFixed(3)}s) -> ${outPath}  ` +
+      `(${summary.width}x${summary.height} ${summary.format}, ` +
+      `${(summary.fileSize / 1000).toFixed(1)} KB, ${Date.now() - started}ms)`,
+  )
 }
 
 main().catch((e) => {

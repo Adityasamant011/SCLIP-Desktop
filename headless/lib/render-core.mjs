@@ -212,6 +212,7 @@ export function prepareJob(workspace, jobArgs, mediaUrlOf) {
     mediaResolved,
     mediaTotal,
     outPath,
+    strict: jobArgs.strict === true,
   }
 }
 
@@ -288,7 +289,12 @@ export async function renderJob(
       message: `${job.missing.length} media source(s) not found on disk: ${job.missing.join(', ')}`,
       details: { mediaIds: job.missing },
     })
-  const unsupportedAudio = job.media.filter((m) => m.metadata?.audioCodecSupported === false)
+  // audioCodecSupported=false on media WITHOUT any audio track is a metadata
+  // authoring bug (seen with external registration scripts) — only warn when
+  // there is an actual audio track that can't be decoded.
+  const unsupportedAudio = job.media.filter(
+    (m) => m.metadata?.audioCodecSupported === false && m.metadata?.audioCodec,
+  )
   if (unsupportedAudio.length > 0) {
     const list = unsupportedAudio
       .map((m) => `${m.metadata.fileName ?? m.mediaId} (${m.metadata.audioCodec ?? 'unknown'})`)
@@ -316,6 +322,7 @@ export async function renderJob(
     renderWholeProject: !job.hasRange,
     inPoint: job.inPoint,
     outPoint: job.outPoint,
+    strict: job.strict,
   })
   const download = await downloadPromise
   const effectiveContainer = summary.effectiveSettings?.container

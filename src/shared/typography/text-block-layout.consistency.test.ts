@@ -147,3 +147,117 @@ describe('layoutTextBlock', () => {
     expect(bg.radius).toBe(12)
   })
 })
+
+describe('inline span flow (spanLayout: inline)', () => {
+  const inlineItem = (overrides: Partial<TextItem> = {}): TextItem =>
+    baseTextItem({
+      text: 'ключевое слово тут',
+      textSpans: [
+        { text: 'ключевое ', color: '#ffffff' },
+        { text: 'слово тут', color: '#ff7a00' },
+      ],
+      spanLayout: 'inline',
+      fontSize: 58,
+      textPadding: 0,
+      ...overrides,
+    })
+
+  it('flows spans into ONE line with color runs when they fit', () => {
+    const layout = layoutTextBlock(inlineItem(), 900, 200, makeMeasurer())
+    expect(layout.lines).toHaveLength(1)
+    const line = layout.lines[0]!
+    expect(line.text).toBe('ключевое слово тут')
+    expect(line.runs?.map((run) => run.text)).toEqual(['ключевое ', 'слово тут'])
+    expect(line.runs?.map((run) => run.color)).toEqual(['#ffffff', '#ff7a00'])
+    // Run offsets are prefix-measured: run 2 starts where run 1's advance ends.
+    expect(line.runs![1]!.offsetX).toBeCloseTo(makeMeasurer().measure('ключевое ', '58px x', 0))
+    // Line width equals the whole-text measure (geometry identical to a
+    // single-style line — runs only affect paint).
+    expect(line.width).toBeCloseTo(makeMeasurer().measure(line.text, '58px x', 0))
+  })
+
+  it('wraps by box width and splits runs at word boundaries', () => {
+    // 10 glyphs fit (10 * 58 * 0.5 = 290 <= 300): first line takes 'ключевое'.
+    const layout = layoutTextBlock(inlineItem(), 300, 400, makeMeasurer())
+    expect(layout.lines.map((line) => line.text)).toEqual(['ключевое', 'слово тут'])
+    expect(layout.lines[0]!.runs?.map((run) => run.color)).toEqual(['#ffffff'])
+    expect(layout.lines[1]!.runs?.map((run) => run.color)).toEqual(['#ff7a00'])
+  })
+
+  it('splits mid-word span boundaries into adjacent runs', () => {
+    const layout = layoutTextBlock(
+      inlineItem({
+        text: 'ключевое',
+        textSpans: [
+          { text: 'клю', color: '#ffffff' },
+          { text: 'чевое', color: '#ff7a00', underline: true },
+        ],
+      }),
+      900,
+      200,
+      makeMeasurer(),
+    )
+    expect(layout.lines).toHaveLength(1)
+    const runs = layout.lines[0]!.runs!
+    expect(runs.map((run) => run.text)).toEqual(['клю', 'чевое'])
+    expect(runs[1]!.offsetX).toBeCloseTo(makeMeasurer().measure('клю', '58px x', 0))
+    expect(runs[1]!.underline).toBe(true)
+  })
+
+  it('preserves authored spacing verbatim (DOM preview uses white-space: pre-wrap)', () => {
+    // Regression: tokenisation used to treat every space as a pure delimiter and
+    // rebuild exactly one between words, so repeated/leading/trailing spaces
+    // vanished from canvas, GPU and dumpLayout while the DOM preview still showed
+    // them — different text, different width, different wrap points.
+    const item = inlineItem({
+      text: '  двойной  пробел  ',
+      textSpans: [
+        { text: '  двойной  ', color: '#ffffff' },
+        { text: 'пробел  ', color: '#ff7a00' },
+      ],
+    })
+    const layout = layoutTextBlock(item, 4000, 200, makeMeasurer())
+
+    expect(layout.lines).toHaveLength(1)
+    const line = layout.lines[0]!
+    expect(line.text).toBe('  двойной  пробел  ')
+    // Width must account for every authored space, not a normalised one.
+    expect(line.width).toBeCloseTo(makeMeasurer().measure('  двойной  пробел  ', '58px x', 0))
+    // Spaces keep the style of the span that authored them, so an underlined or
+    // recoloured span does not lose its own whitespace to the neighbour.
+    expect(line.runs?.map((run) => run.text)).toEqual(['  двойной  ', 'пробел  '])
+  })
+
+  it('drops only the space run consumed by a wrap, not authored indentation', () => {
+    const item = inlineItem({
+      text: '  раз два',
+      textSpans: [{ text: '  раз два', color: '#ffffff' }],
+    })
+    // Narrow enough to force a break between the two words.
+    const layout = layoutTextBlock(item, makeMeasurer().measure('  раз', '58px x', 0) + 1, 400, makeMeasurer())
+
+    expect(layout.lines).toHaveLength(2)
+    // Paragraph indent survives on the first line...
+    expect(layout.lines[0]!.text).toBe('  раз')
+    // ...while the space that caused the break hangs rather than indenting line 2.
+    expect(layout.lines[1]!.text).toBe('два')
+  })
+
+  it('keeps the default stack flow untouched when spanLayout is absent', () => {
+    const layout = layoutTextBlock(
+      baseTextItem({
+        text: 'a b',
+        textSpans: [
+          { text: 'a', color: '#ffffff' },
+          { text: 'b', color: '#ff7a00' },
+        ],
+        textPadding: 0,
+      }),
+      900,
+      200,
+      makeMeasurer(),
+    )
+    expect(layout.lines.map((line) => line.text)).toEqual(['a', 'b'])
+    expect(layout.lines[0]!.runs).toBeUndefined()
+  })
+})

@@ -109,6 +109,7 @@ import {
   itemHasEnabledGpuEffect,
   isAnimatedImage,
   isGifFormat,
+  shouldRenderResolvedItemAtFrame,
   subCompositionRenderDataHasGpuEffects,
 } from './render-engine-predicates'
 
@@ -2188,26 +2189,8 @@ export async function createCompositionRenderer(
       }
 
       // Helper to check if item should be rendered
-      const shouldRenderItem = (baseItem: TimelineItem): boolean => {
-        const item = getCurrentItem(baseItem)
-        // Skip items not visible at this frame
-        if (frame < item.from || frame >= item.from + item.durationInFrames) {
-          return false
-        }
-        // Skip items being handled by transitions
-        if (transitionClipIds.has(item.id)) {
-          return false
-        }
-        // Skip audio items (handled separately)
-        if (item.type === 'audio') return false
-        // Skip adjustment items (they apply effects, not render content)
-        if (item.type === 'adjustment') return false
-        // Null/controller layers drive transforms but never render pixels.
-        if (item.type === 'controller') return false
-        // Skip mask shapes (handled by mask system)
-        if (item.type === 'shape' && (item as ShapeItem).isMask) return false
-        return true
-      }
+      const shouldRenderItem = (baseItem: TimelineItem): boolean =>
+        shouldRenderResolvedItemAtFrame(getCurrentItem(baseItem), frame, transitionClipIds)
       // === OCCLUSION CULLING OPTIMIZATION ===
       // Find the topmost (lowest order) track with a fully occluding item.
       // Skip rendering all tracks below it (higher order) since they'll be fully covered.

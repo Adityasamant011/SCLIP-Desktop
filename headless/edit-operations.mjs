@@ -222,14 +222,64 @@ const cases = [
       rightClipId: 'clip-right',
       type: 'crossfade',
       durationInFrames: 10,
+      presentation: 'glitch',
+      alignment: 0.4,
+      properties: { intensity: 2 },
     },
-    assert: (project) => assert.equal(project.timeline.transitions.length, 1),
+    assert: (project) => {
+      assert.equal(project.timeline.transitions.length, 1)
+      const transition = project.timeline.transitions[0]
+      assert.equal(transition.presentation, 'glitch')
+      assert.equal(transition.alignment, 0.4)
+      assert.deepEqual(transition.properties, { intensity: 2 })
+    },
     failure: {
       op: 'addTransition',
       leftClipId: 'clip-left',
       rightClipId: 'missing',
       durationInFrames: 10,
     },
+  },
+  {
+    name: 'updateTransition',
+    op: { op: 'updateTransition', id: 'tr-x', presentation: 'wipe' },
+    ops: [
+      {
+        op: 'addTransition',
+        leftClipId: 'clip-left',
+        rightClipId: 'clip-right',
+        durationInFrames: 10,
+        callerId: 'tr',
+      },
+      {
+        op: 'updateTransition',
+        id: { $ref: 'tr#/detail/id' },
+        presentation: 'wipe',
+        direction: 'from-left',
+      },
+    ],
+    assert: (project) => {
+      const transition = project.timeline.transitions[0]
+      assert.equal(transition.presentation, 'wipe')
+      assert.equal(transition.direction, 'from-left')
+    },
+    schemaFailure: { op: 'updateTransition', id: 'x', alignment: 2 },
+  },
+  {
+    name: 'removeTransition',
+    op: { op: 'removeTransition', id: 'tr-x' },
+    ops: [
+      {
+        op: 'addTransition',
+        leftClipId: 'clip-left',
+        rightClipId: 'clip-right',
+        durationInFrames: 10,
+        callerId: 'tr',
+      },
+      { op: 'removeTransition', id: { $ref: 'tr#/detail/id' } },
+    ],
+    assert: (project) => assert.equal(project.timeline.transitions?.length ?? 0, 0),
+    failure: { op: 'removeTransition', id: 'ghost' },
   },
   {
     name: 'addTrack',

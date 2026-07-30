@@ -17,7 +17,7 @@
  */
 
 import type { Project } from '@/types/project'
-import type { MigrationResult } from './types'
+import type { MigrationResult, ProjectWarning } from './types'
 import { CURRENT_SCHEMA_VERSION } from './types'
 import { getMigrationsToApply } from './migrations'
 import { normalizeProject, didNormalizationChange } from './normalize'
@@ -27,6 +27,7 @@ const log = createLogger('Migrations')
 
 // Re-export types and constants
 export { CURRENT_SCHEMA_VERSION } from './types'
+export type { ProjectWarning } from './types'
 
 /**
  * Get the schema version from a project.
@@ -100,8 +101,10 @@ export function migrateProject(project: Project): MigrationResult {
   // Step 1: Run version-based migrations
   const { project: migrated, appliedMigrations, fromVersion } = runMigrations(project)
 
-  // Step 2: Normalize to apply current defaults
-  const normalized = normalizeProject(migrated)
+  // Step 2: Normalize to apply current defaults, collecting non-fatal findings
+  // (silent overlap repairs, un-renderable items) for callers that surface them.
+  const warnings: ProjectWarning[] = []
+  const normalized = normalizeProject(migrated, warnings)
 
   // Check if anything changed (migrations or normalization)
   const migratedByVersion = appliedMigrations.length > 0
@@ -113,5 +116,6 @@ export function migrateProject(project: Project): MigrationResult {
     appliedMigrations,
     fromVersion,
     toVersion: CURRENT_SCHEMA_VERSION,
+    warnings,
   }
 }

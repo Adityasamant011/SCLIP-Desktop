@@ -22,6 +22,7 @@
 //   --quality <q>          low|medium|high|ultra (default: high)
 //   --in/--out-sec/--duration <sec>   Render only a slice
 //   --audio-only           Render audio only (container default: mp3)
+//   --strict               Fail (before rendering) on any project validation warning
 //   --allow-missing-media  Render blank/silent gaps and report MISSING_MEDIA warnings
 //   --head                 Run headed (visible browser) for debugging
 //   --build                Build dist/ first if the harness isn't built
@@ -49,6 +50,7 @@ const RENDER_OPTIONS = new Set([
   'out-sec',
   'duration',
   'audio-only',
+  'strict',
   'allow-missing-media',
   'head',
   'build',
@@ -58,7 +60,7 @@ const RENDER_OPTIONS = new Set([
   'help',
   'json',
 ])
-const HELP = `Usage:\n  node headless/render.mjs --workspace <dir> --project <id|project.json> [options]\n  node headless/render.mjs --workspace <dir> --batch <jobs.json>\n  node headless/render.mjs --workspace <dir> --list [--json]\n\nOptions: --out --codec --container --resolution --fps --quality --in --out-sec --duration --audio-only --allow-missing-media --head --build --harness-url --json\n`
+const HELP = `Usage:\n  node headless/render.mjs --workspace <dir> --project <id|project.json> [options]\n  node headless/render.mjs --workspace <dir> --batch <jobs.json>\n  node headless/render.mjs --workspace <dir> --list [--json]\n\nOptions: --out --codec --container --resolution --fps --quality --in --out-sec --duration --audio-only --strict --allow-missing-media --head --build --harness-url --json\n`
 
 async function main() {
   const args = parseArgs(process.argv.slice(2), { allowed: RENDER_OPTIONS })

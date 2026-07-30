@@ -1018,9 +1018,7 @@ export function extractAudioSegments(
   return segments
 }
 
-type MediabunnyAudioSampleSink = InstanceType<
-  (typeof import('mediabunny'))['AudioSampleSink']
->
+type MediabunnyAudioSampleSink = InstanceType<(typeof import('mediabunny'))['AudioSampleSink']>
 type MediabunnyAudioSample = InstanceType<(typeof import('mediabunny'))['AudioSample']>
 
 interface AudioDecodeAccumulator {
@@ -2115,11 +2113,7 @@ interface AudioWindowIntersection {
 }
 
 interface WindowedAudioDecoderPool {
-  decode: (
-    segment: AudioSegment,
-    startTime: number,
-    endTime: number,
-  ) => Promise<DecodedAudio>
+  decode: (segment: AudioSegment, startTime: number, endTime: number) => Promise<DecodedAudio>
   dispose: () => Promise<void>
 }
 

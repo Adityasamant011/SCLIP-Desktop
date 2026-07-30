@@ -479,6 +479,8 @@ async function main() {
 
   // Grab a single composited frame (default: full-res PNG) — no encoder/muxer,
   // much faster than /render + extract for eyeballing a position on a warm page.
+  // Warm-service frame endpoint; exercised end-to-end by headless/test.mjs
+  // fallow-ignore-next-line complexity
   const handleFrame = async (req, res) => {
     const body = await readJsonBody(req)
     if (body.project) assertSinglePathComponent(body.project, 'project id')

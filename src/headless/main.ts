@@ -16,7 +16,7 @@
  * layer being present.
  */
 import type { Project } from '@/types/project'
-import type { TimelineTrack, TimelineItem } from '@/types/timeline'
+import type { TimelineTrack, TimelineItem, TextItem } from '@/types/timeline'
 import type { Transition } from '@/types/transition'
 import type { ItemKeyframes } from '@/types/keyframe'
 import type { AudioEqSettings } from '@/types/audio'
@@ -26,6 +26,7 @@ import type { ItemEffect } from '@/types/effects'
 
 import { createLogger } from '@/shared/logging/logger'
 import { CURRENT_SCHEMA_VERSION, migrateProject } from '@/shared/projects/migrations'
+import type { ProjectWarning } from '@/shared/projects/migrations'
 import {
   DEFAULT_PROJECT_FPS,
   DEFAULT_PROJECT_HEIGHT,
@@ -57,11 +58,22 @@ import {
 } from '@/features/export/deps/timeline-compositions'
 import { editProject } from './edit'
 import { seedMediaLibrary } from './seed-media'
+import {
+  buildMediaMetadataMap,
+  collectSourceRangeFindings,
+  collectTransitionFindings,
+  hasAudioCapableItems,
+} from './validation'
+import { hasAudioContent } from '@/features/export/utils/canvas-audio'
 import { ensureFontsLoaded } from '@/shared/typography/font-loader'
 import {
   collectVisibleTextFontFamilies,
   resolveTrackRenderState,
 } from '@/runtime/composition-runtime/utils/scene-assembly'
+import { expandTextTransformToFitContent } from '@/runtime/composition-runtime/utils/text-layout'
+import { layoutTextBlock, lineInkWidth } from '@/shared/typography/text-block-layout'
+import { createCanvasTextMeasurer } from '@/shared/typography/text-measurer'
+import { resolveAnimatedTextItem } from '@/features/keyframes/utils/animated-text-item'
 
 const log = createLogger('Headless')
 
@@ -219,6 +231,10 @@ interface HeadlessTimelineInput {
   media?: HeadlessMediaSource[]
   settings: ClientExportSettings
   outputFileName?: string
+  /** Fail before rendering if any validation warning was collected. */
+  strict?: boolean
+  /** Load-time validation findings collected by the caller (renderProject). */
+  validationWarnings?: HeadlessRenderWarning[]
 }
 
 /** Render a full Project object (runs migrations, then extracts the timeline). */
@@ -236,6 +252,8 @@ interface HeadlessProjectInput {
   inPoint?: number | null
   outPoint?: number | null
   outputFileName?: string
+  /** Fail before rendering if any validation warning was collected. */
+  strict?: boolean
 }
 
 interface HeadlessRenderSummary {
@@ -251,9 +269,129 @@ interface HeadlessRenderSummary {
 }
 
 interface HeadlessRenderWarning {
-  code: 'CODEC_FALLBACK' | 'WEBGPU_TRANSITION_FALLBACK' | 'FONTS_NOT_APPLIED'
+  code:
+    | 'CODEC_FALLBACK'
+    | 'WEBGPU_TRANSITION_FALLBACK'
+    | 'FONTS_NOT_APPLIED'
+    | 'NO_AUDIO_IN_MIX'
+    | ProjectWarning['code']
+    | 'SOURCE_RANGE_EXCEEDED'
+    | 'TRANSITION_CLIP_NOT_FOUND'
+    | 'TRANSITION_CROSS_TRACK'
+    | 'TRANSITION_NOT_ADJACENT'
+    | 'TRANSITION_MISSING_PRESENTATION'
+    | 'TRANSITION_INVALID_DIRECTION'
   message: string
   details?: Record<string, unknown>
+}
+
+function projectWarningsToHeadless(warnings: ProjectWarning[]): HeadlessRenderWarning[] {
+  return warnings.map((w) => ({
+    code: w.code,
+    message: w.message,
+    details: {
+      ...(w.itemIds ? { itemIds: w.itemIds } : {}),
+      ...(w.trackId ? { trackId: w.trackId } : {}),
+      ...(w.compositionId ? { compositionId: w.compositionId } : {}),
+    },
+  }))
+}
+
+/** Source-overrun findings for top-level and sub-composition items. */
+function sourceRangeWarnings(
+  items: readonly TimelineItem[],
+  compositions: readonly SubComposition[] | undefined,
+  mediaById: Map<string, MediaMetadata>,
+  fps: number,
+): HeadlessRenderWarning[] {
+  const allItems = [
+    ...items,
+    ...(compositions ?? []).flatMap((comp) => (comp.items ?? []) as TimelineItem[]),
+  ]
+  return collectSourceRangeFindings(allItems, mediaById, fps).map((f) => ({
+    code: 'SOURCE_RANGE_EXCEEDED' as const,
+    message:
+      `Item "${f.itemId}" needs ${f.neededSeconds.toFixed(2)}s of media "${f.mediaId}" ` +
+      `but only ${f.availableSeconds.toFixed(2)}s exist — the tail renders black/silent`,
+    details: { ...f },
+  }))
+}
+
+const TRANSITION_WARNING_CODES = {
+  clip_not_found: 'TRANSITION_CLIP_NOT_FOUND',
+  cross_track: 'TRANSITION_CROSS_TRACK',
+  not_adjacent: 'TRANSITION_NOT_ADJACENT',
+  missing_presentation: 'TRANSITION_MISSING_PRESENTATION',
+  invalid_direction: 'TRANSITION_INVALID_DIRECTION',
+} as const
+
+/** Transitions that would silently never render (or degrade to a hard cut). */
+function transitionWarnings(
+  transitions: readonly Transition[] | undefined,
+  items: readonly TimelineItem[],
+): HeadlessRenderWarning[] {
+  return collectTransitionFindings(transitions ?? [], items).map((f) => ({
+    code: TRANSITION_WARNING_CODES[f.kind],
+    message: f.message,
+    details: { transitionId: f.transitionId },
+  }))
+}
+
+/**
+ * Warn (or throw in strict mode) when the composition has audio-capable items
+ * but the extracted mix contains zero audible segments.
+ */
+async function collectSilentMixWarnings(
+  composition: CompositionInputProps,
+  mediaById: Map<string, MediaMetadata>,
+  strict: boolean | undefined,
+): Promise<HeadlessRenderWarning[]> {
+  if (!hasAudioCapableItems(composition.tracks, mediaById)) return []
+  if (await hasAudioContent(composition)) return []
+  const warning: HeadlessRenderWarning = {
+    code: 'NO_AUDIO_IN_MIX',
+    message:
+      'Composition contains items with audio, but the final mix has zero audible segments — the output file will have NO audio track',
+  }
+  log.warn(warning.message)
+  if (strict) {
+    throw new Error(`Strict validation failed (render): ${warning.code}: ${warning.message}`)
+  }
+  return [warning]
+}
+
+/** Merge caller findings with source-overrun checks and report them. */
+function runLoadValidation(
+  input: HeadlessTimelineInput,
+  items: readonly TimelineItem[],
+  compositions: readonly SubComposition[] | undefined,
+  fps: number,
+  mediaById: Map<string, MediaMetadata>,
+): HeadlessRenderWarning[] {
+  const validationWarnings = [
+    ...(input.validationWarnings ?? []),
+    ...sourceRangeWarnings(items, compositions, mediaById, fps),
+    ...transitionWarnings(input.transitions, items),
+  ]
+  reportValidationWarnings(validationWarnings, input.strict, 'render')
+  return validationWarnings
+}
+
+/** Log every validation warning; in strict mode abort before any rendering. */
+function reportValidationWarnings(
+  warnings: HeadlessRenderWarning[],
+  strict: boolean | undefined,
+  context: string,
+): void {
+  for (const w of warnings) {
+    log.warn(`[validation] ${w.message}`, { code: w.code, ...w.details })
+  }
+  if (strict && warnings.length > 0) {
+    throw new Error(
+      `Strict validation failed (${context}): ${warnings.length} warning(s) — ` +
+        warnings.map((w) => `${w.code}: ${w.message}`).join('; '),
+    )
+  }
 }
 
 type ProgressSink = (progress: RenderProgress) => void
@@ -452,6 +590,11 @@ async function renderTimeline(input: HeadlessTimelineInput): Promise<HeadlessRen
 
   const { settings, warnings } = await adaptVideoSettings(requestedSettings)
 
+  // Load-time validation: caller-collected findings (project normalization)
+  // plus source-overrun checks. Logged always; fatal before render in --strict.
+  const mediaById = buildMediaMetadataMap(media)
+  warnings.unshift(...runLoadValidation(input, items, compositions, fps, mediaById))
+
   const composition: CompositionInputProps = convertTimelineToComposition(
     tracks,
     items,
@@ -474,6 +617,11 @@ async function renderTimeline(input: HeadlessTimelineInput): Promise<HeadlessRen
 
   // Resolve top-level media (mediaId -> seeded blob URL). Export never uses proxies.
   composition.tracks = await resolveMediaUrls(composition.tracks, { useProxy: false })
+
+  // Silent-failure guard: items with audio present but zero audible segments in
+  // the final mix is almost always an authoring/engine bug, not intent. (In
+  // audio-only mode renderAudioOnly additionally throws on an empty mix.)
+  warnings.push(...(await collectSilentMixWarnings(composition, mediaById, input.strict)))
 
   const result =
     settings.mode === 'audio'
@@ -503,7 +651,7 @@ async function renderTimeline(input: HeadlessTimelineInput): Promise<HeadlessRen
 
 async function renderProject(input: HeadlessProjectInput): Promise<HeadlessRenderSummary> {
   const { project: rawProject, settings, media, renderWholeProject = true, outputFileName } = input
-  const { project } = migrateProject(rawProject)
+  const { project, warnings: projectWarnings } = migrateProject(rawProject)
   const timeline = project.timeline
   if (!timeline) {
     throw new Error('Project has no timeline to render')
@@ -539,6 +687,8 @@ async function renderProject(input: HeadlessProjectInput): Promise<HeadlessRende
     media,
     settings,
     outputFileName,
+    strict: input.strict,
+    validationWarnings: projectWarningsToHeadless(projectWarnings),
   })
 }
 
@@ -560,6 +710,8 @@ interface HeadlessFrameInput {
   format?: 'image/png' | 'image/jpeg' | 'image/webp'
   quality?: number
   outputFileName?: string
+  /** Fail before rendering if any validation warning was collected. */
+  strict?: boolean
 }
 
 interface HeadlessFrameSummary {
@@ -581,6 +733,49 @@ interface HeadlessLayoutInput {
   media?: HeadlessMediaSource[]
   frame?: number
   atSeconds?: number
+  /** Fail if any validation warning was collected. */
+  strict?: boolean
+}
+
+/** One styled sub-range of an inline-flowed line, in canvas coordinates. */
+interface TextLayoutSpan {
+  text: string
+  x: number
+  width: number
+  color: string
+}
+
+interface TextLayoutLine {
+  text: string
+  /** Canvas-space left edge of the occupied line box. */
+  x: number
+  /** Canvas-space top of the line box. */
+  y: number
+  /** Canvas-space alphabetic baseline. */
+  baseline: number
+  /** Advance width incl. trailing letter-spacing. */
+  width: number
+  /** Visible ink width (excludes trailing letter-spacing). */
+  inkWidth: number
+  height: number
+  color: string
+  fontSize: number
+  letterSpacing: number
+  /** Present only for `spanLayout: 'inline'` items. */
+  spans?: TextLayoutSpan[]
+}
+
+/**
+ * True rendered geometry of a text item at the requested frame — the same
+ * `layoutTextBlock` output the Canvas/GPU renderers draw from, mapped into
+ * canvas coordinates. Lets callers position companion graphics (underlines,
+ * plates) pixel-exactly instead of estimating glyph widths.
+ */
+interface TextLayoutInfo {
+  /** The auto-expanded text box (canvas-space). */
+  box: { x: number; y: number; width: number; height: number }
+  lines: TextLayoutLine[]
+  background?: { x: number; y: number; width: number; height: number; radius: number }
 }
 
 interface LayoutBox {
@@ -592,7 +787,7 @@ interface LayoutBox {
   /** Canvas-space top-left corner (px), origin at canvas top-left. */
   x: number
   y: number
-  /** Bounding-box size (px). For text this is the (auto-expanded) text box. */
+  /** Bounding-box size (px). For text this is the auto-expanded text box. */
   width: number
   height: number
   opacity: number
@@ -606,6 +801,7 @@ interface LayoutBox {
   textAlign?: string
   verticalAlign?: string
   fontSize?: number
+  textLayout?: TextLayoutInfo
 }
 
 interface HeadlessLayoutResult {
@@ -629,15 +825,20 @@ interface MigratedTimelineView {
   backgroundColor?: string
   busAudioEq?: AudioEqSettings
   masterBusDb?: number
+  /** Non-fatal findings from project normalization (overlap repairs etc.). */
+  projectWarnings: ProjectWarning[]
 }
 
 /** Migrate a raw project and extract the fields the composition builder needs. */
+// Thin ??-default mapping; exercised end-to-end by the headless chrome contract suite
+// fallow-ignore-next-line complexity
 function extractTimeline(rawProject: Project): MigratedTimelineView {
-  const { project } = migrateProject(rawProject)
+  const { project, warnings: projectWarnings } = migrateProject(rawProject)
   const timeline = project.timeline
   if (!timeline) throw new Error('Project has no timeline')
   const meta = project.metadata
   return {
+    projectWarnings,
     tracks: (timeline.tracks ?? []) as unknown as TimelineTrack[],
     items: (timeline.items ?? []) as unknown as TimelineItem[],
     transitions: (timeline.transitions ?? []) as Transition[],
@@ -682,9 +883,22 @@ function buildComposition(view: MigratedTimelineView): CompositionInputProps {
  * PNG). Much faster than encoding a short clip + extracting a frame with
  * ffmpeg: no muxer, no encoder, no audio pipeline — just one composited frame.
  */
+// Browser-harness driver; exercised end-to-end by the headless chrome contract suite
+// fallow-ignore-next-line complexity
 async function renderFrame(input: HeadlessFrameInput): Promise<HeadlessFrameSummary> {
   const view = extractTimeline(input.project)
   const frame = resolveTargetFrame(view, input)
+  const validationWarnings = [
+    ...projectWarningsToHeadless(view.projectWarnings),
+    ...sourceRangeWarnings(
+      view.items,
+      view.compositions,
+      buildMediaMetadataMap(input.media),
+      view.fps,
+    ),
+    ...transitionWarnings(view.transitions, view.items),
+  ]
+  reportValidationWarnings(validationWarnings, input.strict, 'frame')
 
   useCompositionsStore.getState().setCompositions(view.compositions)
   registerMediaUrls(input.media)
@@ -729,12 +943,87 @@ async function renderFrame(input: HeadlessFrameInput): Promise<HeadlessFrameSumm
     format,
     fileSize: blob.size,
     fileName,
-    warnings,
+    warnings: [...validationWarnings, ...warnings],
   }
 }
 
 function round1(n: number): number {
   return Math.round(n * 10) / 10
+}
+
+let layoutMeasureCtx: OffscreenCanvasRenderingContext2D | null | undefined
+/** Shared 1×1 measuring context — same canvas measurer the render paths use. */
+function getLayoutMeasureCtx(): OffscreenCanvasRenderingContext2D | null {
+  if (layoutMeasureCtx === undefined) {
+    layoutMeasureCtx = new OffscreenCanvas(1, 1).getContext('2d')
+  }
+  return layoutMeasureCtx
+}
+
+/**
+ * Dry-run the exact text layout the renderers draw from, mapped to canvas
+ * coordinates. Mirrors the render path: resolve animated text properties,
+ * auto-expand the box (baselines depend on box height for middle/bottom
+ * vertical align), then `layoutTextBlock`.
+ */
+function computeTextLayout(
+  item: TextItem,
+  itemKeyframes: ItemKeyframes | undefined,
+  frame: number,
+  canvas: { width: number; height: number; fps: number },
+  transform: ReturnType<typeof getAnimatedTransform>,
+): { textLayout: TextLayoutInfo; expanded: { width: number; height: number } } | null {
+  const ctx = getLayoutMeasureCtx()
+  if (!ctx) return null
+  const resolvedItem = resolveAnimatedTextItem(item, itemKeyframes, frame - item.from, canvas)
+  const expanded = expandTextTransformToFitContent(resolvedItem, transform)
+  const left = canvas.width / 2 + expanded.x - expanded.width / 2
+  const top = canvas.height / 2 + expanded.y - expanded.height / 2
+  const block = layoutTextBlock(
+    resolvedItem,
+    expanded.width,
+    expanded.height,
+    createCanvasTextMeasurer(ctx),
+  )
+  return {
+    expanded: { width: expanded.width, height: expanded.height },
+    textLayout: {
+      box: { x: left, y: top, width: expanded.width, height: expanded.height },
+      lines: block.lines.map((line) => ({
+        text: line.text,
+        x: left + line.startX,
+        y: top + line.top,
+        baseline: top + line.baselineY,
+        width: line.width,
+        inkWidth: lineInkWidth(line),
+        height: line.lineHeightPx,
+        color: line.color,
+        fontSize: line.fontSize,
+        letterSpacing: line.letterSpacing,
+        ...(line.runs
+          ? {
+              spans: line.runs.map((run) => ({
+                text: run.text,
+                x: left + line.startX + run.offsetX,
+                width: run.width,
+                color: run.color,
+              })),
+            }
+          : {}),
+      })),
+      ...(block.background
+        ? {
+            background: {
+              x: left + block.background.x,
+              y: top + block.background.y,
+              width: block.background.width,
+              height: block.background.height,
+              radius: block.background.radius,
+            },
+          }
+        : {}),
+    },
+  }
 }
 
 /**
@@ -743,9 +1032,22 @@ function round1(n: number): number {
  * (`getAnimatedTransform`), so the coordinates match what a render would draw —
  * letting a caller verify positioning without a render round-trip.
  */
+// Browser-harness driver; exercised end-to-end by the headless chrome contract suite
+// fallow-ignore-next-line complexity
 async function dumpLayout(input: HeadlessLayoutInput): Promise<HeadlessLayoutResult> {
   const view = extractTimeline(input.project)
   const frame = resolveTargetFrame(view, input)
+  const validationWarnings = [
+    ...projectWarningsToHeadless(view.projectWarnings),
+    ...sourceRangeWarnings(
+      view.items,
+      view.compositions,
+      buildMediaMetadataMap(input.media),
+      view.fps,
+    ),
+    ...transitionWarnings(view.transitions, view.items),
+  ]
+  reportValidationWarnings(validationWarnings, input.strict, 'layout')
 
   // Source dimensions (video/image) feed the fit-to-canvas default, so seed the
   // media store. No blob URLs / GPU needed — this is pure transform math.
@@ -761,6 +1063,9 @@ async function dumpLayout(input: HeadlessLayoutInput): Promise<HeadlessLayoutRes
   const warnings = await prepareFonts(composition.tracks)
   const canvas = { width: view.width, height: view.height, fps: view.fps }
   const keyframesMap = buildKeyframesMap(composition.keyframes)
+  // Text geometry must be measured with the REAL fonts — without this every
+  // width/wrap point comes from Chrome's fallback sans-serif.
+  await ensureFontsLoaded(collectVisibleTextFontFamilies(composition.tracks), HEADLESS_FONT_WEIGHTS)
 
   // Track visibility comes from the SAME resolver the render path uses, so a
   // soloed track set makes `visible` agree with what a render would actually
@@ -803,12 +1108,27 @@ async function dumpLayout(input: HeadlessLayoutInput): Promise<HeadlessLayoutRes
         box.textAlign = item.textAlign
         box.verticalAlign = item.verticalAlign
         box.fontSize = item.fontSize
+        const measured = computeTextLayout(item, keyframesMap.get(item.id), frame, canvas, t)
+        if (measured) {
+          box.textLayout = measured.textLayout
+          // Report the box the render actually uses (auto-expanded to fit content).
+          box.x = round1(measured.textLayout.box.x)
+          box.y = round1(measured.textLayout.box.y)
+          box.width = round1(measured.expanded.width)
+          box.height = round1(measured.expanded.height)
+        }
       }
       items.push(box)
     }
   }
 
-  return { frame, atSeconds: frame / view.fps, canvas, items, warnings }
+  return {
+    frame,
+    atSeconds: frame / view.fps,
+    canvas,
+    items,
+    warnings: [...validationWarnings, ...warnings],
+  }
 }
 
 interface FreecutHeadlessApi {

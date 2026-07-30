@@ -134,28 +134,96 @@ export const TextContent: React.FC<{ item: TextItem & { _sequenceFrameOffset?: n
           boxSizing: 'border-box',
         }}
       >
-        {spanStyles.map((span, index) => (
-          <div
-            key={`${index}:${span.text}`}
-            style={{
-              fontSize: span.fontSize * scale,
-              fontFamily: loadFont(span.fontFamily),
-              fontWeight: span.fontWeight,
-              fontStyle: span.fontStyle,
-              textDecoration: span.underline ? 'underline' : 'none',
-              color: span.color,
-              lineHeight: style.lineHeight,
-              letterSpacing: span.letterSpacing * scaleX,
-              display: 'block',
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-              width: '100%',
-            }}
-          >
-            {span.text}
-          </div>
-        ))}
+        <SpanBlocks
+          spanLayout={mergedItem.spanLayout}
+          spanStyles={spanStyles}
+          lineHeight={style.lineHeight}
+          scale={scale}
+          scaleX={scaleX}
+        />
       </div>
     </div>
+  )
+}
+
+interface SpanBlockProps {
+  spanStyles: ReturnType<typeof resolveSpanStyles>
+  lineHeight: number
+  scale: number
+  scaleX: number
+}
+
+/** Picks the span flow: 'inline' (one wrapped stream) vs default stacked lines. */
+function SpanBlocks({
+  spanLayout,
+  ...props
+}: SpanBlockProps & { spanLayout: 'stack' | 'inline' | undefined }) {
+  const inline = spanLayout === 'inline' && props.spanStyles.length > 0
+  return inline ? <InlineSpanFlow {...props} /> : <StackedSpans {...props} />
+}
+
+/**
+ * Inline span flow: one wrapped text stream, spans recolor/underline words
+ * inside a line. Font/size come from the FIRST span — same base-style rule as
+ * the shared layoutTextBlock inline path.
+ */
+function InlineSpanFlow({ spanStyles, lineHeight, scale, scaleX }: SpanBlockProps) {
+  const base = spanStyles[0]!
+  return (
+    <div
+      style={{
+        fontSize: base.fontSize * scale,
+        fontFamily: loadFont(base.fontFamily),
+        fontWeight: base.fontWeight,
+        fontStyle: base.fontStyle,
+        lineHeight,
+        letterSpacing: base.letterSpacing * scaleX,
+        display: 'block',
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-word',
+        width: '100%',
+      }}
+    >
+      {spanStyles.map((span, index) => (
+        <span
+          key={`${index}:${span.text}`}
+          style={{
+            color: span.color,
+            textDecoration: span.underline ? 'underline' : 'none',
+          }}
+        >
+          {span.text}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+/** Default flow: every span is its own block line-group. */
+function StackedSpans({ spanStyles, lineHeight, scale, scaleX }: SpanBlockProps) {
+  return (
+    <>
+      {spanStyles.map((span, index) => (
+        <div
+          key={`${index}:${span.text}`}
+          style={{
+            fontSize: span.fontSize * scale,
+            fontFamily: loadFont(span.fontFamily),
+            fontWeight: span.fontWeight,
+            fontStyle: span.fontStyle,
+            textDecoration: span.underline ? 'underline' : 'none',
+            color: span.color,
+            lineHeight,
+            letterSpacing: span.letterSpacing * scaleX,
+            display: 'block',
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            width: '100%',
+          }}
+        >
+          {span.text}
+        </div>
+      ))}
+    </>
   )
 }

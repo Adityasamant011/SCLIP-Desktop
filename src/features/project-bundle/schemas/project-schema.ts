@@ -420,6 +420,7 @@ const cropSchema = z.object({
   top: z.number().min(0).max(1).optional(),
   bottom: z.number().min(0).max(1).optional(),
   softness: z.number().min(-1).max(1).optional(),
+  refit: z.boolean().optional(),
 })
 
 const cornerPinSchema = z.object({
@@ -476,6 +477,7 @@ const timelineItemSchema = z
     // Text fields
     text: z.string().optional(),
     textSpans: z.array(textSpanSchema).optional(),
+    spanLayout: z.enum(['stack', 'inline']).optional(),
     textLayoutDrafts: textLayoutDraftsSchema.optional(),
     textRole: z.literal('caption').optional(),
     captionSource: captionSourceSchema.optional(),

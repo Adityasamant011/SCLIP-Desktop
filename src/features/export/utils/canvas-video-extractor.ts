@@ -706,6 +706,8 @@ export class VideoFrameExtractor {
    * a full-canvas video that failed to init would cull every layer beneath it
    * and the frame would render as a black card.
    */
+  // Called via the shared extractor pool (shared-video-extractor.ts getItemCanBeTransparent), which static tracing misses
+  // fallow-ignore-next-line unused-class-member
   getCanBeTransparent(): boolean {
     return this.canBeTransparent || !this.ready
   }

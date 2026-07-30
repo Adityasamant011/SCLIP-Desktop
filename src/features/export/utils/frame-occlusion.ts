@@ -40,6 +40,8 @@ export interface FrameOcclusionContext {
  * Pure predicate extracted verbatim from `createCompositionRenderer`'s
  * per-frame render path — no side effects.
  */
+// Deliberate early-return decision chain; behavior locked by frame-occlusion.test.ts
+// fallow-ignore-next-line complexity
 export function isItemFullyOccluding(
   baseItem: TimelineItem,
   trackOrder: number,

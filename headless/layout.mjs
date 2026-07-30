@@ -23,12 +23,14 @@
 //
 // Status/logs go to stderr; only the layout JSON goes to stdout, so it pipes
 // cleanly (e.g. `... | jq '.items[] | select(.type=="text")'`).
-import { chromium } from 'playwright'
 import fs from 'node:fs'
 import path from 'node:path'
 import { parseArgs, chromeLaunchArgs } from './lib/cli.mjs'
+import { withHarnessPage } from './lib/page-session.mjs'
 import { startHarness, loadJobProject, resolveProjectMedia } from './lib/render-core.mjs'
 
+// CLI arg wiring; exercised end-to-end by headless/test.mjs
+// fallow-ignore-next-line complexity
 async function main() {
   const args = parseArgs(process.argv.slice(2))
   const workspace = args.workspace
@@ -46,61 +48,57 @@ async function main() {
   })
   console.error(`Harness: ${harnessUrl}`)
 
-  const browser = await chromium.launch({
-    channel: 'chrome',
-    headless: !args.head,
-    args: chromeLaunchArgs(),
-  })
   try {
-    const context = await browser.newContext()
-    const page = await context.newPage()
-    page.on('pageerror', (e) => console.error('  [pageerror]', e.message))
-    page.on('console', (m) => {
-      if (m.type() === 'error' && !m.text().includes('Video load error')) {
-        console.error('  [page:error]', m.text())
-      }
-    })
-    await page.goto(harnessUrl, { waitUntil: 'load', timeout: 60_000 })
-    await page.waitForFunction(() => Boolean(window.freecut?.ready), { timeout: 30_000 })
-
-    const { project } = loadJobProject(workspace, { project: args.project })
-    // Only metadata is used (source dimensions); URLs are never fetched here.
-    const { media, missing } = resolveProjectMedia(workspace, project, mediaUrlOf, null)
-    if (missing.length > 0) {
-      console.error(
-        `  NOTE: ${missing.length} media source(s) not on disk; their default size may be off: ${missing.join(', ')}`,
-      )
-    }
-
-    const layout = await page.evaluate((payload) => window.freecut.dumpLayout(payload), {
-      project,
-      media,
-      frame,
-      atSeconds,
-    })
-
-    // stderr, so the boxes on stdout stay pipeable into jq. A font that never
-    // became active makes every reported text box a fallback measurement.
-    for (const warning of layout.warnings ?? [])
-      console.error(`  WARNING [${warning.code ?? 'UNKNOWN'}]: ${warning.message}`)
-
-    const json = JSON.stringify(layout, null, 2)
-    if (args.out) {
-      const outPath = path.resolve(args.out)
-      fs.mkdirSync(path.dirname(outPath), { recursive: true })
-      fs.writeFileSync(outPath, json)
-      console.error(
-        `  Layout at frame ${layout.frame} (${layout.atSeconds.toFixed(3)}s): ${layout.items.length} item(s) -> ${outPath}`,
-      )
-    } else {
-      console.error(
-        `  Layout at frame ${layout.frame} (${layout.atSeconds.toFixed(3)}s): ${layout.items.length} item(s)`,
-      )
-      console.log(json)
-    }
+    await withHarnessPage(
+      {
+        harnessUrl,
+        headless: !args.head,
+        launchArgs: chromeLaunchArgs(),
+        ignoreConsoleError: (text) => text.includes('Video load error'),
+      },
+      (page) => dumpLayoutToOutput(page, { args, workspace, mediaUrlOf, frame, atSeconds }),
+    )
   } finally {
-    await browser.close()
     await closeServers()
+  }
+}
+
+// One-shot layout driver; exercised end-to-end by headless/test.mjs
+// fallow-ignore-next-line complexity
+async function dumpLayoutToOutput(page, { args, workspace, mediaUrlOf, frame, atSeconds }) {
+  const { project } = loadJobProject(workspace, { project: args.project })
+  // Only metadata is used (source dimensions); URLs are never fetched here.
+  const { media, missing } = resolveProjectMedia(workspace, project, mediaUrlOf, null)
+  if (missing.length > 0) {
+    console.error(
+      `  NOTE: ${missing.length} media source(s) not on disk; their default size may be off: ${missing.join(', ')}`,
+    )
+  }
+
+  const layout = await page.evaluate((payload) => window.freecut.dumpLayout(payload), {
+    project,
+    media,
+    frame,
+    atSeconds,
+    strict: Boolean(args.strict),
+  })
+  for (const w of layout.warnings ?? []) {
+    console.error(`  WARNING [${w.code ?? 'UNKNOWN'}]: ${w.message}`)
+  }
+
+  const json = JSON.stringify(layout, null, 2)
+  if (args.out) {
+    const outPath = path.resolve(args.out)
+    fs.mkdirSync(path.dirname(outPath), { recursive: true })
+    fs.writeFileSync(outPath, json)
+    console.error(
+      `  Layout at frame ${layout.frame} (${layout.atSeconds.toFixed(3)}s): ${layout.items.length} item(s) -> ${outPath}`,
+    )
+  } else {
+    console.error(
+      `  Layout at frame ${layout.frame} (${layout.atSeconds.toFixed(3)}s): ${layout.items.length} item(s)`,
+    )
+    console.log(json)
   }
 }
 
