@@ -79,6 +79,11 @@ async function main() {
       atSeconds,
     })
 
+    // stderr, so the boxes on stdout stay pipeable into jq. A font that never
+    // became active makes every reported text box a fallback measurement.
+    for (const warning of layout.warnings ?? [])
+      console.error(`  WARNING [${warning.code ?? 'UNKNOWN'}]: ${warning.message}`)
+
     const json = JSON.stringify(layout, null, 2)
     if (args.out) {
       const outPath = path.resolve(args.out)

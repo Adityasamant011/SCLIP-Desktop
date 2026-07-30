@@ -595,6 +595,8 @@ interface HeadlessLayoutResult {
   atSeconds: number
   canvas: { width: number; height: number; fps: number }
   items: LayoutBox[]
+  /** Font failures make the reported text boxes untrustworthy — say so. */
+  warnings: HeadlessRenderWarning[]
 }
 
 interface MigratedTimelineView {
@@ -723,7 +725,7 @@ function round1(n: number): number {
  * (`getAnimatedTransform`), so the coordinates match what a render would draw —
  * letting a caller verify positioning without a render round-trip.
  */
-function dumpLayout(input: HeadlessLayoutInput): HeadlessLayoutResult {
+async function dumpLayout(input: HeadlessLayoutInput): Promise<HeadlessLayoutResult> {
   const view = extractTimeline(input.project)
   const frame = resolveTargetFrame(view, input)
 
@@ -733,6 +735,12 @@ function dumpLayout(input: HeadlessLayoutInput): HeadlessLayoutResult {
   seedMediaLibrary(input.media)
 
   const composition = buildComposition(view)
+
+  // Text boxes are NOT pure math: the transform resolver runs text items through
+  // expandTextTransformToFitContent, which measures with a real canvas 2D context.
+  // Without the same font gate the render path uses, the boxes reported here are
+  // fallback-font measurements and silently disagree with what /frame draws.
+  const warnings = await prepareFonts(composition.tracks)
   const canvas = { width: view.width, height: view.height, fps: view.fps }
   const keyframesMap = buildKeyframesMap(composition.keyframes)
 
@@ -782,7 +790,7 @@ function dumpLayout(input: HeadlessLayoutInput): HeadlessLayoutResult {
     }
   }
 
-  return { frame, atSeconds: frame / view.fps, canvas, items }
+  return { frame, atSeconds: frame / view.fps, canvas, items, warnings }
 }
 
 interface FreecutHeadlessApi {
