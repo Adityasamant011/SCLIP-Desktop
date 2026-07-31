@@ -8,8 +8,10 @@ import { useItemsStore } from '../stores/items-store'
 import { useTransitionsStore } from '../stores/transitions-store'
 import {
   DEFAULT_TIMELINE_ITEM_CULL_BUFFER_PX,
+  DENSE_TIMELINE_TRACK_ITEM_THRESHOLD,
   getTimelineItemCullBufferPx,
 } from '../utils/timeline-dom-density'
+import { getTimelineItemsForFrameRange } from '../utils/timeline-item-range-index'
 
 /**
  * Pixels of buffer beyond viewport edges for mounting items.
@@ -28,10 +30,10 @@ import {
  * viewport.
  */
 const HYSTERESIS_PX = 800
-const CULL_CONTRACTION_QUIET_MS = 600
+const DEFAULT_CULL_CONTRACTION_QUIET_MS = 600
+const DENSE_CULL_CONTRACTION_QUIET_MS = 120
 
 /** Sentinel arrays to avoid re-renders when track has no items */
-const EMPTY_ITEMS: TimelineItem[] = []
 const EMPTY_TRANSITIONS: Transition[] = []
 
 export interface VisibleFrameRange {
@@ -139,24 +141,20 @@ function expandRangeByClipBudget(
 ): { range: VisibleFrameRange; added: number } {
   if (!items || items.length === 0) return { range: target, added: 0 }
 
+  const currentItems = getTimelineItemsForFrameRange(items, current)
+  const currentItemIds = new Set(currentItems.map((item) => item.id))
+  const targetItems = getTimelineItemsForFrameRange(items, target)
   const candidates: { start: number; end: number; distance: number }[] = []
-  for (const item of items) {
+  for (const item of targetItems) {
     const itemStart = item.from
     const itemEnd = item.from + item.durationInFrames
-    const inTarget = itemEnd > target.start && itemStart < target.end
-    if (!inTarget) continue
-    const inCurrent = itemEnd > current.start && itemStart < current.end
-    if (inCurrent) continue
+    if (currentItemIds.has(item.id)) continue
     const distance = itemStart >= current.end ? itemStart - current.end : current.start - itemEnd
     candidates.push({ start: itemStart, end: itemEnd, distance })
   }
 
   if (candidates.length <= maxAdd) {
-    const added = Math.max(
-      0,
-      getVisibleItemsForRange(items, target).length -
-        getVisibleItemsForRange(items, current).length,
-    )
+    const added = Math.max(0, targetItems.length - currentItems.length)
     return { range: target, added }
   }
 
@@ -171,7 +169,7 @@ function expandRangeByClipBudget(
   const range = { start, end }
   const added = Math.max(
     0,
-    getVisibleItemsForRange(items, range).length - getVisibleItemsForRange(items, current).length,
+    getTimelineItemsForFrameRange(items, range).length - currentItems.length,
   )
   return { range, added }
 }
@@ -190,13 +188,15 @@ function contractRangeByClipBudget(
 ): { range: VisibleFrameRange; removed: number } {
   if (!items || items.length === 0) return { range: target, removed: 0 }
 
+  const currentItems = getTimelineItemsForFrameRange(items, current)
+  const targetItems = getTimelineItemsForFrameRange(items, target)
+  const targetItemIds = new Set(targetItems.map((item) => item.id))
   const leftCandidates: { boundary: number; distance: number }[] = []
   const rightCandidates: { boundary: number; distance: number }[] = []
-  for (const item of items) {
+  for (const item of currentItems) {
     const itemStart = item.from
     const itemEnd = item.from + item.durationInFrames
-    const inCurrent = itemEnd > current.start && itemStart < current.end
-    if (!inCurrent) continue
+    if (targetItemIds.has(item.id)) continue
 
     if (itemEnd <= target.start) {
       leftCandidates.push({
@@ -213,11 +213,7 @@ function contractRangeByClipBudget(
 
   const candidateCount = leftCandidates.length + rightCandidates.length
   if (candidateCount <= maxRemove) {
-    const removed = Math.max(
-      0,
-      getVisibleItemsForRange(items, current).length -
-        getVisibleItemsForRange(items, target).length,
-    )
+    const removed = Math.max(0, currentItems.length - targetItems.length)
     return { range: target, removed }
   }
 
@@ -245,7 +241,7 @@ function contractRangeByClipBudget(
   const range = { start, end }
   const actualRemoved = Math.max(
     0,
-    getVisibleItemsForRange(items, current).length - getVisibleItemsForRange(items, range).length,
+    currentItems.length - getTimelineItemsForFrameRange(items, range).length,
   )
   return { range, removed: actualRemoved }
 }
@@ -422,7 +418,7 @@ function computeVisibleItemsSnapshot(trackId: string): VisibleItemsSnapshot {
   const transitions = getTrackVisibleTransitions(trackId)
   const visibleFrameRange = computeCurrentDetailRange(trackId)
   publishDetailRange(trackId, visibleFrameRange)
-  const visibleItems = getVisibleItemsForRange(items, visibleFrameRange)
+  const visibleItems = getTimelineItemsForFrameRange(items, visibleFrameRange)
   const visibleTransitions = getVisibleTransitionsForRange(
     transitions,
     itemsState.itemById,
@@ -463,7 +459,7 @@ export function useVisibleItems(trackId: string) {
       const { fps } = useTimelineSettingsStore.getState()
       const cullingPixelsPerSecond = getCullingPixelsPerSecond(useZoomStore.getState())
 
-      const visibleItems = getVisibleItemsForRange(items, range)
+      const visibleItems = getTimelineItemsForFrameRange(items, range)
       const visibleTransitions = getVisibleTransitionsForRange(
         transitions,
         itemsState.itemById,
@@ -567,7 +563,12 @@ export function useVisibleItems(trackId: string) {
       cancelStagedContraction(true)
       retainZoomCohort = true
       exactRangeAfterZoom = target
-      contractionTimeout = setTimeout(beginStagedContraction, CULL_CONTRACTION_QUIET_MS)
+      const trackItemCount = useItemsStore.getState().itemsByTrackId[trackId]?.length ?? 0
+      const quietMs =
+        trackItemCount >= DENSE_TIMELINE_TRACK_ITEM_THRESHOLD
+          ? DENSE_CULL_CONTRACTION_QUIET_MS
+          : DEFAULT_CULL_CONTRACTION_QUIET_MS
+      contractionTimeout = setTimeout(beginStagedContraction, quietMs)
     }
 
     const expander: StagedExpander = {
@@ -812,23 +813,6 @@ function getVisibleFrameRange(
   const endFrame = Math.ceil((rightPx / pixelsPerSecond) * fps)
 
   return { start: startFrame, end: endFrame }
-}
-
-function getVisibleItemsForRange(
-  items: TimelineItem[] | undefined,
-  visibleFrameRange: VisibleFrameRange,
-): TimelineItem[] {
-  if (!items || items.length === 0) {
-    return EMPTY_ITEMS
-  }
-
-  const { start, end } = visibleFrameRange
-  const filtered = items.filter((item) => {
-    const itemEnd = item.from + item.durationInFrames
-    return itemEnd > start && item.from < end
-  })
-
-  return filtered.length === items.length ? items : filtered
 }
 
 function getVisibleTransitionsForRange(

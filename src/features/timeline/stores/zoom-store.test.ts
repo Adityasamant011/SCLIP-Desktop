@@ -152,7 +152,7 @@ describe('zoom-store interaction split', () => {
     })
   })
 
-  it('holds content zoom for the full slider gesture and settles after release', () => {
+  it('holds content zoom for the full slider gesture and settles on release', () => {
     const zoom = useZoomStore.getState()
     zoom.beginZoomGesture()
     zoom.setZoomLevelImmediate(1.4)
@@ -173,18 +173,42 @@ describe('zoom-store interaction split', () => {
     })
 
     useZoomStore.getState().endZoomGesture()
-    vi.advanceTimersByTime(199)
-    expect(useZoomStore.getState()).toMatchObject({
-      contentLevel: 1,
-      isZoomInteracting: true,
-    })
-
-    vi.advanceTimersByTime(1)
     expect(useZoomStore.getState()).toMatchObject({
       level: 1.8,
       contentLevel: 1.8,
       isZoomInteracting: false,
     })
+  })
+
+  it('settles an explicit slider release synchronously during playback', () => {
+    const requestAnimationFrameMock = vi.fn(() => 1)
+    const requestIdleCallbackMock = vi.fn(() => 2)
+    vi.stubGlobal('requestAnimationFrame', requestAnimationFrameMock)
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    vi.stubGlobal('requestIdleCallback', requestIdleCallbackMock)
+    vi.stubGlobal('cancelIdleCallback', vi.fn())
+    usePlaybackStore.setState({ isPlaying: true })
+
+    const zoom = useZoomStore.getState()
+    zoom.beginZoomGesture()
+    zoom.setZoomLevelImmediate(1.8)
+
+    expect(useZoomStore.getState()).toMatchObject({
+      level: 1.8,
+      contentLevel: 1,
+      isZoomInteracting: true,
+    })
+
+    useZoomStore.getState().endZoomGesture()
+
+    expect(useZoomStore.getState()).toMatchObject({
+      level: 1.8,
+      contentLevel: 1.8,
+      contentPixelsPerSecond: 180,
+      isZoomInteracting: false,
+    })
+    expect(requestAnimationFrameMock).not.toHaveBeenCalled()
+    expect(requestIdleCallbackMock).not.toHaveBeenCalled()
   })
 
   it('notifies committed-only subscribers once after a live zoom burst', () => {
@@ -300,6 +324,54 @@ describe('zoom-store interaction split', () => {
     })
     expect(notifications).toHaveLength(3)
     expect(notifications.every(hasChangedZoomValue)).toBe(true)
+  })
+
+  it('forces playback-aware wheel settle when the browser never grants idle time', () => {
+    let nextId = 1
+    const animationFrames = new Map<number, FrameRequestCallback>()
+    const idleCallbacks = new Map<number, IdleRequestCallback>()
+    vi.stubGlobal(
+      'requestAnimationFrame',
+      vi.fn((callback: FrameRequestCallback) => {
+        const id = nextId++
+        animationFrames.set(id, callback)
+        return id
+      }),
+    )
+    vi.stubGlobal('cancelAnimationFrame', vi.fn((id: number) => animationFrames.delete(id)))
+    vi.stubGlobal(
+      'requestIdleCallback',
+      vi.fn((callback: IdleRequestCallback) => {
+        const id = nextId++
+        idleCallbacks.set(id, callback)
+        return id
+      }),
+    )
+    vi.stubGlobal('cancelIdleCallback', vi.fn((id: number) => idleCallbacks.delete(id)))
+    usePlaybackStore.setState({ isPlaying: true })
+
+    useZoomStore.getState().setZoomLevelImmediate(1.6)
+    vi.advanceTimersByTime(200)
+
+    const frame = animationFrames.entries().next().value as
+      | [number, FrameRequestCallback]
+      | undefined
+    expect(frame).toBeDefined()
+    animationFrames.delete(frame![0])
+    frame![1](100)
+    expect(idleCallbacks.size).toBe(1)
+
+    vi.advanceTimersByTime(199)
+    expect(useZoomStore.getState().contentLevel).toBe(1)
+
+    vi.advanceTimersByTime(1)
+    expect(useZoomStore.getState()).toMatchObject({
+      level: 1.6,
+      contentLevel: 1.6,
+      contentPixelsPerSecond: 160,
+      isZoomInteracting: false,
+    })
+    expect(idleCallbacks.size).toBe(0)
   })
 
   it('applies discrete zoom actions synchronously to both visual and content zoom', () => {

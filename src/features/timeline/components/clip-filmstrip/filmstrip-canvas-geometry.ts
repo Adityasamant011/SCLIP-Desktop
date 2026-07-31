@@ -5,6 +5,24 @@ export interface FilmstripCanvasGeometry {
   width: number
 }
 
+export interface LiveTimelineFilmstripCanvasWindow {
+  renderWidth: number
+  visibleStartPx: number
+  visibleEndPx: number
+}
+
+export interface TimelineFilmstripCanvasWindowInput {
+  startFrame: number
+  durationFrames: number
+  fps: number
+  pixelsPerSecond: number
+  scrollLeft: number
+  viewportWidth: number
+  overscanPx: number
+  contentInsetStartPx?: number
+  contentInsetEndPx?: number
+}
+
 export interface FilmstripCanvasTile {
   slot: number
   frame: FilmstripFrame
@@ -45,6 +63,60 @@ export function computeFilmstripCanvasGeometry(
   return {
     left,
     width: Math.max(0, right - left),
+  }
+}
+
+/**
+ * Computes a clip-local filmstrip window from timeline model coordinates.
+ * This is the layout-read-free equivalent of intersecting the filmstrip host
+ * and timeline viewport DOM rectangles.
+ */
+export function computeTimelineFilmstripCanvasWindow({
+  startFrame,
+  durationFrames,
+  fps,
+  pixelsPerSecond,
+  scrollLeft,
+  viewportWidth,
+  overscanPx,
+  contentInsetStartPx = 0,
+  contentInsetEndPx = 0,
+}: TimelineFilmstripCanvasWindowInput): LiveTimelineFilmstripCanvasWindow | null {
+  if (
+    !Number.isFinite(startFrame) ||
+    !Number.isFinite(durationFrames) ||
+    durationFrames < 0 ||
+    !Number.isFinite(fps) ||
+    fps <= 0 ||
+    !Number.isFinite(pixelsPerSecond) ||
+    pixelsPerSecond <= 0 ||
+    !Number.isFinite(scrollLeft) ||
+    !Number.isFinite(viewportWidth) ||
+    viewportWidth <= 0 ||
+    !Number.isFinite(overscanPx) ||
+    !Number.isFinite(contentInsetStartPx) ||
+    contentInsetStartPx < 0 ||
+    !Number.isFinite(contentInsetEndPx) ||
+    contentInsetEndPx < 0
+  ) {
+    return null
+  }
+
+  const clipLeft = (startFrame / fps) * pixelsPerSecond
+  const clipWidth = (durationFrames / fps) * pixelsPerSecond
+  const renderWidth = Math.max(0, clipWidth - contentInsetStartPx - contentInsetEndPx)
+  const hostLeft = clipLeft + contentInsetStartPx
+  const overscan = Math.max(0, overscanPx)
+  const boundedStart = Math.max(0, Math.min(renderWidth, scrollLeft - overscan - hostLeft))
+  const boundedEnd = Math.max(
+    boundedStart,
+    Math.min(renderWidth, scrollLeft + viewportWidth + overscan - hostLeft),
+  )
+
+  return {
+    renderWidth,
+    visibleStartPx: Math.floor(boundedStart),
+    visibleEndPx: Math.ceil(boundedEnd),
   }
 }
 

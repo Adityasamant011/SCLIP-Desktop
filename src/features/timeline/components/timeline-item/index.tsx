@@ -724,10 +724,11 @@ export const TimelineItem = memo(function TimelineItem({
     transformRef,
     updateTimelineItem,
   })
-  // Hoisted before fade memos so the compact guard can account for active interactions.
-  // A narrow clip that is selected/edited should still compute its fade ratios.
+  // Hoisted before fade memos so the compact guard can account for active edits.
+  // Selection alone must not promote a narrow clip back to the rich shell: a
+  // large marquee would otherwise restore every fade control and its math at
+  // once. Active gestures still keep their controls alive while zoom changes.
   const hasActiveClipInteraction =
-    isSelected ||
     isBeingDragged ||
     isPartOfDrag ||
     isTrimming ||
@@ -928,7 +929,7 @@ export const TimelineItem = memo(function TimelineItem({
           data-selected={isSelected ? 'true' : undefined}
           data-compact-clip={useCompactClipShell ? 'true' : undefined}
           className={cn(
-            'timeline-item absolute inset-y-px rounded overflow-visible group/timeline-item',
+            'timeline-item @container absolute inset-y-px rounded overflow-visible group/timeline-item',
             itemColorClasses,
             cursorClass,
             !isBeingDragged && !isStretching && !trackLocked && 'hover:brightness-110',
@@ -1062,6 +1063,7 @@ export const TimelineItem = memo(function TimelineItem({
               clipLeftFrames={visualLeftFrame}
               clipWidthFrames={visualWidthFrames}
               fps={fps}
+              isCompactWidth={isCompactWidth}
               isLinked={isLinked}
               preferImmediateRendering={preferImmediateContentRendering}
               audioWaveformScale={audioVisualizationScale}

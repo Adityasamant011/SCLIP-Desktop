@@ -363,12 +363,12 @@ describe('useVisibleItems filtering logic', () => {
       vi.advanceTimersByTime(200)
     })
 
-    // Content zoom has settled, but culling is still in its independent quiet
-    // window so the wheel task does not also tear down eight rich clip trees.
+    // Content zoom has settled, but dense culling still gets a short independent
+    // quiet window so the commit task does not also tear down rich clip trees.
     expect(getVisibleIds()).toHaveLength(16)
 
     act(() => {
-      vi.advanceTimersByTime(616)
+      vi.advanceTimersByTime(136)
     })
 
     // One shared animation frame retires at most four clips across all tracks.
@@ -397,7 +397,7 @@ describe('useVisibleItems filtering logic', () => {
     act(() => {
       useZoomStore.getState().setZoomLevelImmediate(2)
       vi.advanceTimersByTime(200)
-      vi.advanceTimersByTime(500)
+      vi.advanceTimersByTime(80)
       useZoomStore.getState().setZoomLevelImmediate(1)
       vi.advanceTimersByTime(200)
     })

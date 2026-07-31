@@ -1,7 +1,8 @@
 import { Profiler } from 'react'
-import { act, render } from '@testing-library/react'
+import { act, render, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import type { TimelineItem } from '@/types/timeline'
+import { useSelectionStore } from '@/shared/state/selection'
 import { useTimelineStore } from '../stores/timeline-store'
 import { _resetZoomStoreForTest, useZoomStore } from '../stores/zoom-store'
 
@@ -52,6 +53,7 @@ const items: TimelineItem[] = [
 describe('TimelineTrackItems stable DOM renderer', () => {
   beforeEach(() => {
     useTimelineStore.setState({ fps: 30 })
+    useSelectionStore.getState().selectItems([])
     _resetZoomStoreForTest()
   })
 
@@ -81,7 +83,7 @@ describe('TimelineTrackItems stable DOM renderer', () => {
     expect(view.container.querySelector('[data-timeline-hit-target="true"]')).toBeNull()
   })
 
-  it('ignores live zoom ticks and publishes compact width only at settle', () => {
+  it('ignores live zoom ticks and publishes compact width only at settle', async () => {
     useZoomStore.setState({
       contentLevel: 0.3,
       contentPixelsPerSecond: 30,
@@ -110,7 +112,7 @@ describe('TimelineTrackItems stable DOM renderer', () => {
       })
     })
 
-    expect(onRender).toHaveBeenCalledTimes(initialCommitCount)
+    expect(onRender).toHaveBeenCalledTimes(initialCommitCount + 1)
     expect(firstItem).toHaveAttribute('data-compact-width', 'true')
 
     act(() => {
@@ -121,8 +123,8 @@ describe('TimelineTrackItems stable DOM renderer', () => {
       })
     })
 
-    expect(onRender).toHaveBeenCalledTimes(initialCommitCount + 1)
-    expect(firstItem).toHaveAttribute('data-compact-width', 'false')
+    expect(onRender).toHaveBeenCalledTimes(initialCommitCount + 2)
+    await waitFor(() => expect(firstItem).toHaveAttribute('data-compact-width', 'false'))
     expect(view.container.querySelector('[data-rich-item-id="item-1"]')).toBe(firstItem)
   })
 
@@ -183,7 +185,7 @@ describe('TimelineTrackItems stable DOM renderer', () => {
     expect(view.container.querySelector('[data-rich-item-id="item-2"]')).toBe(secondCompactItem)
   })
 
-  it('restores a newly exposed cohort after a net-zero zoom reversal', () => {
+  it('restores a newly exposed cohort after a net-zero zoom reversal', async () => {
     useZoomStore.setState({
       level: 50,
       pixelsPerSecond: 5000,
@@ -237,12 +239,96 @@ describe('TimelineTrackItems stable DOM renderer', () => {
       })
     })
 
-    expect(firstItem).toHaveAttribute('data-compact-width', 'false')
+    await waitFor(() => expect(firstItem).toHaveAttribute('data-compact-width', 'false'))
     // The retained root survives the reversal but remains cheap while it is
     // outside the current detail window.
     expect(secondItem).toHaveAttribute('data-compact-width', 'true')
     expect(secondItem).toHaveAttribute('data-detail-eligible', 'false')
     expect(view.container.querySelector('[data-rich-item-id="item-1"]')).toBe(firstItem)
     expect(view.container.querySelector('[data-rich-item-id="item-2"]')).toBe(secondItem)
+  })
+
+  it('uses lightweight shells for a normal dense track', () => {
+    useZoomStore.setState({
+      level: 0.1,
+      pixelsPerSecond: 10,
+      contentLevel: 0.1,
+      contentPixelsPerSecond: 10,
+      isZoomInteracting: false,
+    })
+    const denseItems = Array.from({ length: 80 }, (_, index) => ({
+      ...items[0]!,
+      id: `dense-${index}`,
+      from: index * 30,
+    }))
+    const view = render(
+      <TimelineTrackItems
+        trackId="track-1"
+        trackItems={denseItems}
+        totalTrackItemCount={80}
+        trackLocked={false}
+        trackHidden={false}
+      />,
+    )
+
+    expect(view.container.querySelectorAll('[data-rich-item-id]')).toHaveLength(0)
+    expect(view.container.querySelectorAll('[data-timeline-density-bucket]')).toHaveLength(80)
+
+    act(() => useSelectionStore.getState().selectItems(['dense-10']))
+
+    expect(view.container.querySelectorAll('[data-rich-item-id]')).toHaveLength(1)
+    expect(view.container.querySelector('[data-rich-item-id="dense-10"]')).not.toBeNull()
+    expect(view.container.querySelectorAll('[data-timeline-density-bucket]')).toHaveLength(80)
+  })
+
+  it('compresses a 30,000 item track into a bounded overview surface', () => {
+    useZoomStore.setState({
+      level: 0.1,
+      pixelsPerSecond: 10,
+      contentLevel: 0.1,
+      contentPixelsPerSecond: 10,
+      isZoomInteracting: false,
+    })
+    const overviewItems = Array.from({ length: 30_000 }, (_, index) => ({
+      ...items[0]!,
+      id: `overview-${index}`,
+      from: index * 30,
+    }))
+    const view = render(
+      <TimelineTrackItems
+        trackId="track-1"
+        trackItems={overviewItems}
+        totalTrackItemCount={30_000}
+        trackLocked={false}
+        trackHidden={false}
+      />,
+    )
+
+    expect(view.container.querySelectorAll('[data-rich-item-id]')).toHaveLength(0)
+    expect(view.container.querySelectorAll('[data-timeline-density-bucket]').length).toBeLessThanOrEqual(
+      1024,
+    )
+    expect(view.container.querySelector('[data-timeline-density-overview]')).toHaveAttribute(
+      'data-density-bucket-count',
+      '1000',
+    )
+
+    const initialDensityOverview = view.container.querySelector(
+      '[data-timeline-density-overview]',
+    )
+    act(() => {
+      useSelectionStore
+        .getState()
+        .selectItems(overviewItems.slice(0, 128).map((item) => item.id))
+    })
+
+    expect(view.container.querySelectorAll('[data-rich-item-id]')).toHaveLength(128)
+    expect(view.container.querySelector('[data-timeline-density-overview]')).toBe(
+      initialDensityOverview,
+    )
+    expect(view.container.querySelector('[data-timeline-density-overview]')).toHaveAttribute(
+      'data-density-bucket-count',
+      '1000',
+    )
   })
 })

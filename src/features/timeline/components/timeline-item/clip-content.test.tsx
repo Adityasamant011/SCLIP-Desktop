@@ -106,6 +106,64 @@ describe('ClipContent', () => {
     useSequencesStore.getState().reset()
   })
 
+  it('keeps compact clip content unmounted across live zoom updates', () => {
+    useSettingsStore.setState({
+      showFilmstrips: true,
+      enableFilmstripExtraction: true,
+      showWaveforms: true,
+    })
+    const item = {
+      id: 'compact-shell-video',
+      type: 'video',
+      trackId: 'track-1',
+      from: 0,
+      durationInFrames: 30,
+      label: 'Compact shell',
+      mediaId: 'media-1',
+      src: 'blob:test',
+    } as TimelineItem
+    const onRender = vi.fn()
+    const view = render(
+      <Profiler id="compact-clip-content" onRender={onRender}>
+        <ClipContent
+          item={item}
+          clipLeftFrames={0}
+          clipWidthFrames={30}
+          fps={30}
+          isCompactWidth
+        />
+      </Profiler>,
+    )
+    const initialCommitCount = onRender.mock.calls.length
+
+    expect(view.container).toBeEmptyDOMElement()
+
+    act(() => {
+      useZoomStore.setState({
+        level: 0.2,
+        pixelsPerSecond: 20,
+        isZoomInteracting: true,
+      })
+    })
+
+    expect(onRender).toHaveBeenCalledTimes(initialCommitCount)
+    expect(view.container).toBeEmptyDOMElement()
+
+    view.rerender(
+      <Profiler id="compact-clip-content" onRender={onRender}>
+        <ClipContent
+          item={item}
+          clipLeftFrames={0}
+          clipWidthFrames={30}
+          fps={30}
+          isCompactWidth={false}
+        />
+      </Profiler>,
+    )
+
+    expect(screen.getByText('Compact shell')).toBeInTheDocument()
+  })
+
   it('renders the linked delta badge before the clip title text', () => {
     const item: TimelineItem = {
       id: 'video-1',
@@ -270,8 +328,8 @@ describe('ClipContent', () => {
     useZoomStore.setState({
       level: 1,
       pixelsPerSecond: 100,
-      contentLevel: 0.31,
-      contentPixelsPerSecond: 31,
+      contentLevel: 0.47,
+      contentPixelsPerSecond: 47,
     })
     const item: TimelineItem = {
       id: 'linked-label-lod',
@@ -295,8 +353,8 @@ describe('ClipContent', () => {
 
     act(() => {
       useZoomStore.setState({
-        contentLevel: 0.32,
-        contentPixelsPerSecond: 32,
+        contentLevel: 0.48,
+        contentPixelsPerSecond: 48,
       })
     })
 

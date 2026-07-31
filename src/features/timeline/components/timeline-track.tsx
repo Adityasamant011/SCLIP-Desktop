@@ -97,6 +97,9 @@ import {
 } from './timeline-drop-ghost-previews'
 import { TimelineTrackItems } from './timeline-track-items'
 import { createTimelineTrackContentLayerRef } from '../utils/timeline-live-geometry'
+import { getTimelineTrackItemRangeIndex } from '../utils/timeline-item-range-index'
+
+const EMPTY_TRACK_ITEMS: TimelineItemType[] = []
 
 /**
  * Lightweight on-demand context menu for track gaps.
@@ -290,8 +293,12 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
   const { visibleItems: trackItems, visibleTransitions: trackTransitions } = useVisibleItems(
     track.id,
   )
-  // Full item count — used for context menu guard (must not depend on virtualized subset)
-  const hasAnyItems = useItemsStore((s) => (s.itemsByTrackId[track.id]?.length ?? 0) > 0)
+  // Full item count — context-menu and overview policy must not depend on virtualization.
+  const trackItemRangeIndex = useItemsStore((s) =>
+    getTimelineTrackItemRangeIndex(s.itemsByTrackId[track.id] ?? EMPTY_TRACK_ITEMS),
+  )
+  const totalTrackItemCount = trackItemRangeIndex.itemCount
+  const hasAnyItems = totalTrackItemCount > 0
   const addItem = useTimelineStore((s) => s.addItem)
   const addItems = useTimelineStore((s) => s.addItems)
   const fps = useTimelineStore((s) => s.fps)
@@ -1246,6 +1253,8 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
             <TimelineTrackItems
               trackId={track.id}
               trackItems={trackItems}
+              totalTrackItemCount={totalTrackItemCount}
+              trackItemDurationBounds={trackItemRangeIndex}
               trackLocked={isTrackLocked}
               trackHidden={isTrackDisabled}
             />

@@ -34,7 +34,7 @@ const EMPTY_COMPOSITION_LOOKUP: Record<string, never> = {}
 const WAVEFORM_MIN_WIDTH_PX = 12
 const FILMSTRIP_MIN_WIDTH_PX = 20
 const MEDIA_LABEL_MIN_WIDTH_PX = 28
-const MEDIA_LINK_ICON_MIN_WIDTH_PX = 32
+const MEDIA_LINK_ICON_MIN_WIDTH_PX = 48
 const MEDIA_LINKED_LABEL_MIN_WIDTH_PX = 56
 const MEDIA_LABEL_ROW_HORIZONTAL_PADDING_PX = 16
 const MEDIA_LABEL_GAP_PX = 6
@@ -136,6 +136,7 @@ function CompositionFilmstripSegment({
 
   return (
     <div
+      data-filmstrip-timeline-segment
       className="absolute inset-y-0 overflow-hidden"
       style={{
         left: `${leftFraction * 100}%`,
@@ -178,6 +179,7 @@ interface ClipContentProps {
   clipLeftFrames: number
   clipWidthFrames: number
   fps: number
+  isCompactWidth?: boolean
   isLinked?: boolean
   preferImmediateRendering?: boolean
   audioWaveformScale?: number
@@ -976,6 +978,14 @@ const WidthGatedMediaClipContent = memo(function WidthGatedMediaClipContent(
 })
 
 export const ClipContent = memo(function ClipContent(props: ClipContentProps) {
+  // Compact clips already retain the full interactive TimelineItem root. Do
+  // not also mount a label/filmstrip/waveform subtree that cannot be read at
+  // this width. Besides reducing layout work, returning before the width-gated
+  // media component avoids one live zoom-store subscription per compact clip.
+  // Detail is restored only by real-pixel zoom, never by hover or selection.
+  if (props.isCompactWidth === true) {
+    return null
+  }
   if (hasBasicMediaVisuals(props.item)) {
     return <WidthGatedMediaClipContent {...props} />
   }

@@ -31,7 +31,7 @@ export interface MarqueeItem {
   getBoundingRect: () => Rect | null
 }
 
-interface ResolvedMarqueeItem {
+export interface ResolvedMarqueeItem {
   id: string
   rect: Rect | null
 }
@@ -58,6 +58,9 @@ interface UseMarqueeSelectionOptions {
 
   /** Items that can be selected */
   items: MarqueeItem[]
+
+  /** Optional batch resolver for data-driven surfaces without one DOM node per item. */
+  resolveItems?: () => ResolvedMarqueeItem[]
 
   /** Callback when selection changes */
   onSelectionChange?: (selectedIds: string[]) => void
@@ -171,6 +174,7 @@ export function useMarqueeSelection({
   containerRef,
   hitAreaRef,
   items,
+  resolveItems,
   onSelectionChange,
   onPreviewSelectionChange,
   onGestureEnd,
@@ -218,6 +222,7 @@ export function useMarqueeSelection({
   const prevSelectedIdsRef = useRef<string[]>([])
   const rafIdRef = useRef<number | null>(null)
   const itemsRef = useRef(items)
+  const resolveItemsRef = useRef(resolveItems)
   const enabledRef = useRef(enabled)
   const resolvedItemsRef = useRef<ResolvedMarqueeItem[] | null>(null)
   const liveCommitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -238,14 +243,20 @@ export function useMarqueeSelection({
   }, [items])
 
   useEffect(() => {
+    resolveItemsRef.current = resolveItems
+  }, [resolveItems])
+
+  useEffect(() => {
     enabledRef.current = enabled
   }, [enabled])
 
   const captureResolvedItems = useCallback(() => {
-    resolvedItemsRef.current = itemsRef.current.map((item) => ({
-      id: item.id,
-      rect: item.getBoundingRect(),
-    }))
+    resolvedItemsRef.current =
+      resolveItemsRef.current?.() ??
+      itemsRef.current.map((item) => ({
+        id: item.id,
+        rect: item.getBoundingRect(),
+      }))
   }, [])
 
   const flushLiveCommit = useCallback((ids: string[]) => {
@@ -368,6 +379,8 @@ export function useMarqueeSelection({
       target.closest('[role="button"]') ||
       // Don't start marquee if clicking on a draggable timeline item
       target.closest('[data-item-id]') ||
+      // Density buckets represent draggable timeline items without rich roots.
+      target.closest('[data-timeline-density-bucket]') ||
       // Don't start marquee if clicking on a draggable media card
       target.closest('[data-media-id]') ||
       // Don't start marquee if clicking on a draggable composition card

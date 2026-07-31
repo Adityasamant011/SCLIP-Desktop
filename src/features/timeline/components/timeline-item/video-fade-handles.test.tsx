@@ -4,7 +4,7 @@ import { VideoFadeHandles } from './video-fade-handles'
 
 describe('VideoFadeHandles', () => {
   it('renders both fade handles when the select tool is active', () => {
-    render(
+    const view = render(
       <VideoFadeHandles
         trackLocked={false}
         activeTool="select"
@@ -22,6 +22,41 @@ describe('VideoFadeHandles', () => {
 
     expect(screen.getByRole('button', { name: 'Adjust video fade in' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Adjust video fade out' })).toBeInTheDocument()
+    expect(view.container.querySelector('[data-clip-fade-controls="video"]')).toHaveClass(
+      'opacity-0',
+      '@min-[44px]:opacity-40',
+      '@min-[64px]:opacity-100',
+    )
+    expect(screen.getByRole('button', { name: 'Adjust video fade in' })).toHaveClass(
+      'pointer-events-none',
+      '@min-[44px]:pointer-events-auto',
+    )
+  })
+
+  it('keeps an active fade edit visible and interactive below the density threshold', () => {
+    const view = render(
+      <VideoFadeHandles
+        trackLocked={false}
+        activeTool="select"
+        lineYPercent={50}
+        fadeInPercent={20}
+        fadeOutPercent={15}
+        isSelected={true}
+        isEditing={true}
+        editingHandle="in"
+        fadeInLabel="Fade In 0.80s"
+        fadeOutLabel="Fade Out 0.60s"
+        onFadeHandleMouseDown={vi.fn()}
+        onFadeHandleDoubleClick={vi.fn()}
+      />,
+    )
+
+    expect(view.container.querySelector('[data-clip-fade-controls="video"]')).toHaveClass(
+      'opacity-100',
+    )
+    expect(screen.getByRole('button', { name: 'Adjust video fade in' })).toHaveClass(
+      'pointer-events-auto',
+    )
   })
 
   it('shows the hover label and prevents double-click from bubbling', () => {

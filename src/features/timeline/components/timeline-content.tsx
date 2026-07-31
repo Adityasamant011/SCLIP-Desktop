@@ -69,6 +69,8 @@ import {
 } from '../utils/zoom-anchor'
 import { frameToPixelsNow, pixelsToFrameNow } from '../utils/zoom-conversions'
 import { applyTimelineLiveGeometry } from '../utils/timeline-live-geometry'
+import { resolveTimelineMarqueeItems } from '../utils/timeline-marquee-geometry'
+import { setTimelineDensityMarqueePreview } from '../utils/timeline-density-marquee-preview'
 import { notifyTimelineLiveScroll } from '@/shared/timeline/live-scroll-sync'
 import { getPlaybackFollowScrollLeft } from '../utils/playback-follow-scroll'
 import { TimelineSettledContentZoomProvider } from './timeline-settled-content-zoom-provider'
@@ -390,6 +392,8 @@ interface TimelineContentProps {
 interface TimelineMarqueeLayerProps {
   containerRef: React.RefObject<HTMLDivElement | null>
   itemIds: string[]
+  fps: number
+  duration: number
   onSelectionChange: (ids: string[]) => void
   onMarqueeActiveChange: (active: boolean) => void
   onMarqueeGestureEnd: (event: MouseEvent) => void
@@ -398,6 +402,8 @@ interface TimelineMarqueeLayerProps {
 const TimelineMarqueeLayer = memo(function TimelineMarqueeLayer({
   containerRef,
   itemIds,
+  fps,
+  duration,
   onSelectionChange,
   onMarqueeActiveChange,
   onMarqueeGestureEnd,
@@ -406,6 +412,7 @@ const TimelineMarqueeLayer = memo(function TimelineMarqueeLayer({
 
   const setPreviewItemIds = useCallback(
     (ids: string[]) => {
+      setTimelineDensityMarqueePreview(ids)
       const container = containerRef.current
       if (!container) {
         previewItemIdsRef.current = ids
@@ -466,9 +473,21 @@ const TimelineMarqueeLayer = memo(function TimelineMarqueeLayer({
     [containerRef, itemIds],
   )
 
+  const resolveMarqueeItems = useCallback(() => {
+    const container = containerRef.current
+    if (!container) return []
+    return resolveTimelineMarqueeItems(
+      container,
+      itemIds,
+      useItemsStore.getState().itemById,
+      duration * fps,
+    )
+  }, [containerRef, duration, fps, itemIds])
+
   const { marquee, isActive } = useMarqueeSelection({
     containerRef: containerRef as React.RefObject<HTMLElement>,
     items: marqueeItems,
+    resolveItems: resolveMarqueeItems,
     onSelectionChange,
     onPreviewSelectionChange: setPreviewItemIds,
     onGestureEnd: onMarqueeGestureEnd,
@@ -1333,7 +1352,11 @@ export const TimelineContent = memo(function TimelineContent({
     if (e.button !== 0) return
 
     const target = e.target as HTMLElement
-    if (!target.closest('[data-track-id]') || target.closest('[data-item-id]')) {
+    if (
+      !target.closest('[data-track-id]') ||
+      target.closest('[data-item-id]') ||
+      target.closest('[data-timeline-density-bucket]')
+    ) {
       return
     }
 
@@ -2094,6 +2117,8 @@ export const TimelineContent = memo(function TimelineContent({
         <TimelineMarqueeLayer
           containerRef={containerRef}
           itemIds={itemIds}
+          fps={fps}
+          duration={actualDuration}
           onSelectionChange={handleMarqueeSelectionChange}
           onMarqueeActiveChange={handleMarqueeActiveChange}
           onMarqueeGestureEnd={finishMarqueePointerGesture}

@@ -4,6 +4,7 @@ import {
   computeCoverDrawRect,
   computeFilmstripCanvasGeometry,
   computeFilmstripCanvasTiles,
+  computeTimelineFilmstripCanvasWindow,
 } from './filmstrip-canvas-geometry'
 
 describe('computeFilmstripCanvasGeometry', () => {
@@ -23,6 +24,42 @@ describe('computeFilmstripCanvasGeometry', () => {
       left: 0,
       width: 123,
     })
+  })
+})
+
+describe('computeTimelineFilmstripCanvasWindow', () => {
+  it('derives the bounded clip-local window from timeline coordinates', () => {
+    expect(
+      computeTimelineFilmstripCanvasWindow({
+        startFrame: 0,
+        durationFrames: 60_000,
+        fps: 30,
+        pixelsPerSecond: 100,
+        scrollLeft: 10_714,
+        viewportWidth: 1331,
+        overscanPx: 600,
+        contentInsetStartPx: 1,
+        contentInsetEndPx: 1,
+      }),
+    ).toEqual({
+      renderWidth: 199_998,
+      visibleStartPx: 10_113,
+      visibleEndPx: 12_644,
+    })
+  })
+
+  it('rejects invalid arithmetic bounds so callers can retain the DOM fallback', () => {
+    expect(
+      computeTimelineFilmstripCanvasWindow({
+        startFrame: 0,
+        durationFrames: 60,
+        fps: 0,
+        pixelsPerSecond: 100,
+        scrollLeft: 0,
+        viewportWidth: 1000,
+        overscanPx: 600,
+      }),
+    ).toBeNull()
   })
 })
 

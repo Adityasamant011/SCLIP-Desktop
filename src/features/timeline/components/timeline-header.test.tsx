@@ -207,10 +207,6 @@ describe('TimelineHeader zoom slider', () => {
       })
 
       fireEvent.mouseUp(thumb)
-      act(() => vi.advanceTimersByTime(199))
-      expect(useZoomStore.getState().contentLevel).toBe(1)
-
-      act(() => vi.advanceTimersByTime(1))
       expect(useZoomStore.getState()).toMatchObject({
         contentLevel: targetZoom,
         isZoomInteracting: false,
@@ -237,7 +233,6 @@ describe('TimelineHeader zoom slider', () => {
       })
 
       fireEvent.pointerUp(window)
-      act(() => vi.advanceTimersByTime(200))
 
       expect(useZoomStore.getState()).toMatchObject({
         contentLevel: targetZoom,

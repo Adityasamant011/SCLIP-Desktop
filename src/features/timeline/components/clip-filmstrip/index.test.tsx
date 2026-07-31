@@ -378,7 +378,7 @@ describe('ClipFilmstrip', () => {
     expect(heightSetter).toHaveBeenCalledTimes(heightAssignmentCountBeforeDecode)
   })
 
-  it('paints the live zoom sampling without a React commit or settled redraw', async () => {
+  it('paints live zoom from timeline coordinates without layout reads or a React commit', async () => {
     const frames = Array.from({ length: 10 }, (_, index) => ({
       index,
       timestamp: index,
@@ -404,39 +404,33 @@ describe('ClipFilmstrip', () => {
       viewportHeight: 120,
     })
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.hasAttribute('data-timeline-scroll-container')) {
-          return DOMRect.fromRect({ x: 100, y: 0, width: 400, height: 120 })
-        }
-        if (this.hasAttribute('data-filmstrip-fallback')) {
-          return DOMRect.fromRect({
-            x: 100,
-            y: 0,
-            width: 320 * (useZoomStore.getState().pixelsPerSecond / 100),
-            height: 60,
-          })
-        }
-        return DOMRect.fromRect()
-      },
-    )
+    const getBoundingClientRect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect')
 
     const onRender = vi.fn()
     const renderTree = (clipWidth: number, pixelsPerSecond: number) => (
       <div data-timeline-scroll-container>
-        <Profiler id="live-filmstrip" onRender={onRender}>
-          <ClipFilmstrip
-            mediaId="media-live"
-            clipWidth={clipWidth}
-            sourceStart={0}
-            sourceDuration={10}
-            trimStart={0}
-            speed={1}
-            fps={30}
-            isVisible
-            pixelsPerSecond={pixelsPerSecond}
-          />
-        </Profiler>
+        <div
+          data-timeline-item
+          data-timeline-start-frame="0"
+          data-timeline-duration-frames="96"
+          data-timeline-fps="30"
+          data-timeline-content-inset-start-px="1"
+          data-timeline-content-inset-end-px="1"
+        >
+          <Profiler id="live-filmstrip" onRender={onRender}>
+            <ClipFilmstrip
+              mediaId="media-live"
+              clipWidth={clipWidth}
+              sourceStart={0}
+              sourceDuration={10}
+              trimStart={0}
+              speed={1}
+              fps={30}
+              isVisible
+              pixelsPerSecond={pixelsPerSecond}
+            />
+          </Profiler>
+        </div>
       </div>
     )
     const widthSetter = vi.spyOn(HTMLCanvasElement.prototype, 'width', 'set')
@@ -457,9 +451,10 @@ describe('ClipFilmstrip', () => {
     })
 
     expect(onRender).toHaveBeenCalledTimes(commitCountBeforeZoom)
-    expect(canvas.style.width).toBe('640px')
+    expect(canvas.style.width).toBe('638px')
     expect(canvasContextMocks.clearRect).toHaveBeenCalledTimes(clearCountBeforeZoom + 1)
     expect(TestImage.instances.some((image) => !initialSources.has(image.src))).toBe(true)
+    expect(getBoundingClientRect).not.toHaveBeenCalled()
 
     const clearCountBeforeSettle = canvasContextMocks.clearRect.mock.calls.length
     const backingWritesBeforeSettle = widthSetter.mock.calls.length

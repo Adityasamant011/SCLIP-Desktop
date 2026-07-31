@@ -7,6 +7,7 @@ import {
   computeCoverDrawRect,
   computeFilmstripCanvasGeometry,
   computeFilmstripCanvasTiles,
+  computeTimelineFilmstripCanvasWindow,
   type FilmstripCanvasGeometry,
   type FilmstripCanvasTile,
 } from './filmstrip-canvas-geometry'
@@ -43,15 +44,85 @@ interface LiveFilmstripCanvasWindow {
 interface LiveFilmstripCanvasRegistration {
   canvas: HTMLCanvasElement
   host: HTMLElement | null
+  timelineItem: HTMLElement | null
   timelineViewport: HTMLElement | null
+  requiresMeasuredGeometry: boolean
   overscanPx: number
   paint: (pixelsPerSecond: number, window: LiveFilmstripCanvasWindow) => void
+}
+
+interface LiveTimelineSnapshot {
+  pixelsPerSecond: number
+  scrollLeft: number
+  viewportWidth: number
 }
 
 const liveFilmstripCanvasRegistrations = new Set<LiveFilmstripCanvasRegistration>()
 let liveFilmstripCanvasUpdateQueued = false
 let unsubscribeLiveFilmstripZoom: (() => void) | null = null
 let unsubscribeLiveFilmstripViewport: (() => void) | null = null
+
+function getLiveTimelineSnapshot(): LiveTimelineSnapshot {
+  const { pixelsPerSecond } = useZoomStore.getState()
+  const { scrollLeft, viewportWidth } = useTimelineViewportStore.getState()
+  return {
+    pixelsPerSecond,
+    scrollLeft,
+    viewportWidth,
+  }
+}
+
+function parseRequiredFiniteNumber(value: string | undefined): number | null {
+  if (value === undefined || value.trim() === '') return null
+  const number = Number(value)
+  return Number.isFinite(number) ? number : null
+}
+
+function parseOptionalInset(value: string | undefined): number | null {
+  if (value === undefined) return 0
+  const number = parseRequiredFiniteNumber(value)
+  return number !== null && number >= 0 ? number : null
+}
+
+function computeLiveFilmstripCanvasWindowFromItem(
+  timelineItem: HTMLElement | null,
+  snapshot: LiveTimelineSnapshot,
+  overscanPx: number,
+): LiveFilmstripCanvasWindow | null {
+  if (!timelineItem) return null
+
+  const transform = timelineItem.style.transform.trim()
+  if (transform !== '' && transform !== 'none') {
+    return null
+  }
+
+  const startFrame = parseRequiredFiniteNumber(timelineItem.dataset.timelineStartFrame)
+  const durationFrames = parseRequiredFiniteNumber(timelineItem.dataset.timelineDurationFrames)
+  const fps = parseRequiredFiniteNumber(timelineItem.dataset.timelineFps)
+  const contentInsetStartPx = parseOptionalInset(timelineItem.dataset.timelineContentInsetStartPx)
+  const contentInsetEndPx = parseOptionalInset(timelineItem.dataset.timelineContentInsetEndPx)
+  if (
+    startFrame === null ||
+    durationFrames === null ||
+    fps === null ||
+    contentInsetStartPx === null ||
+    contentInsetEndPx === null
+  ) {
+    return null
+  }
+
+  return computeTimelineFilmstripCanvasWindow({
+    startFrame,
+    durationFrames,
+    fps,
+    pixelsPerSecond: snapshot.pixelsPerSecond,
+    scrollLeft: snapshot.scrollLeft,
+    viewportWidth: snapshot.viewportWidth,
+    overscanPx,
+    contentInsetStartPx,
+    contentInsetEndPx,
+  })
+}
 
 function measureLiveFilmstripCanvasWindow(
   registration: Pick<LiveFilmstripCanvasRegistration, 'host' | 'timelineViewport' | 'overscanPx'>,
@@ -88,26 +159,36 @@ function scheduleLiveFilmstripCanvasUpdate(): void {
   liveFilmstripCanvasUpdateQueued = true
   queueMicrotask(() => {
     liveFilmstripCanvasUpdateQueued = false
-    const pixelsPerSecond = useZoomStore.getState().pixelsPerSecond
-    const viewportRectCache = new Map<HTMLElement, DOMRect>()
+    const snapshot = getLiveTimelineSnapshot()
+    let viewportRectCache: Map<HTMLElement, DOMRect> | undefined
     const updates: Array<{
       registration: LiveFilmstripCanvasRegistration
       canvasWindow: LiveFilmstripCanvasWindow
     }> = []
 
-    // Read every live rectangle before painting any canvas. The upstream zoom
-    // handler has already paired the real-width geometry and anchored scroll in
-    // one RAF, so this microtask sees the final state without forcing a
-    // read/write layout cycle for each visible filmstrip.
+    // Ordinary timeline items use arithmetic from one shared live snapshot.
+    // Only transformed items, compound segments, or malformed legacy markup
+    // fall back to rectangles. Resolve every fallback read before painting any
+    // canvas so the batch never alternates layout reads and writes.
     for (const registration of liveFilmstripCanvasRegistrations) {
       if (!registration.canvas.isConnected) continue
-      const canvasWindow = measureLiveFilmstripCanvasWindow(registration, viewportRectCache)
+      let canvasWindow = registration.requiresMeasuredGeometry
+        ? null
+        : computeLiveFilmstripCanvasWindowFromItem(
+            registration.timelineItem,
+            snapshot,
+            registration.overscanPx,
+          )
+      if (!canvasWindow) {
+        viewportRectCache ??= new Map<HTMLElement, DOMRect>()
+        canvasWindow = measureLiveFilmstripCanvasWindow(registration, viewportRectCache)
+      }
       if (canvasWindow) {
         updates.push({ registration, canvasWindow })
       }
     }
     for (const update of updates) {
-      update.registration.paint(pixelsPerSecond, update.canvasWindow)
+      update.registration.paint(snapshot.pixelsPerSecond, update.canvasWindow)
     }
   })
 }
@@ -125,7 +206,9 @@ function registerLiveFilmstripCanvas(
   const registration: LiveFilmstripCanvasRegistration = {
     canvas,
     host,
+    timelineItem: canvas.closest<HTMLElement>('[data-timeline-item]'),
     timelineViewport,
+    requiresMeasuredGeometry: canvas.closest('[data-filmstrip-timeline-segment]') !== null,
     overscanPx,
     paint,
   }
@@ -417,14 +500,27 @@ export const VisibleFilmstripCanvas = memo(function VisibleFilmstripCanvas({
       visibleEndPx,
     }
     if (liveTimelineViewport) {
-      const measuredWindow = measureLiveFilmstripCanvasWindow({
-        host: canvas.parentElement,
-        timelineViewport: canvas.closest<HTMLElement>('[data-timeline-scroll-container]'),
-        overscanPx: liveViewportOverscanPx,
-      })
-      if (measuredWindow) {
-        currentWindow = measuredWindow
-        drawPixelsPerSecond = useZoomStore.getState().pixelsPerSecond
+      const snapshot = getLiveTimelineSnapshot()
+      const timelineItem = canvas.closest<HTMLElement>('[data-timeline-item]')
+      const requiresMeasuredGeometry =
+        canvas.closest('[data-filmstrip-timeline-segment]') !== null
+      const liveWindow = requiresMeasuredGeometry
+        ? null
+        : computeLiveFilmstripCanvasWindowFromItem(
+            timelineItem,
+            snapshot,
+            liveViewportOverscanPx,
+          )
+      const resolvedWindow =
+        liveWindow ??
+        measureLiveFilmstripCanvasWindow({
+          host: canvas.parentElement,
+          timelineViewport: canvas.closest<HTMLElement>('[data-timeline-scroll-container]'),
+          overscanPx: liveViewportOverscanPx,
+        })
+      if (resolvedWindow) {
+        currentWindow = resolvedWindow
+        drawPixelsPerSecond = snapshot.pixelsPerSecond
       }
     }
     drawWindow(drawPixelsPerSecond, currentWindow)
