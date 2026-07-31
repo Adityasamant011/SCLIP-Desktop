@@ -15,38 +15,52 @@ function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value))
 }
 
-function calculateFadeDipOpacity(progress: number, isOutgoing: boolean): number {
-  if (progress < 0.5) {
-    return isOutgoing ? Math.max(0, Math.cos(progress * Math.PI)) : 0
+// cos²/sin² weights — always sum to 1, preserving alpha for soft crop & masks.
+// Mirrors the export path's legacy fade (canvas-transitions.ts) so registering
+// this renderer does not change export output; the dip-through-black look
+// lives on as the `dipToColorDissolve` preset.
+function fadeWeight(progress: number, isOutgoing: boolean): number {
+  const c = Math.cos((progress * Math.PI) / 2)
+  return isOutgoing ? c * c : 1 - c * c
+}
+
+function fadeScale(progress: number, isOutgoing: boolean): number {
+  if (isOutgoing) {
+    return 1 - 0.04 * progress
   }
-  return isOutgoing ? 0 : Math.max(0, -Math.cos(progress * Math.PI))
+  return 1.04 - 0.04 * progress
+}
+
+function drawFadeParticipant(
+  ctx: OffscreenCanvasRenderingContext2D,
+  source: OffscreenCanvas,
+  width: number,
+  height: number,
+  scale: number,
+  alpha: number,
+): void {
+  ctx.save()
+  ctx.globalAlpha = alpha
+  ctx.translate(width / 2, height / 2)
+  ctx.scale(scale, scale)
+  ctx.translate(-width / 2, -height / 2)
+  ctx.drawImage(source, 0, 0)
+  ctx.restore()
 }
 
 const fadeRenderer: TransitionRenderer = {
   gpuTransitionId: 'fade',
-  renderCanvas(ctx, leftCanvas, rightCanvas, progress) {
+  renderCanvas(ctx, leftCanvas, rightCanvas, progress, _direction, canvas) {
     const p = clamp01(progress)
-    const outgoingWeight = calculateFadeDipOpacity(p, true)
-    const incomingWeight = calculateFadeDipOpacity(p, false)
-    const w = Math.max(leftCanvas.width, rightCanvas.width)
-    const h = Math.max(leftCanvas.height, rightCanvas.height)
+    const w = canvas?.width ?? Math.max(leftCanvas.width, rightCanvas.width)
+    const h = canvas?.height ?? Math.max(leftCanvas.height, rightCanvas.height)
 
     ctx.save()
     ctx.globalCompositeOperation = 'copy'
-    ctx.fillStyle = 'black'
-    ctx.fillRect(0, 0, w, h)
+    drawFadeParticipant(ctx, rightCanvas, w, h, fadeScale(p, false), fadeWeight(p, false))
 
-    if (outgoingWeight > 0) {
-      ctx.globalCompositeOperation = 'source-over'
-      ctx.globalAlpha = outgoingWeight
-      ctx.drawImage(leftCanvas, 0, 0)
-    }
-
-    if (incomingWeight > 0) {
-      ctx.globalCompositeOperation = 'source-over'
-      ctx.globalAlpha = incomingWeight
-      ctx.drawImage(rightCanvas, 0, 0)
-    }
+    ctx.globalCompositeOperation = 'lighter'
+    drawFadeParticipant(ctx, leftCanvas, w, h, fadeScale(p, true), fadeWeight(p, true))
     ctx.restore()
   },
 }
@@ -54,7 +68,7 @@ const fadeRenderer: TransitionRenderer = {
 const fadeDef: TransitionDefinition = {
   id: 'fade',
   label: 'Fade',
-  description: 'Dip through black between clips',
+  description: 'Equal-power crossfade between clips',
   category: 'basic',
   icon: 'Blend',
   hasDirection: false,
