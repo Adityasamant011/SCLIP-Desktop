@@ -2,7 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { i18n, i18nReady } from './i18n'
 import { App } from './app'
-import { claimDevVitePreloadRecovery } from './app/vite-preload-recovery'
+import { recoverDevVitePreload } from './app/vite-preload-recovery'
 import { createLogger } from '@/shared/logging/logger'
 import {
   getEditorProjectIdFromPathname,
@@ -32,18 +32,30 @@ function getCurrentProjectId(): string | undefined {
   return getEditorProjectIdFromPathname(window.location.pathname)
 }
 
-async function saveCurrentProjectBeforeReload() {
+async function saveCurrentProjectBeforeReload(): Promise<boolean> {
   const projectId = getCurrentProjectId()
 
   if (!projectId) {
-    return
+    return true
   }
 
   try {
     const { useTimelineStore } = await import('@/features/timeline/stores/timeline-store-facade')
     await useTimelineStore.getState().saveTimeline(projectId)
+    return true
   } catch (e) {
     log.error('Failed to save before reload:', e)
+    return false
+  }
+}
+
+async function showSaveBeforeReloadFailedToast() {
+  window.dispatchEvent(new Event('freecut:ensure-toaster'))
+  try {
+    const { toast } = await import('sonner')
+    toast.error(i18n.t('editor.editor.projectSaveFailed'))
+  } catch (error) {
+    log.warn('Failed to show save-before-reload error:', error)
   }
 }
 
@@ -81,8 +93,11 @@ async function showUpdateAvailableToast(
     action: {
       label: i18n.t('appShell.saveAndReload'),
       onClick: async () => {
+        if (!(await saveCurrentProjectBeforeReload())) {
+          toast.error(i18n.t('editor.editor.projectSaveFailed'))
+          return
+        }
         rememberAcceptedAppUpdate(updateSignature)
-        await saveCurrentProjectBeforeReload()
         applyUpdate()
       },
     },
@@ -234,14 +249,18 @@ window.addEventListener('error', (event) => {
 // the toast when the live entry-script hash actually differs from ours. A transient
 // failure leaves the signature unchanged, so it stays silent and the user can retry.
 window.addEventListener('vite:preloadError', (event) => {
-  if (
-    import.meta.env.DEV &&
-    !devVitePreloadRecoveryInFlight &&
-    claimDevVitePreloadRecovery(window.sessionStorage)
-  ) {
-    devVitePreloadRecoveryInFlight = true
+  if (import.meta.env.DEV) {
     event.preventDefault()
-    void saveCurrentProjectBeforeReload().finally(reloadCurrentLocationWithUpdateCacheBust)
+    if (devVitePreloadRecoveryInFlight) return
+
+    devVitePreloadRecoveryInFlight = true
+    void recoverDevVitePreload({
+      save: saveCurrentProjectBeforeReload,
+      reload: reloadCurrentLocationWithUpdateCacheBust,
+      onSaveFailure: showSaveBeforeReloadFailedToast,
+    }).then((didReload) => {
+      if (!didReload) devVitePreloadRecoveryInFlight = false
+    })
     return
   }
   void checkForAppShellUpdate()

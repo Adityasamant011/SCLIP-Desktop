@@ -1,42 +1,35 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
-import {
-  claimDevVitePreloadRecovery,
-  DEV_VITE_PRELOAD_RECOVERY_COOLDOWN_MS,
-} from './vite-preload-recovery'
+import { recoverDevVitePreload } from './vite-preload-recovery'
 
-function createStorage(initialValue: string | null = null) {
-  let value = initialValue
-  return {
-    getItem: () => value,
-    setItem: (_key: string, nextValue: string) => {
-      value = nextValue
-    },
-  }
-}
+describe('recoverDevVitePreload', () => {
+  it('reloads after the project saves successfully', async () => {
+    const reload = vi.fn()
+    const onSaveFailure = vi.fn()
 
-describe('claimDevVitePreloadRecovery', () => {
-  it('allows one recovery and suppresses an immediate reload loop', () => {
-    const storage = createStorage()
-    const now = 1_000_000
-
-    expect(claimDevVitePreloadRecovery(storage, now)).toBe(true)
-    expect(claimDevVitePreloadRecovery(storage, now + 1)).toBe(false)
-    expect(
-      claimDevVitePreloadRecovery(storage, now + DEV_VITE_PRELOAD_RECOVERY_COOLDOWN_MS),
-    ).toBe(true)
+    await expect(
+      recoverDevVitePreload({
+        save: async () => true,
+        reload,
+        onSaveFailure,
+      }),
+    ).resolves.toBe(true)
+    expect(reload).toHaveBeenCalledOnce()
+    expect(onSaveFailure).not.toHaveBeenCalled()
   })
 
-  it('recovers when session storage is unavailable', () => {
-    const storage = {
-      getItem: () => {
-        throw new Error('blocked')
-      },
-      setItem: () => {
-        throw new Error('blocked')
-      },
-    }
+  it('reports a save failure without navigating', async () => {
+    const reload = vi.fn()
+    const onSaveFailure = vi.fn()
 
-    expect(claimDevVitePreloadRecovery(storage)).toBe(true)
+    await expect(
+      recoverDevVitePreload({
+        save: async () => false,
+        reload,
+        onSaveFailure,
+      }),
+    ).resolves.toBe(false)
+    expect(reload).not.toHaveBeenCalled()
+    expect(onSaveFailure).toHaveBeenCalledOnce()
   })
 })
