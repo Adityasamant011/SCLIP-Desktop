@@ -12,6 +12,21 @@ const frame = z.number().int().nonnegative()
 const positiveFrames = z.number().int().positive()
 const projectObject = z.record(z.string(), z.unknown())
 const params = z.record(z.string(), z.union([z.number(), z.boolean(), z.string()]))
+const imageFormat = z.preprocess(
+  (value) => (typeof value === 'string' ? value.toLowerCase() : value),
+  z.enum(['png', 'jpg', 'jpeg', 'webp']),
+)
+
+const projectFrameFields = {
+  project: id.optional(),
+  projectObject: projectObject.optional(),
+  frame: finite.nonnegative().optional(),
+  at: finite.nonnegative().optional(),
+  atSeconds: finite.nonnegative().optional(),
+}
+
+const hasExactlyOneProjectSource = (value) =>
+  Boolean(value.project) !== Boolean(value.projectObject)
 
 const GPU_EFFECT_TYPES = [
   'gpu-ascii',
@@ -585,6 +600,28 @@ export const renderRequestSchema = z
     path: ['container'],
   })
 
+export const frameRequestSchema = z
+  .object({
+    ...projectFrameFields,
+    width: positiveFrames.max(16384).optional(),
+    height: positiveFrames.max(16384).optional(),
+    format: imageFormat.optional(),
+    quality: finite.min(0).max(1).optional(),
+  })
+  .strict()
+  .refine(hasExactlyOneProjectSource, {
+    message: 'provide exactly one of project or projectObject',
+    path: ['project'],
+  })
+
+export const layoutRequestSchema = z
+  .object(projectFrameFields)
+  .strict()
+  .refine(hasExactlyOneProjectSource, {
+    message: 'provide exactly one of project or projectObject',
+    path: ['project'],
+  })
+
 export function normalizeRenderInput(value) {
   const out = { ...value }
   if (out.in !== undefined) out.inSec = Number(out.in)
@@ -630,6 +667,8 @@ export function capabilities() {
     },
     schemas: {
       render: z.toJSONSchema(renderRequestSchema, { target: 'draft-7' }),
+      frame: z.toJSONSchema(frameRequestSchema, { target: 'draft-7' }),
+      layout: z.toJSONSchema(layoutRequestSchema, { target: 'draft-7' }),
       edit: z.toJSONSchema(editRequestSchema, { target: 'draft-7' }),
       projectCreate: z.toJSONSchema(projectCreateRequestSchema, { target: 'draft-7' }),
       projectSave: z.toJSONSchema(projectSaveRequestSchema, { target: 'draft-7' }),

@@ -99,7 +99,7 @@ async function grabFrame(page, { args, workspace, mediaUrlOf, outPath, mime, fra
     width: args.width ? Number(args.width) : undefined,
     height: args.height ? Number(args.height) : undefined,
     format: mime,
-    quality: args.quality ? Number(args.quality) : undefined,
+    quality: args.quality !== undefined ? Number(args.quality) : undefined,
     strict: Boolean(args.strict),
   })
   for (const w of summary.warnings ?? []) {

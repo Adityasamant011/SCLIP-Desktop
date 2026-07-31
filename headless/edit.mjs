@@ -28,6 +28,9 @@
 //   trimStart    { id, amount }
 //   trimEnd      { id, amount }
 //   addTransition{ leftClipId, rightClipId, type?, durationInFrames? }
+//   updateTransition { id, durationInFrames?, presentation?, direction?, timing?, alignment?, properties? }
+//   removeTransition { id }
+//   setTransformParent { id, parentItemId, behavior?, frame? }
 import fs from 'node:fs'
 import path from 'node:path'
 import { loadProject, collectAddClipMedia } from './lib/workspace.mjs'

@@ -62,6 +62,8 @@ import {
   ContractValidationError,
   capabilities,
   editRequestSchema,
+  frameRequestSchema,
+  layoutRequestSchema,
   lifecycleEditRequestSchema,
   mediaProbeRequestSchema,
   projectCreateRequestSchema,
@@ -482,13 +484,13 @@ async function main() {
   // Warm-service frame endpoint; exercised end-to-end by headless/test.mjs
   // fallow-ignore-next-line complexity
   const handleFrame = async (req, res) => {
-    const body = await readJsonBody(req)
+    const body = validate(frameRequestSchema, await readJsonBody(req))
     if (body.project) assertSinglePathComponent(body.project, 'project id')
     const project =
       body.projectObject ?? loadJobProject(workspace, { project: body.project }).project
     const { media, missing } = resolveProjectMedia(workspace, project, mediaUrlOf, null)
     const format = (body.format ?? 'png').toLowerCase()
-    const mime = IMAGE_MIME_BY_FORMAT[format] ?? 'image/png'
+    const mime = IMAGE_MIME_BY_FORMAT[format]
     const outPath = path.join(
       tmpDir,
       `frame-${process.pid}-${++counter}.${IMAGE_EXT_BY_MIME[mime]}`,
@@ -536,7 +538,7 @@ async function main() {
   // Dump computed on-canvas bounding boxes at a frame (no render/GPU) — trust
   // coordinates without a render round-trip.
   const handleLayout = async (req, res) => {
-    const body = await readJsonBody(req)
+    const body = validate(layoutRequestSchema, await readJsonBody(req))
     if (body.project) assertSinglePathComponent(body.project, 'project id')
     const project =
       body.projectObject ?? loadJobProject(workspace, { project: body.project }).project
