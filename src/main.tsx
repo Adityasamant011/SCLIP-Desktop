@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { i18n, i18nReady } from './i18n'
 import { App } from './app'
+import { claimDevVitePreloadRecovery } from './app/vite-preload-recovery'
 import { createLogger } from '@/shared/logging/logger'
 import {
   getEditorProjectIdFromPathname,
@@ -15,6 +16,7 @@ const UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000
 const ACCEPTED_APP_UPDATE_SIGNATURE_KEY = 'freecut-accepted-app-update-signature'
 
 let updateToastVisible = false
+let devVitePreloadRecoveryInFlight = false
 
 // Debug utilities are editor-heavy; keep them out of the production startup graph.
 if (import.meta.env.DEV) {
@@ -231,7 +233,17 @@ window.addEventListener('error', (event) => {
 // against the server: checkForAppShellUpdate re-fetches the app shell and only surfaces
 // the toast when the live entry-script hash actually differs from ours. A transient
 // failure leaves the signature unchanged, so it stays silent and the user can retry.
-window.addEventListener('vite:preloadError', () => {
+window.addEventListener('vite:preloadError', (event) => {
+  if (
+    import.meta.env.DEV &&
+    !devVitePreloadRecoveryInFlight &&
+    claimDevVitePreloadRecovery(window.sessionStorage)
+  ) {
+    devVitePreloadRecoveryInFlight = true
+    event.preventDefault()
+    void saveCurrentProjectBeforeReload().finally(reloadCurrentLocationWithUpdateCacheBust)
+    return
+  }
   void checkForAppShellUpdate()
 })
 
