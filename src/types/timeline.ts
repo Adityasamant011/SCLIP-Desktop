@@ -349,7 +349,14 @@ export type ShapeItem = BaseTimelineItem &
     type: 'shape'
     shapeType: ShapeType
     // Shape-specific
-    cornerRadius?: number // Rect, Triangle, Star, Polygon
+    /**
+     * Corner rounding baked into the shape's PATH geometry (Rect, Triangle,
+     * Star, Polygon) — the stroke follows the rounded outline. Not the same
+     * property as `transform.cornerRadius`, which clips an item's rendered
+     * bounding box: setting THAT on a shape clips the box straight through
+     * the stroke instead of rounding the outline. Round a shape here.
+     */
+    cornerRadius?: number
     direction?: 'up' | 'down' | 'left' | 'right' // Triangle only
     points?: number // Star (5 default), Polygon (6 default)
     innerRadius?: number // Star only (ratio 0-1 of outer)
