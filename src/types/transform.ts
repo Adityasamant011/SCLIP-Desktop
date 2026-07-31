@@ -24,7 +24,12 @@ export interface TransformProperties {
   flipVertical?: boolean
   /** Opacity from 0 (transparent) to 1 (opaque). Default: 1 */
   opacity?: number
-  /** Border radius in pixels. Default: 0 */
+  /**
+   * Border radius in pixels, applied by CLIPPING the item's rendered bounding
+   * box (video/image content). Default: 0. For shape items use
+   * `ShapeItem.cornerRadius` instead — that one rounds the path geometry
+   * itself; clipping a shape's box here cuts through its stroke.
+   */
   cornerRadius?: number
   /** UI state: aspect ratio lock for resize operations. Default: true */
   aspectRatioLocked?: boolean
