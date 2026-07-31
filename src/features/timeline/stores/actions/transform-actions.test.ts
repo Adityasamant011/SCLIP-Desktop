@@ -155,6 +155,29 @@ describe('transform actions', () => {
       expect(useTimelineCommandStore.getState().undoStack.length).toBe(undoDepth + 1)
     })
 
+    it('commits accompanying item properties in the same undo entry', () => {
+      const undoDepth = useTimelineCommandStore.getState().undoStack.length
+      let itemStorePublishes = 0
+      const unsubscribe = useItemsStore.subscribe(() => {
+        itemStorePublishes += 1
+      })
+
+      updateItemsTransformMap(new Map([['a', { width: 640, height: 360 }]]), {
+        operation: 'resize',
+        itemUpdates: new Map([['a', { label: 'Scaled title' }]]),
+      })
+      unsubscribe()
+
+      expect(getTransform('a')).toMatchObject({ width: 640, height: 360 })
+      expect(useItemsStore.getState().itemById.a?.label).toBe('Scaled title')
+      expect(itemStorePublishes).toBe(1)
+      expect(useTimelineCommandStore.getState().undoStack.length).toBe(undoDepth + 1)
+
+      useTimelineCommandStore.getState().undo()
+      expect(getTransform('a').width).toBeUndefined()
+      expect(useItemsStore.getState().itemById.a?.label).not.toBe('Scaled title')
+    })
+
     it('does not create history or invalidate items for an empty transform map', () => {
       const itemsBefore = useItemsStore.getState().items
       const undoDepth = useTimelineCommandStore.getState().undoStack.length

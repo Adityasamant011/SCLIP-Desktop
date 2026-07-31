@@ -1058,7 +1058,11 @@ export function GizmoOverlay({
 
   // Handle group transform end - commit transforms for all items as a single undo operation
   const handleGroupTransformEnd = useCallback(
-    (transforms: Map<string, Transform>, operation: 'move' | 'resize' | 'rotate') => {
+    (
+      transforms: Map<string, Transform>,
+      operation: 'move' | 'resize' | 'rotate',
+      textUpdates?: ReadonlyMap<string, Partial<TimelineItem>>,
+    ) => {
       const currentFrame = usePlaybackStore.getState().currentFrame
       // Convert Transform to TransformProperties for the batch update
       const transformsMap = new Map<string, Partial<TransformProperties>>()
@@ -1102,7 +1106,11 @@ export function GizmoOverlay({
         if (commit.shouldUpdateBase) transformsMap.set(itemId, commit.transformProps)
       }
       // Use batch update for single undo operation
-      updateItemsTransformMap(transformsMap, { operation, autoKeyframeOperations })
+      updateItemsTransformMap(transformsMap, {
+        operation,
+        autoKeyframeOperations,
+        itemUpdates: textUpdates,
+      })
 
       // Prevent background click from deselecting after drag
       // Use setTimeout instead of requestAnimationFrame because click events
