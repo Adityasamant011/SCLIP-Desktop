@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { i18n, i18nReady } from './i18n'
 import { App } from './app'
+import { recoverDevVitePreload } from './app/vite-preload-recovery'
 import { createLogger } from '@/shared/logging/logger'
 import {
   getEditorProjectIdFromPathname,
@@ -15,6 +16,7 @@ const UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000
 const ACCEPTED_APP_UPDATE_SIGNATURE_KEY = 'freecut-accepted-app-update-signature'
 
 let updateToastVisible = false
+let devVitePreloadRecoveryInFlight = false
 
 // Debug utilities are editor-heavy; keep them out of the production startup graph.
 if (import.meta.env.DEV) {
@@ -30,18 +32,30 @@ function getCurrentProjectId(): string | undefined {
   return getEditorProjectIdFromPathname(window.location.pathname)
 }
 
-async function saveCurrentProjectBeforeReload() {
+async function saveCurrentProjectBeforeReload(): Promise<boolean> {
   const projectId = getCurrentProjectId()
 
   if (!projectId) {
-    return
+    return true
   }
 
   try {
     const { useTimelineStore } = await import('@/features/timeline/stores/timeline-store-facade')
     await useTimelineStore.getState().saveTimeline(projectId)
+    return true
   } catch (e) {
     log.error('Failed to save before reload:', e)
+    return false
+  }
+}
+
+async function showSaveBeforeReloadFailedToast() {
+  window.dispatchEvent(new Event('freecut:ensure-toaster'))
+  try {
+    const { toast } = await import('sonner')
+    toast.error(i18n.t('editor.editor.projectSaveFailed'))
+  } catch (error) {
+    log.warn('Failed to show save-before-reload error:', error)
   }
 }
 
@@ -79,8 +93,11 @@ async function showUpdateAvailableToast(
     action: {
       label: i18n.t('appShell.saveAndReload'),
       onClick: async () => {
+        if (!(await saveCurrentProjectBeforeReload())) {
+          toast.error(i18n.t('editor.editor.projectSaveFailed'))
+          return
+        }
         rememberAcceptedAppUpdate(updateSignature)
-        await saveCurrentProjectBeforeReload()
         applyUpdate()
       },
     },
@@ -231,7 +248,21 @@ window.addEventListener('error', (event) => {
 // against the server: checkForAppShellUpdate re-fetches the app shell and only surfaces
 // the toast when the live entry-script hash actually differs from ours. A transient
 // failure leaves the signature unchanged, so it stays silent and the user can retry.
-window.addEventListener('vite:preloadError', () => {
+window.addEventListener('vite:preloadError', (event) => {
+  if (import.meta.env.DEV) {
+    event.preventDefault()
+    if (devVitePreloadRecoveryInFlight) return
+
+    devVitePreloadRecoveryInFlight = true
+    void recoverDevVitePreload({
+      save: saveCurrentProjectBeforeReload,
+      reload: reloadCurrentLocationWithUpdateCacheBust,
+      onSaveFailure: showSaveBeforeReloadFailedToast,
+    }).then((didReload) => {
+      if (!didReload) devVitePreloadRecoveryInFlight = false
+    })
+    return
+  }
   void checkForAppShellUpdate()
 })
 
