@@ -199,12 +199,17 @@ describe('collectTransitionFindings', () => {
     ).toEqual([])
   })
 
-  it('flags a declared preset that no available path can draw', () => {
-    // BuiltinTransitionPresentation declares far more presets than the Canvas2D
-    // fallback implements. Without a GPU the rest reach `default:` and render a
-    // plain cut — silently, which is what this warning exists to stop.
+  it('flags a presentation that no available path can draw', () => {
+    // `TransitionPresentation` is widened to string so custom registry entries
+    // work, which means an id with no registry entry and no built-in branch is
+    // reachable — and renders a plain cut, silently. That is what this warns on.
+    //
+    // Note this deliberately uses an unregistered id rather than a declared
+    // preset: since the export path now pulls in the built-in renderers, every
+    // declared preset resolves to a real path. Using e.g. 'glitch' here would
+    // pass only while the registry happened to be empty.
     const findings = collectTransitionFindings(
-      [makeTransition({ presentation: 'glitch' as Transition['presentation'] })],
+      [makeTransition({ presentation: 'notARegisteredPreset' as Transition['presentation'] })],
       adjacentPair(),
       { gpuAvailable: false },
     )
@@ -212,10 +217,29 @@ describe('collectTransitionFindings', () => {
       kind: 'unsupported_presentation',
       transitionId: 'tr-1',
     })
-    expect(findings[0]!.message).toContain('glitch')
+    expect(findings[0]!.message).toContain('notARegisteredPreset')
     expect(findings[0]!.message).toContain('HARD CUT')
     // The message names what IS drawable, so the caller can pick a substitute.
     expect(findings[0]!.message).toContain('fade')
+  })
+
+  it('every preset the product offers is drawable by the export path', () => {
+    // The regression this guards: the export path reads the transition registry,
+    // but nothing on that path used to populate it. Any consumer that did not
+    // happen to load the editor UI — the headless harness above all — fell back
+    // to the built-in switch, turning most declared presets into hard cuts.
+    // Verified end-to-end on real media: 6/44 drew a transition before, 44/44 after.
+    //
+    // Importing only `./validation` here is the point: it reaches the registry
+    // through the export path alone, with no editor module in the graph. Drop the
+    // side-effect import from canvas-transitions and this list stops being empty.
+    const offered = transitionRegistry.getDefinitions().map((definition) => definition.id)
+    expect(offered.length).toBeGreaterThan(6)
+
+    const notDrawable = offered.filter(
+      (id) => resolveTransitionRenderPath(id, { gpuAvailable: false }) === 'cut',
+    )
+    expect(notDrawable).toEqual([])
   })
 
   it('does not flag presets the Canvas2D fallback actually implements', () => {
