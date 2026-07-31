@@ -155,25 +155,47 @@ export async function startHarness({ workspace, devUrl, build }) {
   }
 }
 
-/** Resolve everything needed to render one job (no browser involved). */
-export function prepareJob(workspace, jobArgs, mediaUrlOf) {
-  jobArgs = validate(renderRequestSchema, normalizeRenderInput(jobArgs))
-  const { project, projectJsonPath } = jobArgs.projectObject
-    ? { project: jobArgs.projectObject, projectJsonPath: '(inline)' }
-    : loadProject(workspace, jobArgs.project)
-  const settings = buildSettings(project, jobArgs)
-  const { hasRange, inPoint, outPoint } = computeRange(jobArgs, settings.fps)
-
-  const mediaIds = collectMediaIds(
-    project,
-    hasRange ? { inFrame: inPoint ?? 0, outFrame: outPoint ?? Number.POSITIVE_INFINITY } : null,
-  )
+/**
+ * Resolve the media a project references to `{ mediaId, url, metadata }` entries
+ * the harness can consume. `range` ({ inFrame, outFrame }) limits collection to
+ * media overlapping a slice; pass null for the whole project. Shared by the
+ * render, frame-grab, and layout-dump paths (no browser involved).
+ */
+export function resolveProjectMedia(workspace, project, mediaUrlOf, range = null) {
+  const mediaIds = collectMediaIds(project, range)
   const { files, missing } = resolveMediaFiles(workspace, mediaIds)
   const media = [...files.keys()].map((id) => ({
     mediaId: id,
     url: mediaUrlOf(id),
     metadata: readMediaMetadata(workspace, id) ?? undefined,
   }))
+  return { media, missing, mediaResolved: files.size, mediaTotal: mediaIds.length }
+}
+
+/** Load a project from a job's `project` id/path or inline `projectObject`. */
+export function loadJobProject(workspace, jobArgs) {
+  if (!jobArgs.project && !jobArgs.projectObject) throw new Error('Job missing "project"')
+  return jobArgs.projectObject
+    ? { project: jobArgs.projectObject, projectJsonPath: '(inline)' }
+    : loadProject(workspace, jobArgs.project)
+}
+
+/** Resolve everything needed to render one job (no browser involved). */
+export function prepareJob(workspace, jobArgs, mediaUrlOf) {
+  jobArgs = validate(renderRequestSchema, normalizeRenderInput(jobArgs))
+  const { project, projectJsonPath } = loadJobProject(workspace, jobArgs)
+  const settings = buildSettings(project, jobArgs)
+  const { hasRange, inPoint, outPoint } = computeRange(jobArgs, settings.fps)
+
+  const range = hasRange
+    ? { inFrame: inPoint ?? 0, outFrame: outPoint ?? Number.POSITIVE_INFINITY }
+    : null
+  const { media, missing, mediaResolved, mediaTotal } = resolveProjectMedia(
+    workspace,
+    project,
+    mediaUrlOf,
+    range,
+  )
 
   const outName = `${(project.name ?? 'freecut-export').replace(/[^\w.-]+/g, '_')}.${settings.container}`
   const outPath = path.resolve(jobArgs.out ?? path.join('headless', 'output', outName))
@@ -187,9 +209,10 @@ export function prepareJob(workspace, jobArgs, mediaUrlOf) {
     outPoint,
     media,
     missing,
-    mediaResolved: files.size,
-    mediaTotal: mediaIds.length,
+    mediaResolved,
+    mediaTotal,
     outPath,
+    strict: jobArgs.strict === true,
   }
 }
 
@@ -266,7 +289,12 @@ export async function renderJob(
       message: `${job.missing.length} media source(s) not found on disk: ${job.missing.join(', ')}`,
       details: { mediaIds: job.missing },
     })
-  const unsupportedAudio = job.media.filter((m) => m.metadata?.audioCodecSupported === false)
+  // audioCodecSupported=false on media WITHOUT any audio track is a metadata
+  // authoring bug (seen with external registration scripts) — only warn when
+  // there is an actual audio track that can't be decoded.
+  const unsupportedAudio = job.media.filter(
+    (m) => m.metadata?.audioCodecSupported === false && m.metadata?.audioCodec,
+  )
   if (unsupportedAudio.length > 0) {
     const list = unsupportedAudio
       .map((m) => `${m.metadata.fileName ?? m.mediaId} (${m.metadata.audioCodec ?? 'unknown'})`)
@@ -294,6 +322,7 @@ export async function renderJob(
     renderWholeProject: !job.hasRange,
     inPoint: job.inPoint,
     outPoint: job.outPoint,
+    strict: job.strict,
   })
   const download = await downloadPromise
   const effectiveContainer = summary.effectiveSettings?.container

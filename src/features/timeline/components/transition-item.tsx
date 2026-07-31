@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useState, useRef, useEffect } from 'react'
+import { memo, useCallback, useMemo, useState, useRef, useEffect, useLayoutEffect } from 'react'
 import type { Transition } from '@/types/transition'
 import { useShallow } from 'zustand/react/shallow'
 import { perfMarkRender } from '@/shared/logging/perf-marks'
@@ -15,7 +15,8 @@ import {
   useTransitionDragStore,
   type DraggedTransitionDescriptor,
 } from '@/shared/state/transition-drag'
-import { useTimelineZoomContext } from '../contexts/timeline-zoom-context'
+import { useTimelineCommittedZoomContext } from '../contexts/timeline-zoom-context'
+import { useZoomStore } from '../stores/zoom-store'
 import { useTransitionResize } from '../hooks/use-transition-resize'
 import { dragOffsetRef } from '../hooks/use-timeline-drag'
 import type { TimelineState, TimelineActions } from '../types'
@@ -32,6 +33,7 @@ import { Trash2 } from 'lucide-react'
 import {
   applyPreviewGeometryToClip,
   getTransitionBridgeBounds,
+  type PreviewGeometry,
 } from '../utils/transition-preview-geometry'
 import { useLinkedEditPreviewStore } from '../stores/linked-edit-preview-store'
 
@@ -48,6 +50,97 @@ interface TransitionItemProps {
  */
 const BRIDGE_SELECT_SIDE_INSET = 6
 const CUT_PASS_THROUGH_ZONE = 24
+
+interface TransitionPositionInputs {
+  leftClip: PreviewGeometry
+  rightClip: PreviewGeometry
+  previewDuration: number
+  alignment: number | undefined
+  fps: number
+}
+
+interface TransitionPixelPosition {
+  left: number
+  width: number
+  cutOffset: number
+}
+
+function frameToPixelsAtScale(frame: number, fps: number, pixelsPerSecond: number): number {
+  return fps > 0 ? (frame / fps) * pixelsPerSecond : 0
+}
+
+function getTransitionPixelPosition(
+  inputs: TransitionPositionInputs,
+  pixelsPerSecond: number,
+): TransitionPixelPosition {
+  const { leftClip, rightClip, previewDuration, alignment, fps } = inputs
+  const bridge = getTransitionBridgeBounds(
+    leftClip.from,
+    leftClip.durationInFrames,
+    rightClip.from,
+    previewDuration,
+    alignment,
+  )
+  const bridgeRight = frameToPixelsAtScale(bridge.rightFrame, fps, pixelsPerSecond)
+  const bridgeLeft = frameToPixelsAtScale(bridge.leftFrame, fps, pixelsPerSecond)
+  const naturalWidth = bridgeRight - bridgeLeft
+  const leftEnd = leftClip.from + leftClip.durationInFrames
+  const leftClipStart = Math.round(frameToPixelsAtScale(leftClip.from, fps, pixelsPerSecond))
+  const rightClipEnd = Math.round(
+    frameToPixelsAtScale(rightClip.from + rightClip.durationInFrames, fps, pixelsPerSecond),
+  )
+  const cutFrame = Math.abs(leftEnd - rightClip.from) <= 1 ? rightClip.from : leftEnd
+  const cutPx = Math.round(frameToPixelsAtScale(cutFrame, fps, pixelsPerSecond))
+
+  const minWidth = 10
+  const maxVisualWidth = Math.max(naturalWidth, rightClipEnd - leftClipStart)
+  const effectiveWidth = Math.min(Math.max(naturalWidth, minWidth), maxVisualWidth)
+  const centeredLeft =
+    naturalWidth >= effectiveWidth
+      ? bridgeLeft
+      : Math.round((bridgeLeft + bridgeRight) / 2 - effectiveWidth / 2)
+  const left = Math.min(Math.max(centeredLeft, leftClipStart), rightClipEnd - effectiveWidth)
+
+  return {
+    left,
+    width: effectiveWidth,
+    cutOffset: cutPx - left,
+  }
+}
+
+function getTransitionSelectGeometry(position: TransitionPixelPosition) {
+  const leftSelectWidth = Math.max(
+    0,
+    position.cutOffset - CUT_PASS_THROUGH_ZONE / 2 - BRIDGE_SELECT_SIDE_INSET,
+  )
+  const rightSelectLeft = Math.min(
+    position.width - BRIDGE_SELECT_SIDE_INSET,
+    position.cutOffset + CUT_PASS_THROUGH_ZONE / 2,
+  )
+  const rightSelectWidth = Math.max(0, position.width - BRIDGE_SELECT_SIDE_INSET - rightSelectLeft)
+  return { leftSelectWidth, rightSelectLeft, rightSelectWidth }
+}
+
+function applyTransitionPixelPosition(
+  container: HTMLDivElement,
+  position: TransitionPixelPosition,
+) {
+  const selectGeometry = getTransitionSelectGeometry(position)
+  container.style.left = `${position.left}px`
+  container.style.width = `${position.width}px`
+  container.style.setProperty(
+    '--transition-left-select-width',
+    `${selectGeometry.leftSelectWidth}px`,
+  )
+  container.style.setProperty(
+    '--transition-right-select-left',
+    `${selectGeometry.rightSelectLeft}px`,
+  )
+  container.style.setProperty(
+    '--transition-right-select-width',
+    `${selectGeometry.rightSelectWidth}px`,
+  )
+}
 
 function readDraggedTransitionDescriptor(
   event: React.DragEvent,
@@ -75,10 +168,10 @@ export const TransitionItem = memo(function TransitionItem({
   trackHidden = false,
 }: TransitionItemProps) {
   perfMarkRender('TransitionItem')
-  // Transition bridges are lightweight geometry and must stay pinned to the
-  // clip edges during live wheel zoom. Expensive clip media remains on the
-  // settled zoom path; only visible bridges subscribe here.
-  const { frameToPixels } = useTimelineZoomContext()
+  // React keeps transition controls on settled geometry. The bridge shell
+  // samples live zoom imperatively below, so it stays pinned to clip edges
+  // without rerendering the surrounding context-menu tree every wheel frame.
+  const { pixelsPerSecond } = useTimelineCommittedZoomContext()
   const fps = useTimelineStore((s: TimelineState) => s.fps)
   const removeTransition = useTimelineStore((s: TimelineActions) => s.removeTransition)
   const updateTransition = useTimelineStore((s: TimelineActions) => s.updateTransition)
@@ -307,9 +400,9 @@ export const TransitionItem = memo(function TransitionItem({
   const positionShiftXRef = useRef(0)
   positionShiftXRef.current =
     draggedSide === 'left' && leftClip && leftLinkedEditPreview?.from != null
-      ? frameToPixels(leftLinkedEditPreview.from) - frameToPixels(leftClip.from)
+      ? frameToPixelsAtScale(leftLinkedEditPreview.from - leftClip.from, fps, pixelsPerSecond)
       : draggedSide === 'right' && rightClip && rightLinkedEditPreview?.from != null
-        ? frameToPixels(rightLinkedEditPreview.from) - frameToPixels(rightClip.from)
+        ? frameToPixelsAtScale(rightLinkedEditPreview.from - rightClip.from, fps, pixelsPerSecond)
         : 0
 
   /*
@@ -394,48 +487,44 @@ export const TransitionItem = memo(function TransitionItem({
     trackPushRight,
   ])
 
-  const position = useMemo(() => {
+  const positionInputs = useMemo<TransitionPositionInputs | null>(() => {
     if (!effectiveLeftClip || !effectiveRightClip) return null
-
-    const bridge = getTransitionBridgeBounds(
-      effectiveLeftClip.from,
-      effectiveLeftClip.durationInFrames,
-      effectiveRightClip.from,
-      previewDuration,
-      transition.alignment,
-    )
-    // Keep bridge edges fractional so odd-duration transitions can stay
-    // visually centered on the cut instead of biasing to either side.
-    const bridgeRight = frameToPixels(bridge.rightFrame)
-    const bridgeLeft = frameToPixels(bridge.leftFrame)
-    const naturalWidth = bridgeRight - bridgeLeft
-    const leftEnd = effectiveLeftClip.from + effectiveLeftClip.durationInFrames
-    const leftClipStart = Math.round(frameToPixels(effectiveLeftClip.from))
-    const rightClipEnd = Math.round(
-      frameToPixels(effectiveRightClip.from + effectiveRightClip.durationInFrames),
-    )
-    const cutFrame =
-      Math.abs(leftEnd - effectiveRightClip.from) <= 1 ? effectiveRightClip.from : leftEnd
-    const cutPx = Math.round(frameToPixels(cutFrame))
-
-    // Minimum width for visibility
-    const minWidth = 10
-    const maxVisualWidth = Math.max(naturalWidth, rightClipEnd - leftClipStart)
-    const effectiveWidth = Math.min(Math.max(naturalWidth, minWidth), maxVisualWidth)
-    // Center the minimum-width bridge on the overlap midpoint, but keep all
-    // geometry snapped to integer pixels so the center cut line does not jitter.
-    const centeredLeft =
-      naturalWidth >= effectiveWidth
-        ? bridgeLeft
-        : Math.round((bridgeLeft + bridgeRight) / 2 - effectiveWidth / 2)
-    const left = Math.min(Math.max(centeredLeft, leftClipStart), rightClipEnd - effectiveWidth)
-
     return {
-      left,
-      width: effectiveWidth,
-      cutOffset: cutPx - left,
+      leftClip: effectiveLeftClip,
+      rightClip: effectiveRightClip,
+      previewDuration,
+      alignment: transition.alignment,
+      fps,
     }
-  }, [effectiveLeftClip, effectiveRightClip, frameToPixels, previewDuration, transition.alignment])
+  }, [effectiveLeftClip, effectiveRightClip, previewDuration, transition.alignment, fps])
+  const position = useMemo(
+    () => (positionInputs ? getTransitionPixelPosition(positionInputs, pixelsPerSecond) : null),
+    [pixelsPerSecond, positionInputs],
+  )
+  const committedPositionInputsRef = useRef(positionInputs)
+
+  useLayoutEffect(() => {
+    committedPositionInputsRef.current = positionInputs
+    const container = containerRef.current
+    if (!container || !positionInputs) return
+    applyTransitionPixelPosition(
+      container,
+      getTransitionPixelPosition(positionInputs, useZoomStore.getState().pixelsPerSecond),
+    )
+  }, [positionInputs])
+
+  useEffect(() => {
+    return useZoomStore.subscribe((state, previousState) => {
+      if (state.pixelsPerSecond === previousState.pixelsPerSecond) return
+      const container = containerRef.current
+      const inputs = committedPositionInputsRef.current
+      if (!container || !inputs) return
+      applyTransitionPixelPosition(
+        container,
+        getTransitionPixelPosition(inputs, state.pixelsPerSecond),
+      )
+    })
+  }, [])
 
   // Duration in seconds for display (use previewDuration for visual feedback)
   const durationSec = useMemo(() => {
@@ -548,15 +637,8 @@ export const TransitionItem = memo(function TransitionItem({
       : 0.5
   const showLeftResizeHandle = alignment > 0
   const showRightResizeHandle = alignment < 1
-  const leftSelectWidth = Math.max(
-    0,
-    position.cutOffset - CUT_PASS_THROUGH_ZONE / 2 - BRIDGE_SELECT_SIDE_INSET,
-  )
-  const rightSelectLeft = Math.min(
-    position.width - BRIDGE_SELECT_SIDE_INSET,
-    position.cutOffset + CUT_PASS_THROUGH_ZONE / 2,
-  )
-  const rightSelectWidth = Math.max(0, position.width - BRIDGE_SELECT_SIDE_INSET - rightSelectLeft)
+  const { leftSelectWidth, rightSelectLeft, rightSelectWidth } =
+    getTransitionSelectGeometry(position)
 
   return (
     <ContextMenu>
@@ -570,15 +652,20 @@ export const TransitionItem = memo(function TransitionItem({
             dragPreviewMatches && 'ring-2 ring-inset ring-amber-300',
             isResizing && 'ring-2 ring-inset ring-purple-400',
           )}
-          style={{
-            left: `${position.left}px`,
-            width: `${position.width}px`,
-            top: `calc(${EDITOR_LAYOUT_CSS_VALUES.timelineClipLabelRowHeight} + 1px)`,
-            bottom: '1px',
-            zIndex: isResizing ? 50 : 10,
-            opacity: trackHidden ? 0.3 : undefined,
-            cursor: isResizing ? 'ew-resize' : undefined,
-          }}
+          style={
+            {
+              left: `${position.left}px`,
+              width: `${position.width}px`,
+              '--transition-left-select-width': `${leftSelectWidth}px`,
+              '--transition-right-select-left': `${rightSelectLeft}px`,
+              '--transition-right-select-width': `${rightSelectWidth}px`,
+              top: `calc(${EDITOR_LAYOUT_CSS_VALUES.timelineClipLabelRowHeight} + 1px)`,
+              bottom: '1px',
+              zIndex: isResizing ? 50 : 10,
+              opacity: trackHidden ? 0.3 : undefined,
+              cursor: isResizing ? 'ew-resize' : undefined,
+            } as React.CSSProperties
+          }
           title={`${presentationLabel} (${durationSec}s)`}
         >
           <div
@@ -598,7 +685,7 @@ export const TransitionItem = memo(function TransitionItem({
               className="absolute inset-y-0 pointer-events-auto"
               style={{
                 left: `${BRIDGE_SELECT_SIDE_INSET}px`,
-                width: `${leftSelectWidth}px`,
+                width: 'var(--transition-left-select-width)',
                 cursor: isResizing ? 'ew-resize' : cursor,
               }}
               onMouseEnter={() => setIsBridgeHovered(true)}
@@ -615,8 +702,8 @@ export const TransitionItem = memo(function TransitionItem({
             <div
               className="absolute inset-y-0 pointer-events-auto"
               style={{
-                left: `${rightSelectLeft}px`,
-                width: `${rightSelectWidth}px`,
+                left: 'var(--transition-right-select-left)',
+                width: 'var(--transition-right-select-width)',
                 cursor: isResizing ? 'ew-resize' : cursor,
               }}
               onMouseEnter={() => setIsBridgeHovered(true)}

@@ -195,4 +195,41 @@ describe('useAdaptiveWaveformPixelsPerSecond', () => {
     rerender({ pixelsPerSecond: 90 })
     expect(result.current).toBe(90)
   })
+
+  it('stops live commits while hidden and catches up when tracking is re-enabled', async () => {
+    useZoomStore.setState({
+      pixelsPerSecond: 100,
+      isZoomInteracting: true,
+    })
+    const { result, rerender } = renderHook(
+      ({ enabled }) =>
+        useAdaptiveWaveformPixelsPerSecond({
+          pixelsPerSecond: 75,
+          activeTileCount: 2,
+          enabled,
+        }),
+      { initialProps: { enabled: true } },
+    )
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(result.current).toBe(100)
+
+    rerender({ enabled: false })
+    expect(result.current).toBe(75)
+
+    now = 116
+    await act(async () => {
+      useZoomStore.setState({ pixelsPerSecond: 220 })
+      vi.runAllTimers()
+      await Promise.resolve()
+    })
+    expect(result.current).toBe(75)
+
+    rerender({ enabled: true })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(result.current).toBe(220)
+  })
 })

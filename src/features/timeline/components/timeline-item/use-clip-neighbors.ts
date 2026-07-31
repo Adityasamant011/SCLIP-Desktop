@@ -1,6 +1,7 @@
 import { useCallback, useMemo } from 'react'
 import type { TimelineItem as TimelineItemType } from '@/types/timeline'
 import { useItemsStore } from '../../stores/items-store'
+import { getTrackItemRelations } from '../../stores/items-store-indexes'
 import { canJoinItems } from '@/features/timeline/utils/clip-utils'
 
 export interface ClipNeighbors {
@@ -19,40 +20,22 @@ export interface ClipNeighbors {
  * whether each side is join-eligible, and the gap before it.
  *
  * Recomputes when the item's own position changes OR when the adjacent neighbor
- * set changes — detected via `neighborKey`, an O(trackItems) scan of
- * `itemsByTrackId` (covers deletion, cross-track moves, and position shifts).
+ * set changes — detected via `neighborKey` from the cached per-track relation
+ * index (covers deletion, cross-track moves, and position shifts).
  */
 export function useClipNeighbors(item: TimelineItemType): ClipNeighbors {
   const neighborKey = useItemsStore(
     useCallback(
-      (s) => {
-        const trackItems = s.itemsByTrackId[item.trackId]
-        if (!trackItems) return '|'
-        let leftId = ''
-        let rightId = ''
-        for (const other of trackItems) {
-          if (other.id === item.id) continue
-          if (other.from + other.durationInFrames === item.from) leftId = other.id
-          else if (other.from === item.from + item.durationInFrames) rightId = other.id
-        }
-        return leftId + '|' + rightId
-      },
-      [item.id, item.trackId, item.from, item.durationInFrames],
+      (s) => getTrackItemRelations(s.itemsByTrackId[item.trackId], item).neighborKey,
+      [item],
     ),
   )
 
   const getNeighbors = useCallback(() => {
     const trackItems = useItemsStore.getState().itemsByTrackId[item.trackId] ?? []
-
-    const left =
-      trackItems.find(
-        (other) => other.id !== item.id && other.from + other.durationInFrames === item.from,
-      ) ?? null
-
-    const right =
-      trackItems.find(
-        (other) => other.id !== item.id && other.from === item.from + item.durationInFrames,
-      ) ?? null
+    const relations = getTrackItemRelations(trackItems, item)
+    const left = relations.leftNeighbor
+    const right = relations.rightNeighbor
 
     return {
       leftNeighbor: left,
@@ -76,14 +59,8 @@ export function useClipNeighbors(item: TimelineItemType): ClipNeighbors {
   const gapBeforeFrames = useMemo(() => {
     if (!hasGapBefore) return 0
     const trackItems = useItemsStore.getState().itemsByTrackId[item.trackId] ?? []
-    let prevEnd = 0
-    for (const ti of trackItems) {
-      if (ti.id === item.id) continue
-      const end = ti.from + ti.durationInFrames
-      if (end <= item.from && end > prevEnd) prevEnd = end
-    }
-    return Math.max(0, item.from - prevEnd)
-  }, [hasGapBefore, item.trackId, item.id, item.from])
+    return getTrackItemRelations(trackItems, item).gapBeforeFrames
+  }, [hasGapBefore, item])
 
   return {
     leftNeighbor,

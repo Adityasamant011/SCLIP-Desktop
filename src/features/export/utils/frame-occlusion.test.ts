@@ -111,6 +111,22 @@ describe('isItemFullyOccluding', () => {
     expect(isItemFullyOccluding(makeVideoItem(), 0, makeContext())).toBe(false)
   })
 
+  it('returns false for a full-cover video whose source can be transparent', () => {
+    const ctx = makeContext({ hasTransparentVideoSource: () => true })
+    expect(isItemFullyOccluding(makeVideoItem(), 0, ctx)).toBe(false)
+  })
+
+  it('returns true for a full-cover video whose source is opaque', () => {
+    const ctx = makeContext({ hasTransparentVideoSource: () => false })
+    expect(isItemFullyOccluding(makeVideoItem(), 0, ctx)).toBe(true)
+  })
+
+  it('ignores the transparent-source check for images (video-only)', () => {
+    const image = { ...makeVideoItem(), type: 'image' } as unknown as ImageItem
+    const ctx = makeContext({ hasTransparentVideoSource: () => true })
+    expect(isItemFullyOccluding(image, 0, ctx)).toBe(true)
+  })
+
   it('returns true for a 180-degree rotation (still covers)', () => {
     vi.mocked(getAnimatedTransform).mockReturnValue(fullCoverTransform({ rotation: 180 }) as never)
     expect(isItemFullyOccluding(makeVideoItem(), 0, makeContext())).toBe(true)

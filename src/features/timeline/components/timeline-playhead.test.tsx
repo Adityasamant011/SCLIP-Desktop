@@ -1,4 +1,4 @@
-import { createRef } from 'react'
+import { createRef, Profiler } from 'react'
 import { act, fireEvent, render, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it } from 'vite-plus/test'
 
@@ -68,6 +68,54 @@ describe('TimelinePlayhead', () => {
 
     act(() => usePlaybackStore.setState({ currentFrame: 14 }))
     expect(transformAssignments).toEqual(['translate3d(5px, 0, 0)'])
+  })
+
+  it('tracks live zoom imperatively without a React commit', () => {
+    const onRender = vi.fn()
+    const { container } = render(
+      <Profiler id="playhead" onRender={onRender}>
+        <div className="timeline-ruler">
+          <TimelinePlayhead inRuler maxFrame={300} />
+        </div>
+      </Profiler>,
+    )
+    const playhead = container.querySelector<HTMLElement>('[data-timeline-playhead="ruler"]')!
+    const initialCommitCount = onRender.mock.calls.length
+
+    expect(playhead).toHaveStyle({ transform: 'translate3d(40px, 0, 0)' })
+
+    act(() => {
+      useZoomStore.setState({
+        level: 2,
+        pixelsPerSecond: 200,
+        isZoomInteracting: true,
+      })
+    })
+
+    expect(playhead).toHaveStyle({ transform: 'translate3d(80px, 0, 0)' })
+    expect(onRender).toHaveBeenCalledTimes(initialCommitCount)
+  })
+
+  it('tracks FPS changes imperatively without a React commit', () => {
+    const onRender = vi.fn()
+    const { container } = render(
+      <Profiler id="playhead" onRender={onRender}>
+        <div className="timeline-ruler">
+          <TimelinePlayhead inRuler maxFrame={300} />
+        </div>
+      </Profiler>,
+    )
+    const playhead = container.querySelector<HTMLElement>('[data-timeline-playhead="ruler"]')!
+    const initialCommitCount = onRender.mock.calls.length
+
+    expect(playhead).toHaveStyle({ transform: 'translate3d(40px, 0, 0)' })
+
+    act(() => {
+      useTimelineStore.setState({ fps: 60 })
+    })
+
+    expect(playhead).toHaveStyle({ transform: 'translate3d(20px, 0, 0)' })
+    expect(onRender).toHaveBeenCalledTimes(initialCommitCount)
   })
 
   it('uses atomic scrub updates while dragging and clears preview on release', async () => {

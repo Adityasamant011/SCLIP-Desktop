@@ -230,6 +230,11 @@ export function drawContainedMediaSource(
       scratchCtx.clearRect(0, 0, canvas.width, canvas.height)
     }
 
+    // Match the main export context: the source is drawn scaled here, so default
+    // smoothing would soften it before the 1:1 blit back onto the target canvas.
+    scratchCtx.imageSmoothingEnabled = true
+    scratchCtx.imageSmoothingQuality = 'high'
+
     scratchCtx.save()
     clipToViewport(scratchCtx, drawLayout.viewportRect)
     drawSource(scratchCtx)

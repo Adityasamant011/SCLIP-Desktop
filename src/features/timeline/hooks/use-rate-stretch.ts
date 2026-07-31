@@ -276,7 +276,7 @@ export function useRateStretch(
 
   // Use snap calculator - pass item.id to exclude self from magnetic snaps
   // Only use magnetic snap targets (item edges), not grid lines
-  const { magneticSnapTargets, getSnapThresholdFrames, snapEnabled } = useSnapCalculator(
+  const { getMagneticSnapTargets, getSnapThresholdFrames, isSnapEnabled } = useSnapCalculator(
     timelineDuration,
     item.id,
   )
@@ -301,13 +301,15 @@ export function useRateStretch(
 
   // Track previous snap target to avoid unnecessary store updates
   const prevSnapTargetRef = useRef<{ frame: number; type: string } | null>(null)
+  const magneticSnapTargetsRef = useRef<SnapTarget[]>([])
 
   /**
    * Find nearest snap target for a given frame position
    */
   const findSnapForFrame = useCallback(
     (targetFrame: number): { snappedFrame: number; snapTarget: SnapTarget | null } => {
-      if (!snapEnabled || magneticSnapTargets.length === 0) {
+      const magneticSnapTargets = magneticSnapTargetsRef.current
+      if (!isSnapEnabled() || magneticSnapTargets.length === 0) {
         return { snappedFrame: targetFrame, snapTarget: null }
       }
 
@@ -328,7 +330,7 @@ export function useRateStretch(
 
       return { snappedFrame: targetFrame, snapTarget: null }
     },
-    [snapEnabled, magneticSnapTargets, getSnapThresholdFrames],
+    [getSnapThresholdFrames, isSnapEnabled],
   )
 
   // Mouse move handler - only updates local state for visual feedback
@@ -584,6 +586,7 @@ export function useRateStretch(
       setDragState(null)
       useLinkedEditPreviewStore.getState().clear()
       prevSnapTargetRef.current = null
+      magneticSnapTargetsRef.current = []
 
       setStretchState({
         isStretching: false,
@@ -613,6 +616,7 @@ export function useRateStretch(
         window.removeEventListener('mousemove', onMouseMove)
         window.removeEventListener('mouseup', onMouseUp)
         useLinkedEditPreviewStore.getState().clear()
+        magneticSnapTargetsRef.current = []
       }
     }
   }, [stretchState.isStretching])
@@ -643,6 +647,7 @@ export function useRateStretch(
 
       const currentSpeed = currentItem.speed || 1
       const isLoopingMedia = currentItem.type === 'image' // GIFs (images) can loop infinitely
+      magneticSnapTargetsRef.current = isLoopingMedia ? [] : getMagneticSnapTargets()
 
       // Use the actual available source frames for this clip
       // IMPORTANT: For split clips, use sourceEnd - sourceStart to limit rate stretch
@@ -684,7 +689,15 @@ export function useRateStretch(
         constraintLabel: null,
       })
     },
-    [trackLocked, getItemFromStore, item.id, fps, setActiveSnapTarget, setDragState],
+    [
+      trackLocked,
+      getItemFromStore,
+      item.id,
+      fps,
+      setActiveSnapTarget,
+      setDragState,
+      getMagneticSnapTargets,
+    ],
   )
 
   // Calculate visual feedback during stretch

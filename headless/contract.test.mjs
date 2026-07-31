@@ -9,6 +9,8 @@ import {
   capabilities,
   editOpSchema,
   editRequestSchema,
+  frameRequestSchema,
+  layoutRequestSchema,
   normalizeRenderInput,
   renderRequestSchema,
   validate,
@@ -28,7 +30,18 @@ const samples = {
   split: { op: 'split', id: 'i', frame: 1 },
   trimStart: { op: 'trimStart', id: 'i', amount: 1 },
   trimEnd: { op: 'trimEnd', id: 'i', amount: 1 },
-  addTransition: { op: 'addTransition', leftClipId: 'a', rightClipId: 'b', type: 'crossfade' },
+  addTransition: {
+    op: 'addTransition',
+    leftClipId: 'a',
+    rightClipId: 'b',
+    type: 'crossfade',
+    presentation: 'glitch',
+    direction: 'from-left',
+    alignment: 0.4,
+    properties: { intensity: 2 },
+  },
+  updateTransition: { op: 'updateTransition', id: 't', presentation: 'wipe', direction: 'from-top' },
+  removeTransition: { op: 'removeTransition', id: 't' },
   addTrack: { op: 'addTrack', kind: 'audio', order: 2 },
   addClip: { op: 'addClip', mediaId: 'm', from: 0 },
   addKeyframe: {
@@ -40,6 +53,13 @@ const samples = {
     easing: 'linear',
   },
   removeKeyframes: { op: 'removeKeyframes', itemId: 'i', property: 'effect:gpu-blur:e1:radius' },
+  setTransformParent: {
+    op: 'setTransformParent',
+    id: 'arm',
+    parentItemId: 'body',
+    behavior: 'preserve-world',
+    frame: 0,
+  },
   addEffect: {
     op: 'addEffect',
     itemId: 'i',
@@ -110,6 +130,34 @@ test('render request enforces finite bounds, ranges, enums, and canonical HTTP f
   )
 })
 
+test('frame and layout requests reject invalid targets and frame options', () => {
+  assert.deepEqual(
+    frameRequestSchema.parse({ project: 'p', frame: 0, format: 'WEBP', quality: 0 }),
+    { project: 'p', frame: 0, format: 'webp', quality: 0 },
+  )
+  assert.equal(layoutRequestSchema.safeParse({ projectObject: {}, at: 1.5 }).success, true)
+
+  for (const invalid of [
+    { project: 'p', frame: '12' },
+    { project: 'p', frame: Number.NaN },
+    { project: 'p', at: '1.5' },
+    { project: 'p', atSeconds: Number.POSITIVE_INFINITY },
+    { project: 'p', format: 'gif' },
+    { project: 'p', quality: -0.1 },
+    { project: 'p', quality: 1.1 },
+    { project: 'p', width: 0 },
+    { project: 'p', height: 10.5 },
+    { project: 'p', projectObject: {}, frame: 0 },
+    { frame: 0 },
+  ]) assert.equal(frameRequestSchema.safeParse(invalid).success, false, JSON.stringify(invalid))
+
+  for (const invalid of [
+    { project: 'p', frame: '12' },
+    { project: 'p', at: '1.5' },
+    { project: 'p', format: 'png' },
+  ]) assert.equal(layoutRequestSchema.safeParse(invalid).success, false, JSON.stringify(invalid))
+})
+
 test('validation errors and capabilities are machine-readable and bounded', () => {
   assert.throws(
     () => validate(editRequestSchema, { project: 'p', ops: [] }),
@@ -123,6 +171,8 @@ test('validation errors and capabilities are machine-readable and bounded', () =
   assert.equal(result.apiVersion, HEADLESS_API_VERSION)
   assert.deepEqual(result.operations, EDIT_OPERATION_NAMES)
   assert.ok(result.schemas.render)
+  assert.ok(result.schemas.frame)
+  assert.ok(result.schemas.layout)
   assert.ok(JSON.stringify(result).length < 32_000)
 })
 

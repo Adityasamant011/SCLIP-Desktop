@@ -270,7 +270,6 @@
       "noScenesDetected": "Aucun scenes Detected",
       "noScenesWithinBounds": "Aucun scenes dans limites",
       "noValidSplitPoints": "Aucun valide diviser points",
-      "requiresWebGpu": "Requiert Web GPU",
       "splitAtScenes": "diviser At scenes"
     },
     "selectTrackToRemove": "Selectionner Piste a Supprimer",

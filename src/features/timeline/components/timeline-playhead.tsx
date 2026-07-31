@@ -1,14 +1,20 @@
 // React and external libraries
-import { useState, useCallback, useEffect, useRef, useLayoutEffect, type RefObject } from 'react'
+import { useState, useCallback, useEffect, useLayoutEffect, useRef, type RefObject } from 'react'
 
 // Stores and selectors
 import { usePlaybackStore } from '@/shared/state/playback'
 import { useMicRecordingStore, isMicRecordingActive } from '@/shared/state/mic-recording-store'
 import { useSelectionStore } from '@/shared/state/selection'
+import { useZoomStore } from '../stores/zoom-store'
+import { useTimelineSettingsStore } from '../stores/timeline-settings-store'
 
 // Utilities and hooks
-import { useTimelineZoomContext } from '../contexts/timeline-zoom-context'
 import { createScrubThrottleState, shouldCommitScrubFrame } from '../utils/scrub-throttle'
+import {
+  frameToPixelsNow,
+  getPixelsPerSecondNow,
+  pixelsToFrameNow,
+} from '../utils/zoom-conversions'
 import { withPerfMeasure, perfMarkRender } from '@/shared/logging/perf-marks'
 import { PlayheadMarks } from '@/shared/ui/playhead-marks'
 import {
@@ -23,10 +29,7 @@ import {
   notifyTimelineScrubVisualFrame,
   type TimelineScrubVisualFrameDetail,
 } from '@/shared/timeline/live-scroll-sync'
-import {
-  getEdgeScrollDelta,
-  getPlayheadEdgeScrollVelocity,
-} from '../utils/playhead-edge-scroll'
+import { getEdgeScrollDelta, getPlayheadEdgeScrollVelocity } from '../utils/playhead-edge-scroll'
 
 interface TimelinePlayheadProps {
   inRuler?: boolean // If true, shows diamond indicator for ruler
@@ -39,6 +42,11 @@ interface TimelinePlayheadProps {
 function setTranslateXIfChanged(element: HTMLElement, left: number): void {
   const transform = `translate3d(${left}px, 0, 0)`
   if (element.style.transform !== transform) element.style.transform = transform
+}
+
+function updatePlayheadPosition(element: HTMLElement | null, frame: number): void {
+  if (!element) return
+  setTranslateXIfChanged(element, Math.round(frameToPixelsNow(frame)))
 }
 
 function getPlayheadDragSurfaces({
@@ -103,7 +111,6 @@ export function TimelinePlayhead({
   perfMarkRender('TimelinePlayhead')
   // Don't subscribe to currentFrame - use ref + manual subscription instead
   const setScrubFrame = usePlaybackStore((s) => s.setScrubFrame)
-  const { frameToPixels, pixelsToFrame, pixelsPerSecond } = useTimelineZoomContext()
 
   const [isDragging, setIsDragging] = useState(false)
   const [isExternalDrag, setIsExternalDrag] = useState(false)
@@ -120,11 +127,11 @@ export function TimelinePlayhead({
   }, [])
 
   // Use refs to avoid stale closures
-  const pixelsToFrameRef = useRef(pixelsToFrame)
+  const pixelsToFrameRef = useRef(pixelsToFrameNow)
   const setScrubFrameRef = useRef(setScrubFrame)
   const maxFrameRef = useRef(maxFrame)
-  const frameToPixelsRef = useRef(frameToPixels)
-  const pixelsPerSecondRef = useRef(pixelsPerSecond)
+  const frameToPixelsRef = useRef(frameToPixelsNow)
+  const pixelsPerSecondRef = useRef(getPixelsPerSecondNow())
 
   // RAF throttling refs for smooth scrubbing without excessive state updates
   const rafIdRef = useRef<number | null>(null)
@@ -148,17 +155,21 @@ export function TimelinePlayhead({
     })
   }, [])
 
-  // Update refs when functions change
+  // Update prop/action refs without subscribing the component to live zoom.
   useEffect(() => {
-    pixelsToFrameRef.current = pixelsToFrame
     setScrubFrameRef.current = setScrubFrame
     maxFrameRef.current = maxFrame
-    frameToPixelsRef.current = frameToPixels
-    pixelsPerSecondRef.current = pixelsPerSecond
-  }, [pixelsToFrame, setScrubFrame, maxFrame, frameToPixels, pixelsPerSecond])
+  }, [setScrubFrame, maxFrame])
 
   useEffect(() => {
     isDraggingRef.current = isDragging
+    const playbackState = usePlaybackStore.getState()
+    updatePlayheadPosition(
+      playheadRef.current,
+      isDragging && playbackState.previewFrame !== null
+        ? playbackState.previewFrame
+        : playbackState.currentFrame,
+    )
   }, [isDragging])
 
   useEffect(() => {
@@ -173,38 +184,48 @@ export function TimelinePlayhead({
   // Subscribe to playback frame changes and update position directly.
   // During playhead drags, use the same atomic scrub state as the main ruler
   // so the fast-scrub overlay hands back to the player consistently.
-  useEffect(() => {
-    const updatePosition = (frame: number) => {
-      if (!playheadRef.current) return
-      const leftPosition = Math.round(frameToPixelsRef.current(frame))
-      // Use transform (compositor-only) instead of style.left (triggers layout).
-      setTranslateXIfChanged(playheadRef.current, leftPosition)
+  useLayoutEffect(() => {
+    const updateCurrentPosition = () => {
+      const playbackState = usePlaybackStore.getState()
+      updatePlayheadPosition(
+        playheadRef.current,
+        isDraggingRef.current && playbackState.previewFrame !== null
+          ? playbackState.previewFrame
+          : playbackState.currentFrame,
+      )
     }
 
     // Initial update
-    updatePosition(usePlaybackStore.getState().currentFrame)
+    updateCurrentPosition()
 
-    // Subscribe to store changes
-    return usePlaybackStore.subscribe((state) => {
-      updatePosition(
+    const unsubscribePlayback = usePlaybackStore.subscribe((state) => {
+      updatePlayheadPosition(
+        playheadRef.current,
         isDraggingRef.current && state.previewFrame !== null
           ? state.previewFrame
           : state.currentFrame,
       )
     })
-  }, [])
+    const unsubscribeZoom = useZoomStore.subscribe((state, previousState) => {
+      pixelsPerSecondRef.current = state.pixelsPerSecond
+      if (state.pixelsPerSecond !== previousState.pixelsPerSecond) {
+        updateCurrentPosition()
+      }
+    })
+    const unsubscribeTimelineSettings = useTimelineSettingsStore.subscribe(
+      (state, previousState) => {
+        if (state.fps !== previousState.fps) {
+          updateCurrentPosition()
+        }
+      },
+    )
 
-  // Also update position when frameToPixels changes (zoom changes)
-  useLayoutEffect(() => {
-    if (!playheadRef.current) return
-    const playbackState = usePlaybackStore.getState()
-    const frame =
-      isDraggingRef.current && playbackState.previewFrame !== null
-        ? playbackState.previewFrame
-        : playbackState.currentFrame
-    const leftPosition = Math.round(frameToPixels(frame))
-    setTranslateXIfChanged(playheadRef.current, leftPosition)
-  }, [frameToPixels, isDragging])
+    return () => {
+      unsubscribePlayback()
+      unsubscribeZoom()
+      unsubscribeTimelineSettings()
+    }
+  }, [])
 
   useEffect(() => {
     const scrollContainer = playheadRef.current?.closest<HTMLDivElement>('.timeline-container')

@@ -10,8 +10,6 @@ interface RateStretchVisualFeedback {
   speed: number
 }
 
-const COMPACT_CLIP_MAX_WIDTH_PX = 36
-
 interface UseTimelineItemBoundsParams {
   previewBaseItem: TimelineItemType
   fps: number
@@ -52,7 +50,6 @@ export interface TimelineItemBounds {
   visualWidthFrames: number
   visualLeft: number
   visualWidth: number
-  isCompactWidth: boolean
   slideFromOffset: number
   slideDurationOffset: number
   contentPreviewItem: TimelineItemType
@@ -300,8 +297,6 @@ export function useTimelineItemBounds({
 
   const visualLeft = Math.round(frameToPixelsNow(visualLeftFrame))
   const visualWidth = Math.round(frameToPixelsNow(visualWidthFrames))
-  const isCompactWidth = visualWidth > 0 && visualWidth <= COMPACT_CLIP_MAX_WIDTH_PX
-
   return {
     leftFrame,
     rightFrame,
@@ -312,7 +307,6 @@ export function useTimelineItemBounds({
     visualWidthFrames,
     visualLeft,
     visualWidth,
-    isCompactWidth,
     slideFromOffset,
     slideDurationOffset,
     contentPreviewItem,

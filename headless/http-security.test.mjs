@@ -16,7 +16,11 @@ import {
 import { loadProjectById, loadProjectFile, resolveMediaFile } from './lib/workspace.mjs'
 
 function fixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'freecut-http-security-'))
+  // realpath: resolveContained returns canonical paths, and macOS tmpdir lives
+  // behind the /var -> /private/var symlink — expectations must be canonical too.
+  const root = fs.realpathSync.native(
+    fs.mkdtempSync(path.join(os.tmpdir(), 'freecut-http-security-')),
+  )
   const dist = path.join(root, 'dist')
   const workspace = path.join(root, 'workspace')
   fs.mkdirSync(path.join(dist, 'assets'), { recursive: true })

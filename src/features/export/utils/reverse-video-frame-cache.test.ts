@@ -39,6 +39,9 @@ function makeExtractor(): VideoFrameSource & {
     getDuration() {
       return 10
     },
+    getCanBeTransparent() {
+      return false
+    },
     async prewarmBatch() {
       return -1
     },

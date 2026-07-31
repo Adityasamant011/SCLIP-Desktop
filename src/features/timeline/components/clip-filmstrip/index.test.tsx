@@ -1,7 +1,13 @@
-import { render, waitFor } from '@testing-library/react'
+import { Profiler } from 'react'
+import { act, render, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import { ClipFilmstrip } from './index'
-import { resetDecodedFilmstripImagesForTest } from './filmstrip-image-cache'
+import {
+  resetDecodedFilmstripImagesForTest,
+  subscribeFilmstripImage,
+} from './filmstrip-image-cache'
+import { useTimelineViewportStore } from '../../stores/timeline-viewport-store'
+import { _resetZoomStoreForTest, useZoomStore } from '../../stores/zoom-store'
 
 type FilmstripResult = {
   frames: Array<{ index: number; timestamp: number; url: string }> | null
@@ -126,6 +132,13 @@ describe('ClipFilmstrip', () => {
     )
     vi.stubGlobal('Image', TestImage)
     resetDecodedFilmstripImagesForTest()
+    _resetZoomStoreForTest()
+    useTimelineViewportStore.setState({
+      scrollLeft: 0,
+      scrollTop: 0,
+      viewportWidth: 0,
+      viewportHeight: 0,
+    })
     vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(60)
     ;(
       vi.spyOn(HTMLCanvasElement.prototype, 'getContext') as unknown as {
@@ -182,6 +195,23 @@ describe('ClipFilmstrip', () => {
         enabled: true,
       }),
     )
+  })
+
+  it('notifies a late subscriber when a shared image is already decoded', () => {
+    const firstOnChange = vi.fn()
+    const unsubscribeFirst = subscribeFilmstripImage('blob:shared-frame', firstOnChange, vi.fn())
+    const image = TestImage.instances.at(-1)
+    expect(image).toBeDefined()
+
+    image?.onload?.()
+    expect(firstOnChange).toHaveBeenCalledTimes(1)
+    unsubscribeFirst()
+
+    const lateOnChange = vi.fn()
+    const unsubscribeLate = subscribeFilmstripImage('blob:shared-frame', lateOnChange, vi.fn())
+
+    expect(lateOnChange).toHaveBeenCalledTimes(1)
+    unsubscribeLate()
   })
 
   it('uses the refreshed proxy URL when blob URLs are invalidated', () => {
@@ -291,6 +321,9 @@ describe('ClipFilmstrip', () => {
   })
 
   it('keeps tile media full width while the canvas clips a short segment', async () => {
+    const onRender = vi.fn()
+    const widthSetter = vi.spyOn(HTMLCanvasElement.prototype, 'width', 'set')
+    const heightSetter = vi.spyOn(HTMLCanvasElement.prototype, 'height', 'set')
     useFilmstripMock.mockReturnValue({
       frames: [{ index: 0, timestamp: 0, url: 'blob:frame-0' }],
       isLoading: false,
@@ -300,17 +333,19 @@ describe('ClipFilmstrip', () => {
     })
 
     const { container } = render(
-      <ClipFilmstrip
-        mediaId="media-1"
-        clipWidth={40}
-        sourceStart={0}
-        sourceDuration={10}
-        trimStart={0}
-        speed={1}
-        fps={31}
-        isVisible
-        pixelsPerSecond={120}
-      />,
+      <Profiler id="filmstrip" onRender={onRender}>
+        <ClipFilmstrip
+          mediaId="media-1"
+          clipWidth={40}
+          sourceStart={0}
+          sourceDuration={10}
+          trimStart={0}
+          speed={1}
+          fps={31}
+          isVisible
+          pixelsPerSecond={120}
+        />
+      </Profiler>,
     )
 
     const canvas = container.querySelector('[data-filmstrip-canvas]') as HTMLCanvasElement | null
@@ -325,6 +360,9 @@ describe('ClipFilmstrip', () => {
 
     const source = TestImage.instances.find((image) => image.src === 'blob:frame-0')
     expect(source).toBeDefined()
+    const commitCountBeforeDecode = onRender.mock.calls.length
+    const widthAssignmentCountBeforeDecode = widthSetter.mock.calls.length
+    const heightAssignmentCountBeforeDecode = heightSetter.mock.calls.length
     source!.onload?.()
 
     await waitFor(() => {
@@ -335,6 +373,96 @@ describe('ClipFilmstrip', () => {
       expect(drawCall?.[3]).toBe(107)
       expect(drawCall?.[4]).toBeGreaterThanOrEqual(60)
     })
+    expect(onRender).toHaveBeenCalledTimes(commitCountBeforeDecode)
+    expect(widthSetter).toHaveBeenCalledTimes(widthAssignmentCountBeforeDecode)
+    expect(heightSetter).toHaveBeenCalledTimes(heightAssignmentCountBeforeDecode)
+  })
+
+  it('paints live zoom from timeline coordinates without layout reads or a React commit', async () => {
+    const frames = Array.from({ length: 10 }, (_, index) => ({
+      index,
+      timestamp: index,
+      url: `blob:live-frame-${index}`,
+    }))
+    useFilmstripMock.mockReturnValue({
+      frames,
+      isLoading: false,
+      isComplete: true,
+      progress: 100,
+      error: null,
+    })
+    useZoomStore.setState({
+      level: 1,
+      pixelsPerSecond: 100,
+      contentLevel: 1,
+      contentPixelsPerSecond: 100,
+      isZoomInteracting: false,
+    })
+    useTimelineViewportStore.setState({
+      scrollLeft: 0,
+      viewportWidth: 400,
+      viewportHeight: 120,
+    })
+
+    const getBoundingClientRect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+
+    const onRender = vi.fn()
+    const renderTree = (clipWidth: number, pixelsPerSecond: number) => (
+      <div data-timeline-scroll-container>
+        <div
+          data-timeline-item
+          data-timeline-start-frame="0"
+          data-timeline-duration-frames="96"
+          data-timeline-fps="30"
+          data-timeline-content-inset-start-px="1"
+          data-timeline-content-inset-end-px="1"
+        >
+          <Profiler id="live-filmstrip" onRender={onRender}>
+            <ClipFilmstrip
+              mediaId="media-live"
+              clipWidth={clipWidth}
+              sourceStart={0}
+              sourceDuration={10}
+              trimStart={0}
+              speed={1}
+              fps={30}
+              isVisible
+              pixelsPerSecond={pixelsPerSecond}
+            />
+          </Profiler>
+        </div>
+      </div>
+    )
+    const widthSetter = vi.spyOn(HTMLCanvasElement.prototype, 'width', 'set')
+    const { container, rerender } = render(renderTree(320, 100))
+    const canvas = container.querySelector('[data-filmstrip-canvas]') as HTMLCanvasElement
+    const initialCanvas = canvas
+    const commitCountBeforeZoom = onRender.mock.calls.length
+    const initialSources = new Set(TestImage.instances.map((image) => image.src))
+    const clearCountBeforeZoom = canvasContextMocks.clearRect.mock.calls.length
+
+    await act(async () => {
+      useZoomStore.setState({
+        level: 2,
+        pixelsPerSecond: 200,
+        isZoomInteracting: true,
+      })
+      await Promise.resolve()
+    })
+
+    expect(onRender).toHaveBeenCalledTimes(commitCountBeforeZoom)
+    expect(canvas.style.width).toBe('638px')
+    expect(canvasContextMocks.clearRect).toHaveBeenCalledTimes(clearCountBeforeZoom + 1)
+    expect(TestImage.instances.some((image) => !initialSources.has(image.src))).toBe(true)
+    expect(getBoundingClientRect).not.toHaveBeenCalled()
+
+    const clearCountBeforeSettle = canvasContextMocks.clearRect.mock.calls.length
+    const backingWritesBeforeSettle = widthSetter.mock.calls.length
+    rerender(renderTree(640, 200))
+
+    expect(container.querySelector('[data-filmstrip-canvas]')).toBe(initialCanvas)
+    expect(canvasContextMocks.clearRect).toHaveBeenCalledTimes(clearCountBeforeSettle)
+    expect(widthSetter).toHaveBeenCalledTimes(backingWritesBeforeSettle)
   })
 
   it('refreshes a stale frame URL when a tile source errors', async () => {
@@ -400,9 +528,7 @@ describe('ClipFilmstrip', () => {
     canvasContextMocks.drawImage.mockClear()
     render(<ClipFilmstrip {...props} />)
 
-    expect(
-      TestImage.instances.filter((image) => image.src === 'blob:shared-cover'),
-    ).toHaveLength(1)
+    expect(TestImage.instances.filter((image) => image.src === 'blob:shared-cover')).toHaveLength(1)
     await waitFor(() => expect(canvasContextMocks.drawImage).toHaveBeenCalled())
   })
 

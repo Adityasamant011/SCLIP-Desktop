@@ -10,7 +10,9 @@ import type { TimelineTrack, VideoItem } from '@/types/timeline'
 
 import { _resetViewportThrottle, useTimelineViewportStore } from '../stores/timeline-viewport-store'
 import { useTimelineStore } from '../stores/timeline-store'
+import { useItemsStore } from '../stores/items-store'
 import { _resetZoomStoreForTest, useZoomStore } from '../stores/zoom-store'
+import { ZOOM_MAX, ZOOM_MIN } from '../constants'
 import { TimelineContent } from './timeline-content'
 import { TIMELINE_LIVE_SCROLL_EVENT } from '@/shared/timeline/live-scroll-sync'
 
@@ -62,11 +64,22 @@ vi.mock('./timeline-preview-scrubber', () => ({
   TimelinePreviewScrubber: () => <div data-testid="unified-timeline-preview-scrubber" />,
 }))
 
-vi.mock('./timeline-track', () => ({
-  TimelineTrack: ({ track }: { track: { id: string; height: number } }) => (
-    <div data-track-id={track.id} style={{ height: `${track.height}px` }} />
-  ),
-}))
+vi.mock('./timeline-track', async () => {
+  const { useState } = await import('react')
+  const { createTimelineTrackContentLayerRef } = await import('../utils/timeline-live-geometry')
+
+  return {
+    TimelineTrack: ({ track }: { track: { id: string; height: number } }) => {
+      const [contentLayerRef] = useState(createTimelineTrackContentLayerRef)
+
+      return (
+        <div data-track-id={track.id} style={{ height: `${track.height}px` }}>
+          <div ref={contentLayerRef} data-timeline-track-content-layer />
+        </div>
+      )
+    },
+  }
+})
 
 vi.mock('./timeline-guidelines', () => ({
   TimelineGuidelines: () => null,
@@ -243,17 +256,13 @@ describe('TimelineContent playback selection behavior', () => {
       usePlaybackStore.getState().setCurrentFrame(151)
     })
 
-    expect(scrollContainer.scrollLeft).toBeCloseTo(151 / 30 * 100 - 400 * 0.2)
+    expect(scrollContainer.scrollLeft).toBeCloseTo((151 / 30) * 100 - 400 * 0.2)
     expect(useTimelineViewportStore.getState().scrollLeft).toBeCloseTo(scrollContainer.scrollLeft)
     expect(liveScroll).toHaveBeenCalledOnce()
   })
 
-  it('does not re-render the full timeline tree for live gesture zoom', () => {
-    const onMetricsChange = vi.fn()
-    render(
-      <TimelineContent duration={10} tracks={[VIDEO_TRACK]} onMetricsChange={onMetricsChange} />,
-    )
-    const initialTimelineWidth = onMetricsChange.mock.lastCall?.[0].timelineWidth ?? 0
+  it('does not re-render the full timeline tree for live or settled gesture zoom', () => {
+    render(<TimelineContent duration={10} tracks={[VIDEO_TRACK]} />)
     perfMarkMocks.mark.mockClear()
 
     act(() => {
@@ -271,7 +280,94 @@ describe('TimelineContent playback selection behavior', () => {
     })
 
     expect(perfMarkMocks.mark).not.toHaveBeenCalledWith('TimelineContent')
-    expect(onMetricsChange.mock.lastCall?.[0].timelineWidth).toBeGreaterThan(initialTimelineWidth)
+  })
+
+  it('steps zoom buttons multiplicatively while preserving the playhead anchor', () => {
+    let zoomHandlers:
+      | {
+          handleZoomIn: () => void
+          handleZoomOut: () => void
+        }
+      | undefined
+
+    useZoomStore.getState().setZoomLevelSynchronized(ZOOM_MIN)
+    usePlaybackStore.getState().setCurrentFrame(150)
+
+    const { container } = render(
+      <TimelineContent
+        duration={10}
+        tracks={[VIDEO_TRACK]}
+        onZoomHandlersReady={(handlers) => {
+          zoomHandlers = handlers
+        }}
+      />,
+    )
+    const scrollContainer = container.querySelector('[data-timeline-scroll-container]')
+    if (!(scrollContainer instanceof HTMLDivElement) || !zoomHandlers) {
+      throw new Error('Expected timeline scroll container and zoom handlers')
+    }
+    scrollContainer.scrollLeft = 2
+
+    const frameCallbacks: FrameRequestCallback[] = []
+    const animationFrameSpy = vi
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((callback) => {
+        frameCallbacks.push(callback)
+        return frameCallbacks.length
+      })
+
+    act(() => zoomHandlers?.handleZoomIn())
+    expect(frameCallbacks).toHaveLength(1)
+    act(() => frameCallbacks.shift()?.(performance.now()))
+
+    expect(useZoomStore.getState().level).toBeCloseTo(0.011)
+    expect(useZoomStore.getState().level).not.toBeCloseTo(0.11)
+    expect(scrollContainer.scrollLeft).toBeCloseTo(2.5)
+
+    act(() => zoomHandlers?.handleZoomOut())
+    expect(frameCallbacks).toHaveLength(1)
+    act(() => frameCallbacks.shift()?.(performance.now()))
+
+    expect(useZoomStore.getState().level).toBeCloseTo(ZOOM_MIN)
+    expect(scrollContainer.scrollLeft).toBeCloseTo(2)
+
+    animationFrameSpy.mockRestore()
+  })
+
+  it('keeps zoom buttons within the production zoom limits', () => {
+    let zoomHandlers:
+      | {
+          handleZoomIn: () => void
+          handleZoomOut: () => void
+        }
+      | undefined
+
+    render(
+      <TimelineContent
+        duration={10}
+        tracks={[VIDEO_TRACK]}
+        onZoomHandlersReady={(handlers) => {
+          zoomHandlers = handlers
+        }}
+      />,
+    )
+    if (!zoomHandlers) {
+      throw new Error('Expected zoom handlers')
+    }
+
+    const animationFrameSpy = vi.spyOn(window, 'requestAnimationFrame')
+
+    act(() => useZoomStore.getState().setZoomLevelSynchronized(ZOOM_MIN))
+    act(() => zoomHandlers?.handleZoomOut())
+    expect(useZoomStore.getState().level).toBe(ZOOM_MIN)
+    expect(animationFrameSpy).not.toHaveBeenCalled()
+
+    act(() => useZoomStore.getState().setZoomLevelSynchronized(ZOOM_MAX))
+    act(() => zoomHandlers?.handleZoomIn())
+    expect(useZoomStore.getState().level).toBe(ZOOM_MAX)
+    expect(animationFrameSpy).not.toHaveBeenCalled()
+
+    animationFrameSpy.mockRestore()
   })
 
   it('applies live zoom and its cursor-anchor scroll in the same animation frame', () => {
@@ -283,6 +379,9 @@ describe('TimelineContent playback selection behavior', () => {
     }
     const committedSurface = container.querySelector(
       '[data-timeline-committed-surface="tracks"]',
+    ) as HTMLDivElement
+    const contentLayer = committedSurface.querySelector(
+      '[data-timeline-track-content-layer]',
     ) as HTMLDivElement
     const trackNode = container.querySelector(`[data-track-id="${VIDEO_TRACK.id}"]`)
     const liveScroll = vi.fn()
@@ -338,9 +437,11 @@ describe('TimelineContent playback selection behavior', () => {
     )
     expect(container.querySelector(`[data-track-id="${VIDEO_TRACK.id}"]`)).toBe(trackNode)
     expect(committedSurface.style.transform).toBe('none')
+    expect(contentLayer.style.width).toBe('1150px')
     expect(
-      Number.parseFloat(committedSurface.style.getPropertyValue('--timeline-px-per-frame')),
-    ).toBeCloseTo(115 / 30)
+      Number.parseFloat(committedSurface.style.getPropertyValue('--timeline-percent-per-frame')),
+    ).toBeCloseTo(100 / (10 * 30))
+    expect(committedSurface.style.getPropertyValue('--timeline-px-per-frame')).toBe('')
 
     unmount()
     animationFrameSpy.mockRestore()
@@ -478,6 +579,158 @@ describe('TimelineContent playback selection behavior', () => {
     fireEvent.mouseMove(scrollContainer, { clientX: 180, clientY: 48 })
 
     expect(usePlaybackStore.getState().previewFrame).toBeNull()
+  })
+
+  it('cancels a queued hover preview when cursor-anchored zoom starts', () => {
+    let nextFrameId = 1
+    const scheduledFrames = new Map<number, FrameRequestCallback>()
+    const animationFrameSpy = vi
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((callback) => {
+        const id = nextFrameId++
+        scheduledFrames.set(id, callback)
+        return id
+      })
+    const cancelAnimationFrameSpy = vi
+      .spyOn(window, 'cancelAnimationFrame')
+      .mockImplementation((id) => {
+        scheduledFrames.delete(id)
+      })
+
+    const { container, unmount } = render(<TimelineContent duration={10} tracks={[VIDEO_TRACK]} />)
+    const scrollContainer = container.querySelector('[data-timeline-scroll-container]')
+    if (!(scrollContainer instanceof HTMLDivElement)) {
+      throw new Error('Expected timeline scroll container')
+    }
+
+    Object.defineProperty(scrollContainer, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({
+        left: 0,
+        top: 0,
+        right: 400,
+        bottom: 200,
+        width: 400,
+        height: 200,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }),
+    })
+    scheduledFrames.clear()
+
+    fireEvent.mouseMove(scrollContainer, { clientX: 180, clientY: 48 })
+    const previewFrameId = [...scheduledFrames.keys()].at(-1)
+    expect(previewFrameId).toBeDefined()
+
+    fireEvent.wheel(scrollContainer, {
+      clientX: 180,
+      clientY: 48,
+      ctrlKey: true,
+      deltaY: -120,
+    })
+
+    expect(cancelAnimationFrameSpy).toHaveBeenCalledWith(previewFrameId)
+    act(() => {
+      for (const [id, callback] of [...scheduledFrames]) {
+        scheduledFrames.delete(id)
+        callback(performance.now())
+      }
+    })
+    expect(usePlaybackStore.getState().previewFrame).toBeNull()
+    expect(useZoomStore.getState().level).toBeGreaterThan(1)
+
+    unmount()
+    animationFrameSpy.mockRestore()
+    cancelAnimationFrameSpy.mockRestore()
+  })
+
+  it('gives dense timelines a short window to cancel hover preview before zoom', () => {
+    vi.useFakeTimers()
+    const denseItems = Array.from({ length: 80 }, (_, index) => ({
+      ...VIDEO_ITEM,
+      id: `clip-video-${index}`,
+      from: index * VIDEO_ITEM.durationInFrames,
+    }))
+    act(() => {
+      useItemsStore.getState().setItems(denseItems)
+    })
+
+    let nextFrameId = 1
+    const scheduledFrames = new Map<number, FrameRequestCallback>()
+    const animationFrameSpy = vi
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((callback) => {
+        const id = nextFrameId++
+        scheduledFrames.set(id, callback)
+        return id
+      })
+    const cancelAnimationFrameSpy = vi
+      .spyOn(window, 'cancelAnimationFrame')
+      .mockImplementation((id) => {
+        scheduledFrames.delete(id)
+      })
+
+    const { container, unmount } = render(<TimelineContent duration={10} tracks={[VIDEO_TRACK]} />)
+    const scrollContainer = container.querySelector('[data-timeline-scroll-container]')
+    if (!(scrollContainer instanceof HTMLDivElement)) {
+      throw new Error('Expected timeline scroll container')
+    }
+    const zoomInteractionShield = container.querySelector<HTMLElement>(
+      '[data-timeline-zoom-interaction-shield]',
+    )
+    expect(zoomInteractionShield).not.toBeNull()
+    Object.defineProperty(scrollContainer, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({
+        left: 0,
+        top: 0,
+        right: 400,
+        bottom: 200,
+        width: 400,
+        height: 200,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }),
+    })
+    scheduledFrames.clear()
+
+    fireEvent.mouseMove(scrollContainer, { clientX: 180, clientY: 48 })
+    expect(scheduledFrames.size).toBe(0)
+
+    fireEvent.wheel(scrollContainer, {
+      clientX: 180,
+      clientY: 48,
+      ctrlKey: true,
+      deltaY: -120,
+    })
+    expect(zoomInteractionShield!.style.display).toBe('block')
+    const zoomFrameCount = scheduledFrames.size
+    act(() => {
+      vi.advanceTimersByTime(150)
+    })
+    expect(scheduledFrames.size).toBe(zoomFrameCount)
+
+    act(() => {
+      for (const [id, callback] of [...scheduledFrames]) {
+        scheduledFrames.delete(id)
+        callback(performance.now())
+      }
+    })
+    expect(usePlaybackStore.getState().previewFrame).toBeNull()
+    expect(useZoomStore.getState().level).toBeGreaterThan(1)
+    expect(zoomInteractionShield!.style.display).toBe('block')
+
+    act(() => {
+      useZoomStore.setState({ isZoomInteracting: false })
+    })
+    expect(zoomInteractionShield!.style.display).toBe('none')
+
+    unmount()
+    animationFrameSpy.mockRestore()
+    cancelAnimationFrameSpy.mockRestore()
+    vi.useRealTimers()
   })
 
   it('reveals the active track when selection moves to an offscreen lane', async () => {

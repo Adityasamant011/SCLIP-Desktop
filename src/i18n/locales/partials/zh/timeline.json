@@ -270,7 +270,6 @@
       "noScenesDetected": "未检测到场景",
       "noScenesWithinBounds": "范围内没有场景",
       "noValidSplitPoints": "没有有效分割点",
-      "requiresWebGpu": "需要 WebGPU",
       "splitAtScenes": "按场景分割"
     },
     "selectTrackToRemove": "选择要移除的轨道",

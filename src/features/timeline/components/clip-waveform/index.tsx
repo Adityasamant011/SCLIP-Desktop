@@ -14,10 +14,6 @@ import { WAVEFORM_FILL_COLOR, WAVEFORM_STROKE_COLOR } from '../../constants'
 import { createLogger } from '@/shared/logging/logger'
 import { computeWaveformRenderWindow } from './render-window'
 import { computeWaveformAmplitude } from './amplitude'
-import {
-  getWaveformActiveTileCount,
-  useAdaptiveWaveformPixelsPerSecond,
-} from './adaptive-render-version'
 import { observeParentElementHeight } from '../measure-parent-height'
 import { useTimelineViewportStore } from '../../stores/timeline-viewport-store'
 import { useZoomStore } from '../../stores/zoom-store'
@@ -86,7 +82,6 @@ export const ClipWaveform = memo(function ClipWaveform({
   void fps
   const containerRef = useRef<HTMLDivElement>(null)
   const pixelsPerSecondRef = useRef(pixelsPerSecond)
-  const clipTimelineDurationRef = useRef(clipWidth / Math.max(1, pixelsPerSecond))
   const amplitudesBufferRef = useRef<Float32Array>(new Float32Array(0))
   const [height, setHeight] = useState(0)
   const viewportWidth = useTimelineViewportStore((state) => state.viewportWidth)
@@ -124,23 +119,12 @@ export const ClipWaveform = memo(function ClipWaveform({
       visibleStartRatio,
     ],
   )
-  const settledActiveTileCount = useMemo(
-    () =>
-      getWaveformActiveTileCount({
-        renderWidth: settledRenderClipWidth,
-        visibleStartPx: settledRenderWindow.visibleStartPx,
-        visibleEndPx: settledRenderWindow.visibleEndPx,
-      }),
-    [settledRenderClipWidth, settledRenderWindow],
-  )
-  const renderPixelsPerSecond = useAdaptiveWaveformPixelsPerSecond({
-    pixelsPerSecond,
-    activeTileCount: settledActiveTileCount,
-    phaseKey: mediaId,
-    enabled: liveTimelineZoom,
-  })
+  // The bounded canvas owns live timeline zoom imperatively. Keep React on the
+  // settled scale so a wheel burst cannot enqueue one component update per
+  // visible waveform and repeatedly restart the content-zoom transition.
+  const renderPixelsPerSecond = pixelsPerSecond
   pixelsPerSecondRef.current = renderPixelsPerSecond
-  clipTimelineDurationRef.current = visibleClipWidth / Math.max(1, pixelsPerSecond)
+  const clipTimelineDuration = visibleClipWidth / Math.max(1, pixelsPerSecond)
   const visibleSourceWindow = useMemo(() => {
     const effectiveStart = Math.max(0, sourceStart + trimStart)
     const effectiveEnd = Math.min(
@@ -288,16 +272,11 @@ export const ClipWaveform = memo(function ClipWaveform({
       // new pixels map to the same zoom geometry that was just measured.
       const currentPps = Math.max(
         1,
-        liveTimelineZoom
-          ? useZoomStore.getState().pixelsPerSecond
-          : pixelsPerSecondRef.current,
+        liveTimelineZoom ? useZoomStore.getState().pixelsPerSecond : pixelsPerSecondRef.current,
       )
       const effectiveEnd = Math.min(
         sourceDuration,
-        Math.max(
-          effectiveStart,
-          sourceEnd ?? effectiveStart + clipTimelineDurationRef.current * speed,
-        ),
+        Math.max(effectiveStart, sourceEnd ?? effectiveStart + clipTimelineDuration * speed),
       )
       const centerY = height / 2
       const maxWaveHeight = Math.max(1, height / 2 - WAVEFORM_VERTICAL_PADDING_PX)
@@ -386,6 +365,7 @@ export const ClipWaveform = memo(function ClipWaveform({
       normalizationPeak,
       stereo,
       liveTimelineZoom,
+      clipTimelineDuration,
     ],
   )
 
@@ -424,6 +404,7 @@ export const ClipWaveform = memo(function ClipWaveform({
       <VisibleWaveformCanvas
         width={settledRenderClipWidth}
         height={height}
+        contentVersion={loadedSamples}
         liveTimelineViewport={liveTimelineZoom}
         liveViewportOverscanPx={CLIP_VISIBILITY_PREFETCH_MARGIN_PX}
         renderWindow={renderWindow}

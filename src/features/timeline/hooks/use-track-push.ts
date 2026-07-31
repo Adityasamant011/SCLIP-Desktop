@@ -34,7 +34,7 @@ export function useTrackPush(
   const fps = useTimelineStore((s) => s.fps)
   const setDragState = useSelectionStore((s) => s.setDragState)
   const setActiveSnapTarget = useSelectionStore((s) => s.setActiveSnapTarget)
-  const { getMagneticSnapTargets, getSnapThresholdFrames, snapEnabled } = useSnapCalculator(
+  const { getMagneticSnapTargets, getSnapThresholdFrames, isSnapEnabled } = useSnapCalculator(
     timelineDuration,
     item.id,
   )
@@ -49,18 +49,15 @@ export function useTrackPush(
   stateRef.current = state
 
   const prevSnapTargetRef = useRef<{ frame: number; type: string } | null>(null)
+  const magneticSnapTargetsRef = useRef<SnapTarget[]>([])
 
   const findSnapForFrame = useCallback(
-    (
-      targetFrame: number,
-      excludeIds?: Set<string>,
-    ): { snappedFrame: number; snapTarget: SnapTarget | null } => {
-      if (!snapEnabled) return { snappedFrame: targetFrame, snapTarget: null }
-      const targets = getMagneticSnapTargets()
+    (targetFrame: number): { snappedFrame: number; snapTarget: SnapTarget | null } => {
+      if (!isSnapEnabled()) return { snappedFrame: targetFrame, snapTarget: null }
+      const targets = magneticSnapTargetsRef.current
       let nearest: SnapTarget | null = null
       let minDist = getSnapThresholdFrames()
       for (const t of targets) {
-        if (excludeIds && t.itemId && excludeIds.has(t.itemId)) continue
         const d = Math.abs(targetFrame - t.frame)
         if (d < minDist) {
           nearest = t
@@ -71,7 +68,7 @@ export function useTrackPush(
         ? { snappedFrame: nearest.frame, snapTarget: nearest }
         : { snappedFrame: targetFrame, snapTarget: null }
     },
-    [snapEnabled, getMagneticSnapTargets, getSnapThresholdFrames],
+    [getSnapThresholdFrames, isSnapEnabled],
   )
 
   const handleMouseMove = useCallback(
@@ -87,8 +84,7 @@ export function useTrackPush(
 
       // Snap the anchor item's new start edge
       const anchorFrom = item.from + deltaFrames
-      const shiftedIds = useTrackPushPreviewStore.getState().shiftedItemIds
-      const { snappedFrame, snapTarget } = findSnapForFrame(anchorFrom, shiftedIds)
+      const { snappedFrame, snapTarget } = findSnapForFrame(anchorFrom)
       if (snapTarget) {
         deltaFrames = snappedFrame - item.from
         deltaFrames = Math.max(deltaFrames, -stateRef.current.maxLeftFrames)
@@ -123,6 +119,7 @@ export function useTrackPush(
     setActiveSnapTarget(null)
     setDragState(null)
     prevSnapTargetRef.current = null
+    magneticSnapTargetsRef.current = []
     setState({ isActive: false, startX: 0, currentDelta: 0, maxLeftFrames: 0 })
   }, [item.id, setActiveSnapTarget, setDragState])
 
@@ -134,6 +131,7 @@ export function useTrackPush(
         window.removeEventListener('mousemove', handleMouseMove)
         window.removeEventListener('mouseup', handleMouseUp)
         useTrackPushPreviewStore.getState().clearPreview()
+        magneticSnapTargetsRef.current = []
         setActiveSnapTarget(null)
         setDragState(null)
       }
@@ -183,6 +181,9 @@ export function useTrackPush(
       }
       if (!isFinite(minGap)) minGap = cutFrame
 
+      magneticSnapTargetsRef.current = getMagneticSnapTargets().filter(
+        (target) => !target.itemId || !shiftedIds.has(target.itemId),
+      )
       useTrackPushPreviewStore.getState().setPreview({
         anchorItemId: item.id,
         trackId: item.trackId,
@@ -204,7 +205,15 @@ export function useTrackPush(
         maxLeftFrames: Math.max(0, minGap),
       })
     },
-    [item.id, item.trackId, item.from, trackLocked, setActiveSnapTarget, setDragState],
+    [
+      item.id,
+      item.trackId,
+      item.from,
+      trackLocked,
+      setActiveSnapTarget,
+      setDragState,
+      getMagneticSnapTargets,
+    ],
   )
 
   return {

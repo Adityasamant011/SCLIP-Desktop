@@ -12,22 +12,23 @@
  */
 
 import type { CompositionInputProps, SubtitleExportMode } from '@/types/export'
-import type { TimelineTrack, TimelineItem, VideoItem } from '@/types/timeline'
 import type { ClientExportSettings, RenderProgress, ClientRenderResult } from './client-renderer'
 import { createOutputFormat, getDefaultAudioCodec, getMimeType } from './client-renderer'
 import { createMediabunnyInputSource } from '@/infrastructure/browser/mediabunny-input-source'
 import { createLogger } from '@/shared/logging/logger'
 import { ensureAudioEncoderSupport } from '@/shared/media/audio-encoder-support'
-import { hasMediaCrop } from '@/shared/utils/media-crop'
 import { DEFAULT_PROJECT_HEIGHT, DEFAULT_PROJECT_WIDTH } from '@/shared/projects/defaults'
+import { getPacketRemuxPlan } from './packet-remux-plan'
 import {
   buildTranscriptSubtitleWebVtt,
   omitTranscriptSubtitleItemsForSoftSubtitleExport,
+  resolveSubtitleExportPlan,
 } from './embedded-subtitle-export'
 import { createExportOutputTarget } from './export-output-target'
 
 // Subsystems
 import { createCompositionRenderer } from './client-render-engine'
+import { runPipelinedFrameLoop } from './pipelined-frame-loop'
 
 function getLog() {
   return createLogger('CanvasRenderOrchestrator')
@@ -135,7 +136,9 @@ async function addCompositionAudio(params: {
 
 interface PreparedAudioPacketCopy {
   input: InstanceType<MediabunnyModule['Input']>
-  track: NonNullable<Awaited<ReturnType<InstanceType<MediabunnyModule['Input']>['getPrimaryAudioTrack']>>>
+  track: NonNullable<
+    Awaited<ReturnType<InstanceType<MediabunnyModule['Input']>['getPrimaryAudioTrack']>>
+  >
   source: InstanceType<MediabunnyModule['EncodedAudioPacketSource']>
   durationSeconds: number
 }
@@ -265,104 +268,6 @@ interface SingleFrameOptions {
   height?: number
   quality?: number
   format?: 'image/jpeg' | 'image/png' | 'image/webp'
-}
-
-interface PacketRemuxPlan {
-  src: string
-  trimStartSeconds: number
-  trimEndSeconds: number
-  includeAudio: boolean
-}
-
-const EPSILON = 1e-6
-
-function isIdentityTransform(item: VideoItem): boolean {
-  const transform = item.transform
-  if (hasMediaCrop(item.crop)) return false
-  if (!transform) return true
-
-  if (transform.width !== undefined || transform.height !== undefined) return false
-  if (transform.x !== undefined && Math.abs(transform.x) > EPSILON) return false
-  if (transform.y !== undefined && Math.abs(transform.y) > EPSILON) return false
-  if (transform.rotation !== undefined && Math.abs(transform.rotation) > EPSILON) return false
-  if (transform.cornerRadius !== undefined && Math.abs(transform.cornerRadius) > EPSILON)
-    return false
-  if (transform.opacity !== undefined && Math.abs(transform.opacity - 1) > EPSILON) return false
-  return true
-}
-
-function getPacketRemuxPlan(
-  settings: ClientExportSettings,
-  composition: CompositionInputProps,
-): PacketRemuxPlan | null {
-  if (settings.mode !== 'video') return null
-  if (composition.durationInFrames === undefined || composition.durationInFrames <= 0) return null
-  if ((composition.transitions?.length ?? 0) > 0) return null
-  if ((composition.keyframes?.length ?? 0) > 0) return null
-
-  const tracks: TimelineTrack[] = (composition.tracks ?? []).filter(
-    (track) => track.visible !== false,
-  )
-  const items: Array<{ item: TimelineItem; track: TimelineTrack }> = []
-
-  for (const track of tracks) {
-    for (const item of track.items ?? []) {
-      if (item.durationInFrames > 0) {
-        items.push({ item, track })
-      }
-    }
-  }
-
-  if (items.length !== 1) return null
-
-  const { item, track } = items[0]!
-  if (item.type !== 'video') return null
-
-  const videoItem = item as VideoItem
-  if (!videoItem.src) return null
-  if (videoItem.isReversed === true) return null
-  if (videoItem.from !== 0) return null
-  if (videoItem.durationInFrames !== composition.durationInFrames) return null
-  if ((videoItem.effects?.length ?? 0) > 0) return null
-  if (!isIdentityTransform(videoItem)) return null
-
-  const speed = videoItem.speed ?? 1
-  if (Math.abs(speed - 1) > EPSILON) return null
-
-  const hasVisualFades =
-    Math.abs(videoItem.fadeIn ?? 0) > EPSILON || Math.abs(videoItem.fadeOut ?? 0) > EPSILON
-  if (hasVisualFades) return null
-
-  const includeAudio = track.muted !== true
-  if (includeAudio) {
-    const hasAudioAdjustments =
-      Math.abs(videoItem.volume ?? 0) > EPSILON ||
-      Math.abs(videoItem.audioFadeIn ?? 0) > EPSILON ||
-      Math.abs(videoItem.audioFadeOut ?? 0) > EPSILON
-    if (hasAudioAdjustments) return null
-  }
-
-  const sourceFps = videoItem.sourceFps ?? composition.fps
-  if (!Number.isFinite(sourceFps) || sourceFps <= 0) return null
-  if (Math.abs((settings.fps ?? composition.fps) - composition.fps) > EPSILON) return null
-
-  // Require clip to start at source frame 0 — a trimmed-from-middle clip can't be
-  // remuxed directly and must fall back to frame-by-frame rendering.
-  const sourceStartFrames = videoItem.sourceStart ?? videoItem.trimStart ?? videoItem.offset ?? 0
-  if (Math.abs(sourceStartFrames) > EPSILON) return null
-  const trimStartSeconds = Math.max(0, sourceStartFrames / sourceFps)
-  const clipDurationSeconds = videoItem.durationInFrames / composition.fps
-  if (!Number.isFinite(clipDurationSeconds) || clipDurationSeconds <= 0) return null
-
-  const trimEndSeconds = trimStartSeconds + clipDurationSeconds
-  if (!Number.isFinite(trimEndSeconds) || trimEndSeconds <= trimStartSeconds) return null
-
-  return {
-    src: videoItem.src,
-    trimStartSeconds,
-    trimEndSeconds,
-    includeAudio,
-  }
 }
 
 async function tryPacketRemuxComposition(
@@ -633,29 +538,23 @@ export async function renderComposition(options: RenderEngineOptions): Promise<C
     target: outputTarget.target,
   })
 
-  // Subtitle handling per mode:
-  // - `burn`   : keep the transcript items so they render into the frames.
-  // - `off`    : drop them (no captions).
-  // - `sidecar`: drop them here — the clean video is muxed; the .srt file is
-  //              generated and downloaded on the main thread.
-  // - `embedded`: mux a soft WebVTT track, but ONLY for Matroska (WebM/MKV).
-  //   mediabunny never starts its ISOBMFF subtitle `auxWriter`, so WebVTT-into-
-  //   MP4/MOV asserts ("Assertion failed") via an uncatchable floating rejection;
-  //   there we fall back to burning captions in so they aren't silently lost.
+  // Subtitle handling per mode — see resolveSubtitleExportPlan for the matrix.
   const subtitleMode: SubtitleExportMode = settings.subtitleMode ?? 'burn'
-  const supportsWebVttSubtitles = format.getSupportedSubtitleCodecs().includes('webvtt')
-  const isIsobmffContainer = settings.container === 'mp4' || settings.container === 'mov'
   const transcriptSubtitleVtt =
     subtitleMode === 'embedded' ? buildTranscriptSubtitleWebVtt(composition) : null
-  const embedTranscriptSubtitles =
-    transcriptSubtitleVtt !== null && supportsWebVttSubtitles && !isIsobmffContainer
-  const burnInSubtitles =
-    subtitleMode === 'burn' || (subtitleMode === 'embedded' && !embedTranscriptSubtitles)
+  const { embedTranscriptSubtitles, burnInSubtitles, fallbackToBurnIn } = resolveSubtitleExportPlan(
+    {
+      subtitleMode,
+      container: settings.container,
+      supportsWebVttSubtitles: format.getSupportedSubtitleCodecs().includes('webvtt'),
+      hasTranscriptVtt: transcriptSubtitleVtt !== null,
+    },
+  )
   const renderCompositionInput = burnInSubtitles
     ? composition
     : omitTranscriptSubtitleItemsForSoftSubtitleExport(composition)
 
-  if (subtitleMode === 'embedded' && transcriptSubtitleVtt !== null && !embedTranscriptSubtitles) {
+  if (fallbackToBurnIn) {
     getLog().warn(
       `${settings.container.toUpperCase()} can't embed a soft subtitle track; ` +
         'burning captions into the video instead.',
@@ -709,10 +608,19 @@ export async function renderComposition(options: RenderEngineOptions): Promise<C
     throw new Error('Failed to create OffscreenCanvas 2D context')
   }
 
+  // High-quality smoothing: media is often drawn scaled (e.g. cover-fill upscale),
+  // and the default ('low') visibly softens fine detail like small slide text.
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
+
   // Create output canvas at EXPORT resolution (for encoding)
   // If no scaling needed, we'll use renderCanvas directly
   const outputCanvas = needsScaling ? new OffscreenCanvas(exportWidth, exportHeight) : renderCanvas
   const outputCtx = needsScaling ? outputCanvas.getContext('2d')! : ctx
+  if (needsScaling) {
+    outputCtx.imageSmoothingEnabled = true
+    outputCtx.imageSmoothingQuality = 'high'
+  }
 
   onProgress({
     phase: 'preparing',
@@ -875,80 +783,36 @@ export async function renderComposition(options: RenderEngineOptions): Promise<C
     // VideoSample copies pixel data on construction, so the canvas is free
     // immediately after. We overlap the previous frame's encode with the
     // next frame's render for ~25-40% throughput improvement.
-    let pendingEncode: Promise<void> | null = null
-
-    for (let frame = 0; frame < totalFrames; frame++) {
-      if (audioError) throw audioError
-      // Check for abort — drain any in-flight encode first so the encoder
-      // is idle before we cancel the output. Discard encoder errors since
-      // we are aborting anyway and must always surface AbortError.
-      if (signal?.aborted) {
-        if (pendingEncode) {
-          try {
-            await pendingEncode
-          } catch {
-            /* discarded — aborting */
-          }
+    const renderer = frameRenderer
+    await runPipelinedFrameLoop({
+      totalFrames,
+      signal,
+      getPendingError: () => audioError,
+      renderFrame: async (frame) => {
+        await renderer.renderFrame(frame)
+        // Scale to output resolution if needed
+        if (needsScaling) {
+          outputCtx.clearRect(0, 0, exportWidth, exportHeight)
+          outputCtx.drawImage(renderCanvas, 0, 0, exportWidth, exportHeight)
         }
-        await output.cancel()
-        throw new DOMException('Render cancelled', 'AbortError')
-      }
-
-      // Render frame to canvas first — this overlaps with the previous frame's
-      // encode that is still in flight. The previous VideoSample already copied
-      // its pixels, so writing to the canvas here cannot corrupt it.
-      await frameRenderer.renderFrame(frame)
-
-      // Scale to output resolution if needed
-      if (needsScaling) {
-        outputCtx.clearRect(0, 0, exportWidth, exportHeight)
-        outputCtx.drawImage(renderCanvas, 0, 0, exportWidth, exportHeight)
-      }
-
-      // Now wait for the previous encode to finish before capturing a new
-      // VideoSample. This ensures at most one encode is in flight and that
-      // frames are fed to the encoder in order.
-      if (pendingEncode) await pendingEncode
-
-      // Calculate timestamp in seconds
-      const timestamp = frame / fps
-      const frameDuration = 1 / fps
-
-      // Snapshot canvas pixels into a VideoSample. The constructor copies
-      // pixel data immediately — the canvas is free for the next render.
-      const sample = new VideoSample(outputCanvas, { timestamp, duration: frameDuration })
-
-      // Kick off encoding in the background. NOT awaited here — it runs
-      // concurrently with the next iteration's renderFrame().
-      const isKeyFrame = frame === 0
-      pendingEncode = (async () => {
-        try {
-          if (isKeyFrame) {
-            await videoSource.add(sample, { keyFrame: true })
-          } else {
-            await videoSource.add(sample)
-          }
-        } finally {
-          // VideoSampleSource does NOT close samples (unlike CanvasSource).
-          // We must close to release the underlying VideoFrame's GPU memory,
-          // otherwise the browser throttles after ~8-16 outstanding frames.
-          sample.close()
-        }
-      })()
-
-      // Report progress
-      const progress = Math.round((frame / totalFrames) * 100)
-      onProgress({
-        phase: 'rendering',
-        progress,
-        currentFrame: frame,
-        totalFrames,
-        message: `Rendering frame ${frame + 1}/${totalFrames}`,
-      })
-    }
-
-    // Drain the final in-flight encode before finalizing
-    if (pendingEncode) await pendingEncode
+      },
+      // VideoSampleSource does NOT close samples (unlike CanvasSource) — the
+      // loop closes each sample to release the VideoFrame's GPU memory.
+      captureSample: (frame) =>
+        new VideoSample(outputCanvas, { timestamp: frame / fps, duration: 1 / fps }),
+      encodeSample: (sample, keyFrame) =>
+        keyFrame ? videoSource.add(sample, { keyFrame: true }) : videoSource.add(sample),
+      onAbort: () => output.cancel(),
+      onFrameProgress: (frame) => {
+        onProgress({
+          phase: 'rendering',
+          progress: Math.round((frame / totalFrames) * 100),
+          currentFrame: frame,
+          totalFrames,
+          message: `Rendering frame ${frame + 1}/${totalFrames}`,
+        })
+      },
+    })
 
     if (audioTask) {
       onProgress({
@@ -1049,6 +913,11 @@ export async function renderSingleFrame(options: SingleFrameOptions): Promise<Bl
   if (!renderCtx) {
     throw new Error('Failed to get 2d context')
   }
+
+  // Match the export composition context so single-frame output is
+  // pixel-consistent with the final render (scaled media draws stay sharp).
+  renderCtx.imageSmoothingEnabled = true
+  renderCtx.imageSmoothingQuality = 'high'
 
   // Use the SAME renderer as export – single source of truth
   const renderer = await createCompositionRenderer(composition, renderCanvas, renderCtx)

@@ -3,13 +3,11 @@
  *
  * Compares consecutive frames using RGB color histograms. A scene cut is
  * detected when the chi-squared distance between histograms exceeds a
- * threshold. Much faster than optical flow but only detects hard cuts
- * (not gradual transitions like dissolves or wipes).
+ * threshold. This sparse path favors speed over frame-accurate timing.
  */
 
 import { createLogger } from '@/shared/logging/logger'
-import type { MotionResult } from './optical-flow-analyzer'
-import type { SceneCut, SceneDetectionProgress } from './scene-detection'
+import type { SceneCut, SceneDetectionProgress } from './scene-detection-types'
 import { seekVideo, deduplicateCuts } from './scene-detection-utils'
 
 const log = createLogger('HistogramSceneDetection')
@@ -30,8 +28,8 @@ const HIST_HEIGHT = 90
  */
 const CHI_SQUARED_THRESHOLD = 0.3
 
-/** Minimum gap in seconds between cuts to avoid micro-segments */
-const MIN_CUT_GAP_SEC = 2.0
+/** Cluster only duplicate candidates from the same sparse sampling window. */
+const MAX_CANDIDATE_CLUSTER_SEC = 0.25
 
 /**
  * Compute a normalized RGB histogram from pixel data.
@@ -95,7 +93,6 @@ export interface HistogramDetectOptions {
  */
 export async function detectScenesHistogram(
   video: HTMLVideoElement,
-  fps: number,
   options: HistogramDetectOptions = {},
 ): Promise<SceneCut[]> {
   const { sampleIntervalMs = 250, threshold = CHI_SQUARED_THRESHOLD, onProgress, signal } = options
@@ -112,7 +109,7 @@ export async function detectScenesHistogram(
   let maxDistance = 0
 
   for (let i = 0; i < totalSamples; i++) {
-    if (signal?.aborted) break
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
 
     const time = i * sampleIntervalSec
     await seekVideo(video, time)
@@ -126,16 +123,13 @@ export async function detectScenesHistogram(
       if (distance > maxDistance) maxDistance = distance
 
       if (distance >= threshold) {
-        const frame = Math.round(time * fps)
-        const motion: MotionResult = {
-          totalMotion: distance,
-          globalMotion: distance,
-          localMotion: 0,
-          isSceneCut: true,
-          dominantDirection: 0,
-          directionCoherence: 0,
-        }
-        rawCuts.push({ frame, time, motion })
+        rawCuts.push({
+          time,
+          score: distance,
+          confidence: Math.min(1, 0.5 + (distance - threshold) / Math.max(threshold * 2, 0.001)),
+          type: 'cut',
+          metrics: { kind: 'histogram', histogramDistance: distance },
+        })
       }
     }
 
@@ -143,10 +137,10 @@ export async function detectScenesHistogram(
 
     onProgress?.({
       percent: ((i + 1) / totalSamples) * 100,
-      currentSample: i,
-      totalSamples,
       sceneCuts: rawCuts.length,
-      stage: 'optical-flow', // reuse stage name for progress UI compatibility
+      completed: i + 1,
+      total: totalSamples,
+      stage: 'analyzing',
     })
   }
 
@@ -157,8 +151,8 @@ export async function detectScenesHistogram(
     threshold,
   })
 
-  // Deduplicate: keep strongest cut within each MIN_CUT_GAP_SEC window
-  const deduped = deduplicateCuts(rawCuts, MIN_CUT_GAP_SEC)
+  const clusterWindowSec = Math.min(MAX_CANDIDATE_CLUSTER_SEC, sampleIntervalSec)
+  const deduped = deduplicateCuts(rawCuts, clusterWindowSec)
   log.info('Deduplication complete', { cuts: deduped.length })
 
   return deduped

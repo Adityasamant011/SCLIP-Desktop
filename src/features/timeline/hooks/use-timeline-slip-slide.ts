@@ -225,7 +225,7 @@ export function useTimelineSlipSlide(
   const fps = useTimelineStore((s) => s.fps)
   const setDragState = useSelectionStore((s) => s.setDragState)
 
-  const { getMagneticSnapTargets, getSnapThresholdFrames, snapEnabled } = useSnapCalculator(
+  const { getMagneticSnapTargets, getSnapThresholdFrames, isSnapEnabled } = useSnapCalculator(
     timelineDuration,
     item.id,
   )
@@ -247,8 +247,6 @@ export function useTimelineSlipSlide(
   const latestDeltaRef = useRef(0)
   const pendingStartCleanupRef = useRef<(() => void) | null>(null)
   const slideGestureContextRef = useRef<SlideGestureContext | null>(null)
-  const snapEnabledRef = useRef(snapEnabled)
-  snapEnabledRef.current = snapEnabled
 
   const getItemFromStore = useCallback(() => {
     return useTimelineStore.getState().items.find((i) => i.id === item.id) ?? item
@@ -951,7 +949,7 @@ export function useTimelineSlipSlide(
         const storeItem = slideContext?.currentItem ?? getItemFromStore()
 
         // Apply snapping for slide (clip edges snap to items/playhead/grid)
-        if (snapEnabledRef.current) {
+        if (isSnapEnabled()) {
           const targets = slideContext?.snapTargets ?? getMagneticSnapTargets()
           const excludeIds =
             slideContext?.snapExcludeIds ??
@@ -1154,6 +1152,7 @@ export function useTimelineSlipSlide(
       clampSlideDeltaWithContext,
       getMagneticSnapTargets,
       getSnapThresholdFrames,
+      isSnapEnabled,
     ],
   )
 

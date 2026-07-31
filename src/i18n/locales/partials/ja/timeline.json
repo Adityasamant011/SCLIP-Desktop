@@ -270,7 +270,6 @@
       "noScenesDetected": "シーンが検出されませんでした",
       "noScenesWithinBounds": "範囲内にシーンがありません",
       "noValidSplitPoints": "有効な分割点がありません",
-      "requiresWebGpu": "WebGPUが必要です",
       "splitAtScenes": "シーンで分割"
     },
     "selectTrackToRemove": "削除するトラックを選択",

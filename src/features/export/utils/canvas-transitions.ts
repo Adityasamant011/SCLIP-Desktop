@@ -7,6 +7,10 @@
 
 import type { Transition, WipeDirection, SlideDirection, FlipDirection } from '@/types/transition'
 import type { TimelineItem } from '@/types/timeline'
+// Side-effect: populate the registry. Without it every consumer that does not
+// happen to load the editor UI (the headless harness, workers) silently falls
+// back to the built-in switch, turning 38 declared presets into hard cuts.
+import '@/shared/timeline/transitions'
 import { transitionRegistry } from '@/shared/timeline/transitions/registry'
 import { createLogger } from '@/shared/logging/logger'
 import type { TransitionPipeline } from '@/infrastructure/gpu-transitions'
@@ -433,6 +437,58 @@ function renderCutTransition(
  * @param rightCanvas - Pre-rendered right (incoming) clip content
  * @param canvas - Canvas settings
  */
+/**
+ * Presentations the built-in Canvas2D fallback below actually draws.
+ *
+ * Deliberately adjacent to the `switch` it mirrors: `BuiltinTransitionPresentation`
+ * declares far more presets than this path implements, and every unlisted one
+ * lands in `default:` and renders a hard cut. Keeping the list next to the switch
+ * is what stops the two from drifting — add a `case`, add it here.
+ */
+export const CANVAS_FALLBACK_PRESENTATIONS: ReadonlySet<string> = new Set([
+  'fade',
+  'wipe',
+  'slide',
+  'flip',
+  'clockWipe',
+  'iris',
+  'none',
+])
+
+export type TransitionRenderPath = 'gpu' | 'registry-canvas' | 'builtin' | 'cut'
+
+/**
+ * Which path a presentation will actually take.
+ *
+ * `'cut'` means the transition silently renders as a hard cut — no error, no
+ * visual transition. Callers that can warn (headless validation) use this to say
+ * so up front instead of letting the export look merely "wrong".
+ */
+export function resolveTransitionRenderPath(
+  presentation: string | undefined,
+  options: {
+    gpuAvailable: boolean
+    /**
+     * Probe for whether the transition pipeline actually carries this id.
+     * `renderTransition` requires BOTH a `gpuTransitionId` and
+     * `gpuTransitionPipeline.has(id)` — an adapter alone does not mean the
+     * pipeline compiled. Pass this wherever a pipeline exists; without it the
+     * GPU path is only assumed when a `gpuTransitionId` is registered.
+     */
+    hasGpuTransition?: (gpuTransitionId: string) => boolean
+  },
+): TransitionRenderPath {
+  if (!presentation) return 'cut'
+  const renderer = transitionRegistry.getRenderer(presentation)
+  if (renderer?.gpuTransitionId && options.gpuAvailable) {
+    const compiled = options.hasGpuTransition?.(renderer.gpuTransitionId) ?? true
+    if (compiled) return 'gpu'
+  }
+  if (renderer?.renderCanvas) return 'registry-canvas'
+  if (CANVAS_FALLBACK_PRESENTATIONS.has(presentation)) return 'builtin'
+  return 'cut'
+}
+
 export function renderTransition(
   ctx: OffscreenCanvasRenderingContext2D,
   activeTransition: ActiveTransition,

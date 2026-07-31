@@ -14,6 +14,8 @@ interface ZoomState {
 }
 
 interface ZoomActions {
+  beginZoomGesture: () => void
+  endZoomGesture: () => void
   setZoomLevel: (level: number) => void
   setZoomLevelImmediate: (level: number) => void // Bypasses throttle for smooth momentum zoom
   setZoomLevelSynchronized: (level: number) => void
@@ -22,13 +24,32 @@ interface ZoomActions {
   zoomToFit: (containerWidth: number, contentDurationSeconds: number) => void
 }
 
+interface SettledZoomState {
+  contentLevel: number
+  contentPixelsPerSecond: number
+}
+
+/**
+ * Content-only zoom channel.
+ *
+ * The live zoom store publishes on every wheel frame. Expensive clip selectors
+ * only care about the committed content scale, so keeping that pair in a
+ * separate store prevents every mounted clip from evaluating its selector on
+ * each live update.
+ */
+export const useSettledZoomStore = create<SettledZoomState>(() => ({
+  contentLevel: 1,
+  contentPixelsPerSecond: 100,
+}))
+
 // Throttle visual zoom updates a bit for non-immediate callers like the header
 // slider, then let committed content zoom catch up only after interaction settles.
 const VISUAL_ZOOM_THROTTLE_MS = 120
-// Keep rich clip content/culling frozen across a wheel burst, then catch it up
-// promptly after the last event. Track shells and the ruler still update every
-// frame during the gesture.
-const CONTENT_ZOOM_SETTLE_MS = 100
+// Keep rich clip content/culling frozen across a wheel burst, including slower
+// mouse-wheel notches. Track shells, canvases, and the ruler still update live;
+// this only keeps a late content commit from colliding with the next wheel task.
+const CONTENT_ZOOM_SETTLE_MS = 200
+const PLAYBACK_CONTENT_ZOOM_COMMIT_DEADLINE_MS = 200
 let lastVisualZoomUpdate = 0
 let pendingVisualZoomLevel: number | null = null
 let pendingContentZoomLevel: number | null = null
@@ -36,6 +57,8 @@ let visualZoomThrottleTimeout: ReturnType<typeof setTimeout> | null = null
 let contentZoomSettleTimeout: ReturnType<typeof setTimeout> | null = null
 let contentZoomCommitRaf: number | null = null
 let contentZoomCommitIdleCallback: number | null = null
+let contentZoomCommitDeadlineTimeout: ReturnType<typeof setTimeout> | null = null
+let activeZoomGestureCount = 0
 
 function zoomLevelToPixelsPerSecond(level: number): number {
   return level * 100
@@ -65,6 +88,10 @@ function clearContentZoomSettleTimeout() {
     }
     contentZoomCommitIdleCallback = null
   }
+  if (contentZoomCommitDeadlineTimeout !== null) {
+    clearTimeout(contentZoomCommitDeadlineTimeout)
+    contentZoomCommitDeadlineTimeout = null
+  }
 }
 
 function setVisualZoom(
@@ -92,6 +119,10 @@ function flushPendingVisualZoom(set: (partial: Partial<ZoomState>) => void) {
 function commitPendingContentZoom(set: (partial: Partial<ZoomState>) => void) {
   contentZoomCommitRaf = null
   contentZoomCommitIdleCallback = null
+  if (contentZoomCommitDeadlineTimeout !== null) {
+    clearTimeout(contentZoomCommitDeadlineTimeout)
+    contentZoomCommitDeadlineTimeout = null
+  }
   if (pendingContentZoomLevel === null) {
     set({ isZoomInteracting: false })
     return
@@ -124,23 +155,47 @@ function schedulePlaybackAwareContentCommit(set: (partial: Partial<ZoomState>) =
   // cancels both callbacks while the lightweight live geometry remains current.
   contentZoomCommitRaf = requestAnimationFrame(() => {
     contentZoomCommitRaf = null
-    contentZoomCommitIdleCallback = requestIdleCallback(() => commitPendingContentZoom(set), {
-      timeout: 200,
+    const commitFromIdle = () => {
+      contentZoomCommitIdleCallback = null
+      commitPendingContentZoom(set)
+    }
+    contentZoomCommitIdleCallback = requestIdleCallback(commitFromIdle, {
+      timeout: PLAYBACK_CONTENT_ZOOM_COMMIT_DEADLINE_MS,
     })
+    // Chrome's idle timeout can still be postponed by a continuously busy
+    // playback/render loop. Keep the idle fast path, but back it with a real
+    // task deadline so wheel/trackpad settle cannot depend on pausing playback.
+    contentZoomCommitDeadlineTimeout = setTimeout(() => {
+      contentZoomCommitDeadlineTimeout = null
+      if (contentZoomCommitIdleCallback !== null && typeof cancelIdleCallback === 'function') {
+        cancelIdleCallback(contentZoomCommitIdleCallback)
+        contentZoomCommitIdleCallback = null
+      }
+      commitPendingContentZoom(set)
+    }, PLAYBACK_CONTENT_ZOOM_COMMIT_DEADLINE_MS)
   })
 }
 
 function scheduleContentZoomCommit(set: (partial: Partial<ZoomState>) => void) {
   clearContentZoomSettleTimeout()
+  if (activeZoomGestureCount > 0) {
+    return
+  }
   contentZoomSettleTimeout = setTimeout(() => {
     contentZoomSettleTimeout = null
     schedulePlaybackAwareContentCommit(set)
   }, CONTENT_ZOOM_SETTLE_MS)
 }
 
-function stageContentZoomCommit(set: (partial: Partial<ZoomState>) => void, level: number) {
+function stageContentZoomCommit(
+  set: (partial: Partial<ZoomState>) => void,
+  level: number,
+  interactionAlreadyStarted = false,
+) {
   pendingContentZoomLevel = level
-  set({ isZoomInteracting: true })
+  if (!interactionAlreadyStarted) {
+    set({ isZoomInteracting: true })
+  }
   scheduleContentZoomCommit(set)
 }
 
@@ -170,6 +225,33 @@ export const useZoomStore = create<ZoomState & ZoomActions>((set, get) => ({
   contentPixelsPerSecond: 100,
   isZoomInteracting: false,
 
+  beginZoomGesture: () => {
+    activeZoomGestureCount += 1
+    clearContentZoomSettleTimeout()
+    if (!get().isZoomInteracting) {
+      set({ isZoomInteracting: true })
+    }
+  },
+  endZoomGesture: () => {
+    if (activeZoomGestureCount > 0) {
+      activeZoomGestureCount -= 1
+    }
+    if (activeZoomGestureCount > 0) {
+      return
+    }
+    if (pendingContentZoomLevel !== null) {
+      // Pointer-up is an explicit end boundary, so the wheel-burst debounce is
+      // no longer useful. Commit the settled geometry synchronously even during
+      // playback: routing this boundary through requestIdleCallback can leave
+      // isZoomInteracting and rich-content geometry pending indefinitely while
+      // continuous preview frames keep the main thread busy. Dense detail and
+      // culling consumers already stage their own mount/unmount work.
+      clearContentZoomSettleTimeout()
+      commitPendingContentZoom(set)
+    } else if (get().isZoomInteracting) {
+      set({ isZoomInteracting: false })
+    }
+  },
   setZoomLevel: (level) => {
     const now = performance.now()
     pendingVisualZoomLevel = level
@@ -206,7 +288,9 @@ export const useZoomStore = create<ZoomState & ZoomActions>((set, get) => ({
     pendingVisualZoomLevel = null
     lastVisualZoomUpdate = performance.now()
     setVisualZoom(set, level, true)
-    stageContentZoomCommit(set, level)
+    // setVisualZoom already publishes isZoomInteracting=true with the live
+    // geometry. Do not publish a second identical interaction-only state.
+    stageContentZoomCommit(set, level, true)
   },
   setZoomLevelSynchronized: (level) => {
     applySynchronizedZoom(set, level)
@@ -225,6 +309,21 @@ export const useZoomStore = create<ZoomState & ZoomActions>((set, get) => ({
   },
 }))
 
+// Keep direct `useZoomStore.setState(...)` calls (including focused tests and
+// restore paths) synchronized without adding more than one live subscriber.
+useZoomStore.subscribe((state, previousState) => {
+  if (
+    state.contentLevel === previousState.contentLevel &&
+    state.contentPixelsPerSecond === previousState.contentPixelsPerSecond
+  ) {
+    return
+  }
+  useSettledZoomStore.setState({
+    contentLevel: state.contentLevel,
+    contentPixelsPerSecond: state.contentPixelsPerSecond,
+  })
+})
+
 // Non-reactive handler registration — avoids unnecessary subscriber notifications
 let _zoomTo100Handler: ((centerFrame: number) => void) | null = null
 
@@ -241,6 +340,7 @@ export function _resetZoomStoreForTest() {
   clearContentZoomSettleTimeout()
   pendingVisualZoomLevel = null
   pendingContentZoomLevel = null
+  activeZoomGestureCount = 0
   lastVisualZoomUpdate = 0
   useZoomStore.setState({
     level: 1,

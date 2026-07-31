@@ -1,6 +1,46 @@
-import type { CompositionInputProps } from '@/types/export'
+import type { CompositionInputProps, SubtitleExportMode } from '@/types/export'
 import type { SubtitleSegmentItem, TimelineItem, TimelineTrack } from '@/types/timeline'
 import { serializeVtt, type SubtitleCue } from '@/shared/utils/subtitles'
+
+export interface SubtitleExportPlan {
+  /** Mux the transcript as a soft WebVTT track. */
+  embedTranscriptSubtitles: boolean
+  /** Keep transcript items in the rendered composition so they burn in. */
+  burnInSubtitles: boolean
+  /** `embedded` was requested but can't be honoured — burning in instead. */
+  fallbackToBurnIn: boolean
+}
+
+/**
+ * Subtitle handling per mode (moved verbatim from the export orchestrator):
+ * - `burn`   : keep the transcript items so they render into the frames.
+ * - `off`    : drop them (no captions).
+ * - `sidecar`: drop them here — the clean video is muxed; the .srt file is
+ *              generated and downloaded on the main thread.
+ * - `embedded`: mux a soft WebVTT track, but ONLY for Matroska (WebM/MKV).
+ *   mediabunny never starts its ISOBMFF subtitle `auxWriter`, so WebVTT-into-
+ *   MP4/MOV asserts ("Assertion failed") via an uncatchable floating rejection;
+ *   there we fall back to burning captions in so they aren't silently lost.
+ */
+export function resolveSubtitleExportPlan(params: {
+  subtitleMode: SubtitleExportMode
+  container: string
+  supportsWebVttSubtitles: boolean
+  hasTranscriptVtt: boolean
+}): SubtitleExportPlan {
+  const { subtitleMode, container, supportsWebVttSubtitles, hasTranscriptVtt } = params
+  const isIsobmffContainer = container === 'mp4' || container === 'mov'
+  const embedTranscriptSubtitles =
+    subtitleMode === 'embedded' &&
+    hasTranscriptVtt &&
+    supportsWebVttSubtitles &&
+    !isIsobmffContainer
+  const burnInSubtitles =
+    subtitleMode === 'burn' || (subtitleMode === 'embedded' && !embedTranscriptSubtitles)
+  const fallbackToBurnIn =
+    subtitleMode === 'embedded' && hasTranscriptVtt && !embedTranscriptSubtitles
+  return { embedTranscriptSubtitles, burnInSubtitles, fallbackToBurnIn }
+}
 
 function isTranscriptSubtitleItem(item: TimelineItem): item is SubtitleSegmentItem {
   return item.type === 'subtitle' && item.source.type === 'transcript'

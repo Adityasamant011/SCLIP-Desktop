@@ -126,7 +126,7 @@ describe('ItemContextMenu scene detection', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'AI (Liquid Vision)' }))
 
-    expect(onDetectScenes).toHaveBeenCalledWith('optical-flow', 'lfm')
+    expect(onDetectScenes).toHaveBeenCalledWith('adaptive', 'lfm')
   })
 })
 

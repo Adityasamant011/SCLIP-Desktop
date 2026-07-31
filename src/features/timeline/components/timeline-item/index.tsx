@@ -34,7 +34,7 @@ import { StretchHandles } from './stretch-handles'
 import { AudioFadeHandles } from './audio-fade-handles'
 import { VideoFadeHandles } from './video-fade-handles'
 import { AudioVolumeControl } from './audio-volume-control'
-import { JoinIndicators } from './join-indicators'
+import { ZoomGatedJoinIndicators } from './join-indicators'
 import { SegmentStatusOverlays } from './segment-status-overlays'
 import { getTimelineItemGestureMode } from './drag-visual-mode'
 import { useDragVisualState } from './use-drag-visual-state'
@@ -46,7 +46,6 @@ import { useSmartTrimHover } from './use-smart-trim-hover'
 import { useContextMenuState } from './use-context-menu-state'
 import { useTimelineItemOverlayStore } from '../../stores/timeline-item-overlay-store'
 import { useRollHoverStore } from '../../stores/roll-hover-store'
-import { useZoomStore } from '../../stores/zoom-store'
 import { frameToPixelsNow } from '../../utils/zoom-conversions'
 import { useTimelineItemBounds } from './use-timeline-item-bounds'
 import { getTransitionBridgeBounds } from '../../utils/transition-preview-geometry'
@@ -70,21 +69,19 @@ const EMPTY_LINKED_ITEMS: TimelineItemType[] = []
 const TRACK_PUSH_MIN_PX = 6
 const TRACK_PUSH_MAX_PX = 14
 const TRACK_PUSH_ZOOM_THRESHOLD = 120
-const COMPACT_CLIP_MAX_WIDTH_PX = 36
-const JOIN_INDICATOR_MIN_ZOOM_PPS = 30
 const SPEED_BADGE_EPSILON = 0.005
 const TRANSITION_DROP_HIT_MIN_WIDTH_PX = 72
 const TRANSITION_DROP_HIT_MAX_WIDTH_PX = 240
 
 function getFramePositionStyle(frame: number): string {
-  return `calc(${frame} * var(--timeline-px-per-frame, 0px))`
+  return `calc(${frame} * var(--timeline-percent-per-frame, 0%))`
 }
 
 function getTrackPushZoneStyle(gapFrames: number): string {
   const safeGapFrames = Math.max(0, gapFrames)
-  const gapWidth = `calc(${safeGapFrames} * var(--timeline-px-per-frame, 0px))`
+  const gapWidth = `calc(${safeGapFrames} * var(--timeline-percent-per-frame, 0%))`
   const zoomSlopeDivisor = TRACK_PUSH_ZOOM_THRESHOLD / (TRACK_PUSH_MAX_PX - TRACK_PUSH_MIN_PX)
-  const adaptiveWidth = `clamp(${TRACK_PUSH_MIN_PX}px, calc(${TRACK_PUSH_MAX_PX}px - (var(--timeline-pixels-per-second, 0px) / ${zoomSlopeDivisor})), ${TRACK_PUSH_MAX_PX}px)`
+  const adaptiveWidth = `clamp(${TRACK_PUSH_MIN_PX}px, calc(${TRACK_PUSH_MAX_PX}px - (var(--timeline-percent-per-second, 0%) / ${zoomSlopeDivisor})), ${TRACK_PUSH_MAX_PX}px)`
   return `min(${gapWidth}, ${adaptiveWidth})`
 }
 const AUDIO_ENVELOPE_VIEWBOX_HEIGHT = 100
@@ -95,6 +92,8 @@ interface TimelineItemProps {
   timelineDuration?: number
   trackLocked?: boolean
   trackHidden?: boolean
+  isCompactWidth: boolean
+  isDetailEligible: boolean
   onHoverChange?: (itemId: string, hovered: boolean) => void
 }
 
@@ -116,6 +115,8 @@ export const TimelineItem = memo(function TimelineItem({
   timelineDuration = 30,
   trackLocked = false,
   trackHidden = false,
+  isCompactWidth,
+  isDetailEligible,
   onHoverChange,
 }: TimelineItemProps) {
   perfMarkRender('TimelineItem')
@@ -165,8 +166,6 @@ export const TimelineItem = memo(function TimelineItem({
   const segmentOverlays = useTimelineItemOverlayStore(
     useCallback((s) => s.overlaysByItemId[item.id] ?? EMPTY_SEGMENT_OVERLAYS, [item.id]),
   )
-  const showJoinIndicators = useZoomStore((s) => s.pixelsPerSecond >= JOIN_INDICATOR_MIN_ZOOM_PPS)
-
   // O(1) lookup via keyframesByItemId index instead of O(n) array scan
   const itemKeyframes = useKeyframesStore(
     useCallback((s) => s.keyframesByItemId[item.id] ?? null, [item.id]),
@@ -484,7 +483,6 @@ export const TimelineItem = memo(function TimelineItem({
     visualWidthFrames,
     visualLeft,
     visualWidth,
-    isCompactWidth,
     slideFromOffset,
     contentPreviewItem,
     preferImmediateContentRendering,
@@ -509,7 +507,6 @@ export const TimelineItem = memo(function TimelineItem({
     rippleEdgeDelta,
     trackPushOffset,
   })
-
   const transitionDropHitWidth = Math.min(
     TRANSITION_DROP_HIT_MAX_WIDTH_PX,
     Math.max(
@@ -727,10 +724,11 @@ export const TimelineItem = memo(function TimelineItem({
     transformRef,
     updateTimelineItem,
   })
-  // Hoisted before fade memos so the compact guard can account for active interactions.
-  // A narrow clip that is selected/edited should still compute its fade ratios.
+  // Hoisted before fade memos so the compact guard can account for active edits.
+  // Selection alone must not promote a narrow clip back to the rich shell: a
+  // large marquee would otherwise restore every fade control and its math at
+  // once. Active gestures still keep their controls alive while zoom changes.
   const hasActiveClipInteraction =
-    isSelected ||
     isBeingDragged ||
     isPartOfDrag ||
     isTrimming ||
@@ -828,11 +826,7 @@ export const TimelineItem = memo(function TimelineItem({
     (item.type === 'shape' && (item.isMask ?? false))
   // hasActiveClipInteraction is hoisted before fade memos (see above)
   const useCompactClipShell =
-    activeTool === 'select' &&
-    visualWidth > 0 &&
-    visualWidth <= COMPACT_CLIP_MAX_WIDTH_PX &&
-    !hasDetailBadges &&
-    !hasActiveClipInteraction
+    activeTool === 'select' && isCompactWidth && !hasDetailBadges && !hasActiveClipInteraction
   const { trimInfoLabel, moveInfoLabel } = useClipReadoutLabels({
     fps,
     isTrimming,
@@ -925,11 +919,17 @@ export const TimelineItem = memo(function TimelineItem({
       >
         <div
           ref={transformRef}
+          data-timeline-item
           data-item-id={item.id}
+          data-timeline-start-frame={visualLeftFrame}
+          data-timeline-duration-frames={visualWidthFrames}
+          data-timeline-fps={fps}
+          data-timeline-content-inset-start-px={1}
+          data-timeline-content-inset-end-px={1}
           data-selected={isSelected ? 'true' : undefined}
           data-compact-clip={useCompactClipShell ? 'true' : undefined}
           className={cn(
-            'absolute inset-y-px rounded overflow-visible group/timeline-item',
+            'timeline-item @container absolute inset-y-px rounded overflow-visible group/timeline-item',
             itemColorClasses,
             cursorClass,
             !isBeingDragged && !isStretching && !trackLocked && 'hover:brightness-110',
@@ -946,14 +946,13 @@ export const TimelineItem = memo(function TimelineItem({
               pointerEvents: isBeingDragged ? 'none' : 'auto',
               zIndex: isBeingDragged ? 50 : undefined,
               transition: isBeingDragged ? 'none' : undefined,
-              contain: 'layout style paint',
-              // Let the browser skip laying out/painting the interior (label,
-              // filmstrip, waveform, fade SVGs) of clips that are mounted in
-              // the cull buffer but currently off-screen. The box itself stays
-              // correctly sized by inset-y + explicit left/width, so the zoom
-              // reflow (--timeline-px-per-frame change) only pays interior
-              // layout for clips actually in the viewport.
-              contentVisibility: 'auto',
+              // Compact shells already suppress rich content, and almost all
+              // of them are onscreen in a dense track. Avoid giving each one a
+              // paint-containment boundary that Layerize must revisit on every
+              // real-width zoom step. Full-detail buffered clips keep browser
+              // layout/paint skipping while offscreen.
+              contain: useCompactClipShell ? 'layout style' : 'layout style paint',
+              contentVisibility: useCompactClipShell ? 'visible' : 'auto',
               '--timeline-audio-volume-line-y': `${
                 item.type === 'audio' && audioVolumeEdit !== null
                   ? (getAudioVolumeLineY(
@@ -1064,10 +1063,12 @@ export const TimelineItem = memo(function TimelineItem({
               clipLeftFrames={visualLeftFrame}
               clipWidthFrames={visualWidthFrames}
               fps={fps}
+              isCompactWidth={isCompactWidth}
               isLinked={isLinked}
               preferImmediateRendering={preferImmediateContentRendering}
               audioWaveformScale={audioVisualizationScale}
               linkedSyncOffsetFrames={linkedSyncOffsetFrames}
+              isDetailEligible={isDetailEligible}
             />
 
             {!useCompactClipShell && (
@@ -1230,19 +1231,18 @@ export const TimelineItem = memo(function TimelineItem({
             />
           )}
 
-          {/* Join indicators ââ‚¬” hide globally below a zoom threshold so they're always consistent between neighbors */}
-          {showJoinIndicators && (
-            <JoinIndicators
-              hasJoinableLeft={hasJoinableLeft}
-              hasJoinableRight={hasJoinableRight}
-              trackLocked={trackLocked}
-              dragAffectsJoin={dragAffectsJoin}
-              hoveredEdge={hoveredEdge}
-              isTrimming={isTrimming}
-              isStretching={isStretching}
-              isBeingDragged={isBeingDragged}
-            />
-          )}
+          {/* The zoom threshold is deferred at the track boundary so crossing
+              it cannot synchronously rerender every full TimelineItem. */}
+          <ZoomGatedJoinIndicators
+            hasJoinableLeft={hasJoinableLeft}
+            hasJoinableRight={hasJoinableRight}
+            trackLocked={trackLocked}
+            dragAffectsJoin={dragAffectsJoin}
+            hoveredEdge={hoveredEdge}
+            isTrimming={isTrimming}
+            isStretching={isStretching}
+            isBeingDragged={isBeingDragged}
+          />
 
           {!useCompactClipShell &&
             draggedTransition &&
@@ -1277,6 +1277,7 @@ export const TimelineItem = memo(function TimelineItem({
       <ClipFloatingLayer
         transformRef={transformRef}
         ghostRef={ghostRef}
+        showFollowerDragGhost={isAltDrag}
         visualLeftFrame={visualLeftFrame}
         visualWidthFrames={visualWidthFrames}
         dragOffset={dragOffset}

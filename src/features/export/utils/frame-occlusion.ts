@@ -18,6 +18,12 @@ export interface FrameOcclusionContext {
   adjustmentLayers: AdjustmentLayerWithTrackOrder[]
   getCurrentItem: <TItem extends TimelineItem>(item: TItem) => TItem
   getCurrentKeyframes: (itemId: string) => ItemKeyframes | undefined
+  /**
+   * True when a video item's decoded source may carry an alpha channel, so it is
+   * NOT opaque and must never occlude the layers beneath it. Optional: when
+   * absent (e.g. before media init), items are treated as opaque as before.
+   */
+  hasTransparentVideoSource?: (item: TimelineItem) => boolean
   getPreviewEffectsOverride?: (itemId: string) => ItemEffect[] | undefined
   getLiveItemSnapshot?: (itemId: string) => TimelineItem | undefined
 }
@@ -34,6 +40,8 @@ export interface FrameOcclusionContext {
  * Pure predicate extracted verbatim from `createCompositionRenderer`'s
  * per-frame render path — no side effects.
  */
+// Deliberate early-return decision chain; behavior locked by frame-occlusion.test.ts
+// fallow-ignore-next-line complexity
 export function isItemFullyOccluding(
   baseItem: TimelineItem,
   trackOrder: number,
@@ -51,11 +59,18 @@ export function isItemFullyOccluding(
     getCurrentKeyframes,
     getPreviewEffectsOverride,
     getLiveItemSnapshot,
+    hasTransparentVideoSource,
   } = ctx
 
   const item = getCurrentItem(baseItem)
   // Only videos and images can be fully opaque
   if (item.type !== 'video' && item.type !== 'image') return false
+
+  // A video whose source carries an alpha channel is not opaque even at full
+  // cover — culling the layers below would wrongly reveal the black base fill.
+  // (Images decode to alpha-carrying bitmaps drawn as-is; only video needs this
+  // codec-level check since its opacity depends on the decoded frame's format.)
+  if (item.type === 'video' && hasTransparentVideoSource?.(item)) return false
 
   // Items in transitions are blended, not fully occluding
   if (transitionClipIds.has(item.id)) return false

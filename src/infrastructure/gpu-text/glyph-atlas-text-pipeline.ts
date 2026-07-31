@@ -402,6 +402,11 @@ export class GlyphAtlasTextPipeline {
     for (const [lineIndex, line] of layout.lines.entries()) {
       const color = parseGpuTextColor(line.color)
       if (!color) return null
+      // Inline span flow: per-glyph color follows the run covering that char.
+      const runColorByChar = line.runs?.flatMap((run) => {
+        const parsed = parseGpuTextColor(run.color) ?? color
+        return Array.from(run.text, () => parsed)
+      })
       const lineUnits = motionSegmentation?.lineUnitIndices[lineIndex]
       const baselineY = line.baselineY
       let currentX = line.startX
@@ -439,7 +444,7 @@ export class GlyphAtlasTextPipeline {
               y: baselineY + metrics.offsetY,
               width: metrics.contentWidth,
               height: metrics.contentHeight,
-              color,
+              color: runColorByChar?.[charIndex] ?? color,
               strokeColor,
               strokeWidth,
               motion: glyphMotion,
@@ -494,6 +499,25 @@ export class GlyphAtlasTextPipeline {
             motion: underlineMotion,
           })
         }
+      }
+      // Inline span flow: per-run underlines (line.underline is false there).
+      for (const run of line.runs ?? []) {
+        if (!run.underline) continue
+        const runInkWidth = Math.max(0, run.width - line.letterSpacing)
+        if (runInkWidth <= 0) continue
+        const underlineGlyph = this.ensureSolidGlyph()
+        if (!underlineGlyph) return null
+        const runColor = parseGpuTextColor(run.color) ?? color
+        glyphs.push({
+          metrics: underlineGlyph,
+          x: line.startX + run.offsetX,
+          y: baselineY + Math.max(1, line.fontSize * 0.08),
+          width: runInkWidth,
+          height: Math.max(1, line.fontSize * 0.05),
+          color: runColor,
+          solidRadius: 0,
+          motion: undefined,
+        })
       }
     }
     return { glyphs }

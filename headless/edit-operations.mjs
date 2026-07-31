@@ -222,14 +222,75 @@ const cases = [
       rightClipId: 'clip-right',
       type: 'crossfade',
       durationInFrames: 10,
+      presentation: 'glitch',
+      alignment: 0.4,
+      properties: { intensity: 2 },
     },
-    assert: (project) => assert.equal(project.timeline.transitions.length, 1),
+    assert: (project) => {
+      assert.equal(project.timeline.transitions.length, 1)
+      const transition = project.timeline.transitions[0]
+      assert.equal(transition.presentation, 'glitch')
+      assert.equal(transition.alignment, 0.4)
+      assert.deepEqual(transition.properties, { intensity: 2 })
+    },
     failure: {
       op: 'addTransition',
       leftClipId: 'clip-left',
       rightClipId: 'missing',
       durationInFrames: 10,
     },
+  },
+  {
+    name: 'updateTransition',
+    op: { op: 'updateTransition', id: 'tr-x', presentation: 'wipe' },
+    ops: [
+      {
+        op: 'addTransition',
+        leftClipId: 'clip-left',
+        rightClipId: 'clip-right',
+        durationInFrames: 10,
+        callerId: 'tr',
+      },
+      {
+        op: 'updateTransition',
+        id: { $ref: 'tr#/detail/id' },
+        presentation: 'wipe',
+        direction: 'from-left',
+      },
+    ],
+    assert: (project) => {
+      const transition = project.timeline.transitions[0]
+      assert.equal(transition.presentation, 'wipe')
+      assert.equal(transition.direction, 'from-left')
+    },
+    schemaFailure: { op: 'updateTransition', id: 'x', alignment: 2 },
+  },
+  {
+    name: 'removeTransition',
+    op: { op: 'removeTransition', id: 'tr-x' },
+    ops: [
+      {
+        op: 'addTransition',
+        leftClipId: 'clip-left',
+        rightClipId: 'clip-right',
+        durationInFrames: 10,
+        callerId: 'tr',
+      },
+      { op: 'removeTransition', id: { $ref: 'tr#/detail/id' } },
+    ],
+    assert: (project) => assert.equal(project.timeline.transitions?.length ?? 0, 0),
+    failure: { op: 'removeTransition', id: 'ghost' },
+  },
+  {
+    name: 'setTransformParent',
+    op: { op: 'setTransformParent', id: 'clip-right', parentItemId: 'clip-left' },
+    assert: (project) => {
+      const child = item(project, 'clip-right')
+      assert.equal(child.transformParent?.parentItemId, 'clip-left')
+      assert.ok(child.transformParent.childLocalReference.width > 0)
+      assert.ok(child.transformParent.childWorldReference.width > 0)
+    },
+    failure: { op: 'setTransformParent', id: 'clip-right', parentItemId: 'missing' },
   },
   {
     name: 'addTrack',

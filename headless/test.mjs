@@ -416,6 +416,119 @@ async function main() {
       `got ${editedSummary.durationSeconds}, expected ${expectedEditedDurationSeconds}`,
     )
     check('edited render produced bytes (>1KB)', editedSize > 1000, `size ${editedSize}`)
+
+    console.log('\nFrame grab + layout dump:')
+    const frameDownloadPromise = page.waitForEvent('download', { timeout: 60_000 })
+    frameDownloadPromise.catch(() => {})
+    const frameSummary = await page.evaluate((input) => window.freecut.renderFrame(input), {
+      project: reopenedProject,
+      atSeconds: 1,
+    })
+    const framePath = path.join(tempDir, 'frame.png')
+    const frameDownload = await frameDownloadPromise
+    await frameDownload.saveAs(framePath)
+    const frameSize = fs.existsSync(framePath) ? fs.statSync(framePath).size : 0
+    check('frame grab returns ok', frameSummary.ok === true)
+    check(
+      'frame grab matches project resolution',
+      frameSummary.width === (reopenedProject.metadata?.width ?? -1),
+      `got ${frameSummary.width}`,
+    )
+    check('frame PNG has real pixels (>10KB)', frameSize > 10_000, `size ${frameSize}`)
+
+    const layout = await page.evaluate((input) => window.freecut.dumpLayout(input), {
+      project: reopenedProject,
+      atSeconds: 1,
+    })
+    const titleBox = layout.items.find((box) => box.id === 'text-1')
+    check('layout reports the title box', Boolean(titleBox))
+    check(
+      'layout title is visible with sane bounds',
+      Boolean(titleBox && titleBox.visible && titleBox.width > 0 && titleBox.height > 0),
+      titleBox ? `${titleBox.width}x${titleBox.height}` : 'missing',
+    )
+    check('layout carries a validation warnings array', Array.isArray(layout.warnings))
+
+    // textLayout: real measured geometry (lines + inline-span runs) for text items.
+    const tl = titleBox?.textLayout
+    check('layout exposes textLayout for text items', Boolean(tl && tl.lines.length >= 1))
+    check(
+      'textLayout line has positive width within the box',
+      Boolean(
+        tl &&
+          tl.lines.every(
+            (line) => line.width > 0 && line.inkWidth > 0 && line.width <= tl.box.width + 0.5,
+          ),
+      ),
+      tl ? JSON.stringify(tl.lines.map((line) => line.width)) : 'missing',
+    )
+    check(
+      'textLayout baseline sits inside the box',
+      Boolean(
+        tl &&
+          tl.lines.every((line) => line.baseline > tl.box.y && line.baseline <= tl.box.y + tl.box.height),
+      ),
+    )
+
+    const spanProject = JSON.parse(JSON.stringify(reopenedProject))
+    const spanTrack = {
+      ...spanProject.timeline.tracks[0],
+      id: 'track-spans',
+      name: 'Spans',
+      order: Math.min(...spanProject.timeline.tracks.map((track) => track.order)) - 1,
+    }
+    spanProject.timeline.tracks.push(spanTrack)
+    spanProject.timeline.items.push({
+      ...spanProject.timeline.items.find((item) => item.id === 'text-1'),
+      id: 'text-spans',
+      trackId: 'track-spans',
+      text: 'до КЛЮЧ после',
+      textSpans: [{ text: 'до ' }, { text: 'КЛЮЧ', color: '#FF7A00' }, { text: ' после' }],
+      spanLayout: 'inline',
+      from: 0,
+      durationInFrames: 60,
+    })
+    const spanLayoutDump = await page.evaluate((input) => window.freecut.dumpLayout(input), {
+      project: spanProject,
+      frame: 1,
+    })
+    const spanBox = spanLayoutDump.items.find((box) => box.id === 'text-spans')
+    check('span item present in layout dump', Boolean(spanBox), spanBox ? 'ok' : 'item missing')
+    const spanRuns = spanBox?.textLayout?.lines?.[0]?.spans
+    check('inline spanLayout yields per-span runs', Boolean(spanRuns && spanRuns.length === 3))
+    check(
+      'span runs advance left-to-right with positive widths',
+      Boolean(
+        spanRuns &&
+          spanRuns.every((run) => run.width > 0) &&
+          spanRuns[1].x > spanRuns[0].x &&
+          spanRuns[2].x > spanRuns[1].x,
+      ),
+      spanRuns ? JSON.stringify(spanRuns.map((run) => [Math.round(run.x), Math.round(run.width)])) : 'missing',
+    )
+
+    // --strict must fail BEFORE rendering on silent-failure findings.
+    const brokenProject = JSON.parse(JSON.stringify(reopenedProject))
+    brokenProject.timeline.items.push({
+      ...brokenProject.timeline.items.find((item) => item.id === 'text-1'),
+      id: 'text-overlap',
+    })
+    const strictError = await page.evaluate(
+      async (input) => {
+        try {
+          await window.freecut.dumpLayout(input)
+          return null
+        } catch (error) {
+          return String(error?.message ?? error)
+        }
+      },
+      { project: brokenProject, strict: true },
+    )
+    check(
+      'strict mode rejects a project with overlapping items',
+      Boolean(strictError && strictError.includes('TRACK_OVERLAP_REPAIRED')),
+      strictError ?? 'no error thrown',
+    )
   } finally {
     await browser.close()
     await server.close()

@@ -5,6 +5,10 @@
 
 import type { TimelineItem } from '@/types/timeline'
 import { hasCornerPin } from '@/features/export/deps/composition-runtime'
+// Side-effect: populate the registry. Without it every consumer that does not
+// happen to load the editor UI (the headless harness, workers) silently falls
+// back to the built-in switch, turning 38 declared presets into hard cuts.
+import '@/shared/timeline/transitions'
 import { transitionRegistry } from '@/shared/timeline/transitions/registry'
 import type { GpuTexturePool } from '@/infrastructure/gpu-compositor'
 import {

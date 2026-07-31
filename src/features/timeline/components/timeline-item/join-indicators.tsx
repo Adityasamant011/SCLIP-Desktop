@@ -1,6 +1,34 @@
-import { memo } from 'react'
+import { createContext, memo, useContext, useDeferredValue, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/shared/ui/cn'
+import { useZoomStore } from '../../stores/zoom-store'
+import { getDemotionAwarePixelsPerSecond } from '../../utils/timeline-dom-density'
+
+const JOIN_INDICATOR_MIN_ZOOM_PPS = 30
+const TimelineJoinIndicatorsEnabledContext = createContext(true)
+
+export function TimelineJoinIndicatorsZoomGate({ children }: { children: ReactNode }) {
+  const enabledAtRenderZoom = useZoomStore((state) => {
+    return (
+      getDemotionAwarePixelsPerSecond(
+        state.contentPixelsPerSecond,
+        state.pixelsPerSecond,
+        state.isZoomInteracting,
+      ) >= JOIN_INDICATOR_MIN_ZOOM_PPS
+    )
+  })
+  const deferredEnabled = useDeferredValue(enabledAtRenderZoom)
+  // Promotion can wait for React's transition lane, but zoom-out demotion must
+  // be immediate so even a saturated split cohort removes its indicator leaves
+  // before the settle commit.
+  const enabled = enabledAtRenderZoom && deferredEnabled
+
+  return (
+    <TimelineJoinIndicatorsEnabledContext.Provider value={enabled}>
+      {children}
+    </TimelineJoinIndicatorsEnabledContext.Provider>
+  )
+}
 
 interface JoinIndicatorsProps {
   hasJoinableLeft: boolean
@@ -12,6 +40,18 @@ interface JoinIndicatorsProps {
   isStretching: boolean
   isBeingDragged: boolean
 }
+
+/**
+ * Keeps the global 30 PPS branch off the TimelineItem render path. Crossing
+ * that threshold updates these tiny leaves through a transition, so a dense
+ * split cohort cannot synchronously rerender every full clip component.
+ */
+export const ZoomGatedJoinIndicators = memo(function ZoomGatedJoinIndicators(
+  props: JoinIndicatorsProps,
+) {
+  const enabled = useContext(TimelineJoinIndicatorsEnabledContext)
+  return enabled ? <JoinIndicators {...props} /> : null
+})
 
 /**
  * Join indicators for timeline items
