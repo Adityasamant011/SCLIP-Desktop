@@ -7,6 +7,10 @@
 
 import type { Transition, WipeDirection, SlideDirection, FlipDirection } from '@/types/transition'
 import type { TimelineItem } from '@/types/timeline'
+// Side-effect: populate the registry. Without it every consumer that does not
+// happen to load the editor UI (the headless harness, workers) silently falls
+// back to the built-in switch, turning 38 declared presets into hard cuts.
+import '@/shared/timeline/transitions'
 import { transitionRegistry } from '@/shared/timeline/transitions/registry'
 import { createLogger } from '@/shared/logging/logger'
 import type { TransitionPipeline } from '@/infrastructure/gpu-transitions'
