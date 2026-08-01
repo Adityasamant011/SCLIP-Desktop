@@ -1,5 +1,11 @@
 import { useMemo, useCallback, useState, useRef } from 'react'
 import { flushSync } from 'react-dom'
+import { resolveAnimatedTextItem } from '@/features/preview/deps/keyframes'
+import {
+  useKeyframesStore,
+  useTimelineSettingsStore,
+} from '@/features/preview/deps/timeline-store'
+import { useResolvedPlaybackFrame } from '@/shared/state/playback/use-resolved-playback-frame'
 import type { TimelineItem } from '@/types/timeline'
 import type {
   GizmoHandle,
@@ -91,6 +97,24 @@ export function GroupGizmo({
 
   const { projectSize } = coordParams
   const scale = getEffectiveScale(coordParams)
+  const fps = useTimelineSettingsStore((state) => state.fps)
+  const animationFrame = useResolvedPlaybackFrame()
+  const keyframesByItemId = useKeyframesStore((state) => state.keyframesByItemId)
+
+  const resolvedItems = useMemo(
+    () =>
+      items.map((item) =>
+        item.type === 'text'
+          ? resolveAnimatedTextItem(
+              item,
+              keyframesByItemId[item.id],
+              animationFrame - item.from,
+              { width: projectSize.width, height: projectSize.height, fps },
+            )
+          : item,
+      ),
+    [animationFrame, fps, items, keyframesByItemId, projectSize.height, projectSize.width],
+  )
 
   // Get visual transforms for all items (includes keyframes and any existing preview)
   // Note: During group interaction, we use our own preview which takes priority
@@ -475,7 +499,7 @@ export function GroupGizmo({
         )
         setPreviewTransforms(
           newTransforms,
-          buildGroupScaledTextProperties(items, groupState.itemTransforms, newTransforms),
+          buildGroupScaledTextProperties(resolvedItems, groupState.itemTransforms, newTransforms),
         )
       }
 
@@ -490,6 +514,7 @@ export function GroupGizmo({
     },
     [
       items,
+      resolvedItems,
       itemTransforms,
       projectSize,
       toCanvasPoint,

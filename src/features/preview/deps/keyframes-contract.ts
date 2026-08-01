@@ -15,6 +15,7 @@ export { removeMotionModifiers } from '@/features/keyframes/utils/motion-modifie
 export { isFrameInTransitionRegion } from '@/features/keyframes/utils/transition-region'
 export { resolveAnimatedTextItem } from '@/features/keyframes/utils/animated-text-item'
 export { resolveAnimatedShapeItem } from '@/features/keyframes/utils/animated-shape-item'
+export { resetAutoKeyframeStore } from '@/features/keyframes/stores/auto-keyframe-store'
 export {
   clonePathVertices,
   getChangedPathVertexValues,
