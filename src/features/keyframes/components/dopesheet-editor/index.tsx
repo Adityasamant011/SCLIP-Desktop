@@ -137,6 +137,7 @@ import {
   PROPERTY_COLUMN_WIDTH,
   SPACIOUS_PROPERTY_COLUMN_WIDTH,
   ROW_HEIGHT,
+  RULER_HEIGHT,
   SNAP_THRESHOLD_PX,
   ZOOM_IN_FACTOR,
   ZOOM_OUT_FACTOR,
@@ -215,6 +216,8 @@ interface DopesheetEditorProps {
   itemFrom?: number
   /** Total duration in frames */
   totalFrames?: number
+  /** Optional span in the editor's frame space, subtly highlighted behind the sheet lanes. */
+  affectedFrameRange?: { fromFrame: number; toFrame: number }
   /** Stored keyframes currently parked beyond the item's visible out point. */
   trimmedKeyframeCount?: number
   /** Destructively consolidate parked keyframes to the visible item bounds. */
@@ -763,7 +766,11 @@ const TimelineViewportCuller = memo(function TimelineViewportCuller({
   useEffect(() => {
     const node = rootRef.current
     if (!node || typeof IntersectionObserver === 'undefined') return
-    const motionScrollRoot = node.closest('[data-testid="motion-layer-scroll-area"]')
+    // Classic Edit has its own scroller. Observing against the browser viewport
+    // can report every row as hidden while the panel is opening and stay stale.
+    const scrollRoot =
+      node.closest('[data-dopesheet-scroll-viewport]') ??
+      node.closest('[data-testid="motion-layer-scroll-area"]')
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (!entry) return
@@ -771,7 +778,7 @@ const TimelineViewportCuller = memo(function TimelineViewportCuller({
         setIsNearViewport(entry.isIntersecting)
       },
       {
-        root: motionScrollRoot,
+        root: scrollRoot,
         rootMargin: '96px 0px',
       },
     )
@@ -801,6 +808,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   globalFrame = null,
   itemFrom = 0,
   totalFrames = 300,
+  affectedFrameRange,
   trimmedKeyframeCount = 0,
   onTrimAnimation,
   fps = 30,
@@ -1671,6 +1679,17 @@ export const DopesheetEditor = memo(function DopesheetEditor({
     (frame: number) => getFrameAxisX(frame, viewport, effectiveTimelineWidth, timelineEdgeInset),
     [effectiveTimelineWidth, timelineEdgeInset, viewport],
   )
+  const affectedFrameRangeGeometry = useMemo(() => {
+    if (!affectedFrameRange || affectedFrameRange.toFrame <= affectedFrameRange.fromFrame) {
+      return null
+    }
+    const rawLeft = frameToX(affectedFrameRange.fromFrame)
+    const rawRight = frameToX(affectedFrameRange.toFrame)
+    const left = Math.max(0, Math.min(effectiveTimelineWidth, rawLeft))
+    const right = Math.max(0, Math.min(effectiveTimelineWidth, rawRight))
+    if (right <= left) return null
+    return { left, width: right - left }
+  }, [affectedFrameRange, effectiveTimelineWidth, frameToX])
   const sharedGridFrameToX = useCallback(
     (frame: number) =>
       getFrameAxisX(
@@ -5038,6 +5057,18 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       customGraphContent={graphMode === 'speed' ? speedGraphContent : undefined}
     />
   )
+  const affectedFrameRangeOverlayElement =
+    affectedFrameRange && affectedFrameRangeGeometry ? (
+      <div
+        data-testid="dopesheet-affected-frame-range"
+        data-from-frame={affectedFrameRange.fromFrame}
+        data-to-frame={affectedFrameRange.toFrame}
+        data-dopesheet-from-frame={affectedFrameRange.fromFrame}
+        data-dopesheet-to-frame={affectedFrameRange.toFrame}
+        className="absolute inset-y-0 border-x border-foreground/[0.10] bg-foreground/[0.035]"
+        style={affectedFrameRangeGeometry}
+      />
+    ) : null
 
   if (presentation === 'lanes') {
     return (
@@ -5137,6 +5168,16 @@ export const DopesheetEditor = memo(function DopesheetEditor({
           )}
           onWheel={viewportInteractionEnabled ? handleWheel : undefined}
         >
+          {affectedFrameRangeOverlayElement ? (
+            <div
+              data-motion-viewport-surface
+              data-motion-viewport-axis-width={effectiveTimelineWidth}
+              className="pointer-events-none absolute bottom-0 right-0 z-[5] overflow-hidden"
+              style={{ left: columnWidth, top: RULER_HEIGHT }}
+            >
+              {affectedFrameRangeOverlayElement}
+            </div>
+          ) : null}
           {skimPlayheadOverlayElement}
           {playheadOverlayElement}
           {rulerHeaderElement}

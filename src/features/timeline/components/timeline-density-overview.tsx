@@ -1,5 +1,6 @@
-import { memo, useEffect, useMemo, useRef } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef } from 'react'
 import { flushSync } from 'react-dom'
+import { useShallow } from 'zustand/react/shallow'
 import { cn } from '@/shared/ui/cn'
 import { useEditorStore } from '@/shared/state/editor'
 import { useSelectionStore } from '@/shared/state/selection'
@@ -13,6 +14,7 @@ import {
 } from '../utils/timeline-density-overview'
 import { DENSE_TIMELINE_MAX_OVERVIEW_BUCKETS_PER_TRACK } from '../utils/timeline-dom-density'
 import { registerTimelineDensityMarqueeBucket } from '../utils/timeline-density-marquee-preview'
+import { useLinkedEditPreviewStore } from '../stores/linked-edit-preview-store'
 
 interface TimelineDensityOverviewProps {
   items: ReadonlyArray<TimelineItem>
@@ -75,13 +77,32 @@ export const TimelineDensityOverview = memo(function TimelineDensityOverview({
   trackHidden,
 }: TimelineDensityOverviewProps) {
   const overviewRef = useRef<HTMLDivElement>(null)
+  const itemIds = useMemo(() => items.map((item) => item.id), [items])
+  const previewUpdates = useLinkedEditPreviewStore(
+    useShallow(
+      useCallback(
+        (state) => itemIds.map((itemId) => state.updatesById[itemId] ?? null),
+        [itemIds],
+      ),
+    ),
+  )
+  const previewItems = useMemo(
+    () =>
+      items.flatMap((item, index) => {
+        const update = previewUpdates[index]
+        if (!update) return [item]
+        if (update.hidden) return []
+        return [{ ...item, ...update } as TimelineItem]
+      }),
+    [items, previewUpdates],
+  )
   const buckets = useMemo(
     () =>
       buildTimelineDensityBuckets(
-        items,
+        previewItems,
         DENSE_TIMELINE_MAX_OVERVIEW_BUCKETS_PER_TRACK,
       ),
-    [items],
+    [previewItems],
   )
 
   useEffect(() => {

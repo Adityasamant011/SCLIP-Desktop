@@ -34,6 +34,45 @@ function keepTightestDelta(requested: number, candidate: number): number {
   return requested < 0 ? Math.max(requested, candidate) : Math.min(requested, candidate)
 }
 
+interface SynchronizedTrimOptions {
+  forceLinked?: boolean
+  itemIds?: readonly string[]
+}
+
+function getSynchronizedTrimItems(
+  items: TimelineItem[],
+  anchorId: string,
+  options: SynchronizedTrimOptions,
+): TimelineItem[] {
+  const linkedSelectionEnabled = options.forceLinked === true || isLinkedSelectionEnabled()
+  const requestedIds = [
+    anchorId,
+    ...(options.itemIds ?? []).filter((itemId) => itemId !== anchorId),
+  ]
+  const synchronizedById = new Map<string, TimelineItem>()
+
+  if (options.itemIds !== undefined) {
+    const itemById = new Map(items.map((item) => [item.id, item]))
+    for (const requestedId of requestedIds) {
+      const requestedItem = itemById.get(requestedId)
+      if (requestedItem) synchronizedById.set(requestedItem.id, requestedItem)
+    }
+    return Array.from(synchronizedById.values())
+  }
+
+  for (const requestedId of requestedIds) {
+    for (const synchronizedItem of getSynchronizedLinkedItemsForEdit(
+      items,
+      requestedId,
+      linkedSelectionEnabled,
+    )) {
+      synchronizedById.set(synchronizedItem.id, synchronizedItem)
+    }
+  }
+
+  return Array.from(synchronizedById.values())
+}
+
 function clampSlideParticipantDelta(
   requestedDelta: number,
   item: TimelineItem,
@@ -142,15 +181,11 @@ function applySynchronizedTrim(
   id: string,
   handle: 'start' | 'end',
   trimAmount: number,
-  forceLinked: boolean,
+  options: SynchronizedTrimOptions,
 ): void {
   const itemsStore = useItemsStore.getState()
   const itemsBefore = itemsStore.items
-  const synchronizedItems = getSynchronizedLinkedItemsForEdit(
-    itemsBefore,
-    id,
-    forceLinked || isLinkedSelectionEnabled(),
-  )
+  const synchronizedItems = getSynchronizedTrimItems(itemsBefore, id, options)
   const anchorBefore = synchronizedItems.find((item) => item.id === id)
   if (!anchorBefore) return
 
@@ -218,28 +253,28 @@ function applySynchronizedTrim(
 export function trimItemStart(
   id: string,
   trimAmount: number,
-  options: { forceLinked?: boolean } = {},
+  options: SynchronizedTrimOptions = {},
 ): void {
   execute(
     'TRIM_ITEM_START',
     () => {
-      applySynchronizedTrim(id, 'start', trimAmount, options.forceLinked === true)
+      applySynchronizedTrim(id, 'start', trimAmount, options)
     },
-    { id, trimAmount },
+    { id, trimAmount, itemIds: options.itemIds },
   )
 }
 
 export function trimItemEnd(
   id: string,
   trimAmount: number,
-  options: { forceLinked?: boolean } = {},
+  options: SynchronizedTrimOptions = {},
 ): void {
   execute(
     'TRIM_ITEM_END',
     () => {
-      applySynchronizedTrim(id, 'end', trimAmount, options.forceLinked === true)
+      applySynchronizedTrim(id, 'end', trimAmount, options)
     },
-    { id, trimAmount },
+    { id, trimAmount, itemIds: options.itemIds },
   )
 }
 
@@ -248,6 +283,7 @@ export function trimItemBreakingTransition(
   handle: 'start' | 'end',
   trimAmount: number,
   transitionIdsToRemove: string[],
+  options: Pick<SynchronizedTrimOptions, 'itemIds'> = {},
 ): void {
   execute(
     handle === 'start' ? 'TRIM_ITEM_START' : 'TRIM_ITEM_END',
@@ -256,12 +292,13 @@ export function trimItemBreakingTransition(
         useTransitionsStore.getState()._removeTransitions(transitionIdsToRemove)
       }
 
-      applySynchronizedTrim(id, handle, trimAmount, false)
+      applySynchronizedTrim(id, handle, trimAmount, options)
     },
     {
       id,
       handle,
       trimAmount,
+      itemIds: options.itemIds,
       removedTransitionCount: transitionIdsToRemove.length,
     },
   )

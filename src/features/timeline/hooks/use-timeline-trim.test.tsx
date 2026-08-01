@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import { act, renderHook } from '@testing-library/react'
-import type { TimelineItem, VideoItem } from '@/types/timeline'
+import type { TextItem, TimelineItem, VideoItem } from '@/types/timeline'
 import type { Transition } from '@/types/transition'
 import { makeTimelineAudioItem, makeTimelineTrack, makeTimelineVideoItem } from '../test-helpers'
 import { resetPlaybackPreviewState } from '@/shared/state/playback-preview-test-helpers'
@@ -38,6 +38,7 @@ function setupStores() {
   useTransitionsStore.getState().setTransitions([])
   useSelectionStore.getState().setDragState(null)
   useSelectionStore.getState().setActiveSnapTarget(null)
+  useSelectionStore.getState().clearSelection()
   useRollingEditPreviewStore.getState().clearPreview()
   useRippleEditPreviewStore.getState().clearPreview()
   useTransitionBreakPreviewStore.getState().clearPreview()
@@ -249,6 +250,301 @@ describe('useTimelineTrim', () => {
 
       expect(getItem('video-1').durationInFrames).toBe(50)
       expect(getItem('audio-1').durationInFrames).toBe(50)
+    })
+
+    it('trims a mixed text and linked A/V selection as one undoable group', () => {
+      const text: TextItem = {
+        id: 'text-1',
+        type: 'text',
+        trackId: 'track-v2',
+        from: 0,
+        durationInFrames: 60,
+        label: 'CINEMA',
+        text: 'CINEMA',
+        color: '#ffffff',
+      }
+      const video = makeTimelineVideoItem({ id: 'video-1', linkedGroupId: 'lg-1' })
+      const audio = makeTimelineAudioItem({ id: 'audio-1', linkedGroupId: 'lg-1' })
+      useItemsStore.getState().setItems([text, video, audio])
+      useSelectionStore.getState().selectItems(['text-1', 'video-1', 'audio-1'])
+      const undoDepthBefore = useTimelineCommandStore.getState().undoStack.length
+      const { result } = renderTrimHook(text)
+
+      startTrim(result, 'end')
+      moveMouse(-10)
+
+      expect(useSelectionStore.getState().dragState?.draggedItemIds).toEqual(['text-1'])
+      const previewUpdates = useLinkedEditPreviewStore.getState().updatesById
+      expect(previewUpdates['video-1']?.durationInFrames).toBe(50)
+      expect(previewUpdates['audio-1']?.durationInFrames).toBe(50)
+
+      releaseMouse()
+
+      expect(getItem('text-1').durationInFrames).toBe(50)
+      expect(getItem('video-1').durationInFrames).toBe(50)
+      expect(getItem('audio-1').durationInFrames).toBe(50)
+      expect(useTimelineCommandStore.getState().undoStack.length).toBe(undoDepthBefore + 1)
+
+      act(() => {
+        useTimelineCommandStore.getState().undo()
+      })
+      expect(getItem('text-1').durationInFrames).toBe(60)
+      expect(getItem('video-1').durationInFrames).toBe(60)
+      expect(getItem('audio-1').durationInFrames).toBe(60)
+    })
+
+    it('excludes horizontally selected clips that do not share the trim edge', () => {
+      const text: TextItem = {
+        id: 'text-1',
+        type: 'text',
+        trackId: 'track-v2',
+        from: 120,
+        durationInFrames: 60,
+        label: 'CINEMA',
+        text: 'CINEMA',
+        color: '#ffffff',
+      }
+      const alignedVideo = makeTimelineVideoItem({
+        id: 'video-aligned',
+        linkedGroupId: 'lg-aligned',
+        from: 100,
+        durationInFrames: 80,
+      })
+      const alignedAudio = makeTimelineAudioItem({
+        id: 'audio-aligned',
+        linkedGroupId: 'lg-aligned',
+        from: 100,
+        durationInFrames: 80,
+      })
+      const earlierVideo = makeTimelineVideoItem({
+        id: 'video-earlier',
+        linkedGroupId: 'lg-earlier',
+        from: 40,
+        durationInFrames: 60,
+      })
+      const earlierAudio = makeTimelineAudioItem({
+        id: 'audio-earlier',
+        linkedGroupId: 'lg-earlier',
+        from: 40,
+        durationInFrames: 60,
+      })
+      useItemsStore
+        .getState()
+        .setItems([text, alignedVideo, alignedAudio, earlierVideo, earlierAudio])
+      useSelectionStore
+        .getState()
+        .selectItems([
+          'text-1',
+          'video-aligned',
+          'audio-aligned',
+          'video-earlier',
+          'audio-earlier',
+        ])
+      const { result } = renderTrimHook(text)
+
+      startTrim(result, 'end')
+      moveMouse(-10)
+
+      const previewUpdates = useLinkedEditPreviewStore.getState().updatesById
+      expect(previewUpdates['video-aligned']?.durationInFrames).toBe(70)
+      expect(previewUpdates['audio-aligned']?.durationInFrames).toBe(70)
+      expect(previewUpdates['video-earlier']).toBeUndefined()
+      expect(previewUpdates['audio-earlier']).toBeUndefined()
+
+      releaseMouse()
+
+      expect(getItem('text-1').durationInFrames).toBe(50)
+      expect(getItem('video-aligned').durationInFrames).toBe(70)
+      expect(getItem('audio-aligned').durationInFrames).toBe(70)
+      expect(getItem('video-earlier').durationInFrames).toBe(60)
+      expect(getItem('audio-earlier').durationInFrames).toBe(60)
+    })
+
+    it('uses the shared start edge instead of an adjacent selected clip end', () => {
+      const text: TextItem = {
+        id: 'text-1',
+        type: 'text',
+        trackId: 'track-v2',
+        from: 100,
+        durationInFrames: 60,
+        label: 'CINEMA',
+        text: 'CINEMA',
+        color: '#ffffff',
+      }
+      const alignedVideo = makeTimelineVideoItem({
+        id: 'video-aligned',
+        linkedGroupId: 'lg-aligned',
+        from: 100,
+        durationInFrames: 80,
+      })
+      const alignedAudio = makeTimelineAudioItem({
+        id: 'audio-aligned',
+        linkedGroupId: 'lg-aligned',
+        from: 100,
+        durationInFrames: 80,
+      })
+      const earlierVideo = makeTimelineVideoItem({
+        id: 'video-earlier',
+        linkedGroupId: 'lg-earlier',
+        from: 40,
+        durationInFrames: 60,
+      })
+      const earlierAudio = makeTimelineAudioItem({
+        id: 'audio-earlier',
+        linkedGroupId: 'lg-earlier',
+        from: 40,
+        durationInFrames: 60,
+      })
+      useItemsStore
+        .getState()
+        .setItems([text, alignedVideo, alignedAudio, earlierVideo, earlierAudio])
+      useSelectionStore
+        .getState()
+        .selectItems([
+          'text-1',
+          'video-aligned',
+          'audio-aligned',
+          'video-earlier',
+          'audio-earlier',
+        ])
+      const { result } = renderTrimHook(text)
+
+      startTrim(result, 'start')
+      moveMouse(10)
+
+      const previewUpdates = useLinkedEditPreviewStore.getState().updatesById
+      expect(previewUpdates['video-aligned']).toMatchObject({
+        from: 110,
+        durationInFrames: 70,
+      })
+      expect(previewUpdates['audio-aligned']).toMatchObject({
+        from: 110,
+        durationInFrames: 70,
+      })
+      expect(previewUpdates['video-earlier']).toBeUndefined()
+      expect(previewUpdates['audio-earlier']).toBeUndefined()
+
+      releaseMouse()
+
+      expect(getItem('text-1')).toMatchObject({ from: 110, durationInFrames: 50 })
+      expect(getItem('video-aligned')).toMatchObject({ from: 110, durationInFrames: 70 })
+      expect(getItem('audio-aligned')).toMatchObject({ from: 110, durationInFrames: 70 })
+      expect(getItem('video-earlier')).toMatchObject({ from: 40, durationInFrames: 60 })
+      expect(getItem('audio-earlier')).toMatchObject({ from: 40, durationInFrames: 60 })
+    })
+
+    it('does not group a selected edge that is one frame away', () => {
+      const text: TextItem = {
+        id: 'text-1',
+        type: 'text',
+        trackId: 'track-v2',
+        from: 120,
+        durationInFrames: 60,
+        label: 'CINEMA',
+        text: 'CINEMA',
+        color: '#ffffff',
+      }
+      const nearVideo = makeTimelineVideoItem({
+        id: 'video-near',
+        from: 119,
+        durationInFrames: 60,
+      })
+      useItemsStore.getState().setItems([text, nearVideo])
+      useSelectionStore.getState().selectItems(['text-1', 'video-near'])
+      const { result } = renderTrimHook(text)
+
+      startTrim(result, 'end')
+      moveMouse(-10)
+
+      expect(useLinkedEditPreviewStore.getState().updatesById['video-near']).toBeUndefined()
+
+      releaseMouse()
+
+      expect(getItem('text-1').durationInFrames).toBe(50)
+      expect(getItem('video-near').durationInFrames).toBe(60)
+    })
+
+    it('leaves a vertically aligned selected companion unchanged on a locked track', () => {
+      const text: TextItem = {
+        id: 'text-1',
+        type: 'text',
+        trackId: 'track-v2',
+        from: 0,
+        durationInFrames: 60,
+        label: 'CINEMA',
+        text: 'CINEMA',
+        color: '#ffffff',
+      }
+      const video = makeTimelineVideoItem({ id: 'video-1', linkedGroupId: 'lg-1' })
+      const audio = makeTimelineAudioItem({ id: 'audio-1', linkedGroupId: 'lg-1' })
+      useItemsStore
+        .getState()
+        .setTracks([
+          makeTimelineTrack({ id: 'track-v1', name: 'V1', kind: 'video', order: 0 }),
+          makeTimelineTrack({ id: 'track-v2', name: 'V2', kind: 'video', order: 1 }),
+          makeTimelineTrack({
+            id: 'track-a1',
+            name: 'A1',
+            kind: 'audio',
+            order: 2,
+            locked: true,
+          }),
+        ])
+      useItemsStore.getState().setItems([text, video, audio])
+      useSelectionStore.getState().selectItems(['text-1', 'video-1', 'audio-1'])
+      const { result } = renderTrimHook(text)
+
+      startTrim(result, 'end')
+      moveMouse(-10)
+
+      const previewUpdates = useLinkedEditPreviewStore.getState().updatesById
+      expect(previewUpdates['video-1']?.durationInFrames).toBe(50)
+      expect(previewUpdates['audio-1']).toBeUndefined()
+
+      releaseMouse()
+
+      expect(getItem('text-1').durationInFrames).toBe(50)
+      expect(getItem('video-1').durationInFrames).toBe(50)
+      expect(getItem('audio-1').durationInFrames).toBe(60)
+    })
+
+    it('uses the tightest neighbor clamp across the vertical trim group', () => {
+      const text: TextItem = {
+        id: 'text-1',
+        type: 'text',
+        trackId: 'track-v2',
+        from: 0,
+        durationInFrames: 60,
+        label: 'CINEMA',
+        text: 'CINEMA',
+        color: '#ffffff',
+      }
+      const video = makeTimelineVideoItem({ id: 'video-1', linkedGroupId: 'lg-1' })
+      const audio = makeTimelineAudioItem({ id: 'audio-1', linkedGroupId: 'lg-1' })
+      const audioNeighbor = makeTimelineAudioItem({
+        id: 'audio-neighbor',
+        mediaId: 'media-2',
+        from: 65,
+        durationInFrames: 30,
+      })
+      useItemsStore.getState().setItems([text, video, audio, audioNeighbor])
+      useSelectionStore.getState().selectItems(['text-1', 'video-1', 'audio-1'])
+      const { result } = renderTrimHook(text)
+
+      startTrim(result, 'end')
+      moveMouse(20)
+
+      expect(result.current.trimDelta).toBe(5)
+      expect(result.current.trimConstraintLabel).toBe('neighbor limit')
+      expect(useLinkedEditPreviewStore.getState().updatesById['video-1']?.durationInFrames).toBe(65)
+      expect(useLinkedEditPreviewStore.getState().updatesById['audio-1']?.durationInFrames).toBe(65)
+
+      releaseMouse()
+
+      expect(getItem('text-1').durationInFrames).toBe(65)
+      expect(getItem('video-1').durationInFrames).toBe(65)
+      expect(getItem('audio-1').durationInFrames).toBe(65)
+      expect(getItem('audio-neighbor').from).toBe(65)
     })
   })
 
