@@ -368,6 +368,8 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
   const { marquee } = useMediaLibraryMarquee({
     compositions,
     filteredMediaItems,
+    selectedMediaIds,
+    selectedCompositionIds,
     scrollContainerRef,
     setSelection,
   })

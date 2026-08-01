@@ -11,6 +11,8 @@ interface MarqueeHarnessProps {
   onPreviewSelectionChange?: (ids: string[]) => void
   onGestureEnd: (event: MouseEvent, wasActualDrag: boolean) => void
   onGestureCancel?: (wasActualDrag: boolean) => void
+  committedSelectionIds?: readonly string[]
+  liveCommitThrottleMs?: number
 }
 
 function createRect(left: number, top: number, right: number, bottom: number): Rect {
@@ -31,6 +33,8 @@ function MarqueeHarness({
   onPreviewSelectionChange,
   onGestureEnd,
   onGestureCancel,
+  committedSelectionIds,
+  liveCommitThrottleMs = 0,
 }: MarqueeHarnessProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const items = useMemo(
@@ -57,9 +61,11 @@ function MarqueeHarness({
     resolveItems,
     onSelectionChange,
     onPreviewSelectionChange,
+    committedSelectionIds,
     onGestureEnd,
     onGestureCancel,
     commitSelectionOnMouseUp: true,
+    liveCommitThrottleMs,
   })
 
   return (
@@ -89,6 +95,7 @@ describe('useMarqueeSelection deferred commits', () => {
   })
 
   afterEach(() => {
+    vi.restoreAllMocks()
     vi.unstubAllGlobals()
   })
 
@@ -303,6 +310,42 @@ describe('useMarqueeSelection deferred commits', () => {
     expect(onGestureCancel).toHaveBeenCalledWith(true)
     expect(onGestureEnd).not.toHaveBeenCalled()
     expect(onSelectionChange).not.toHaveBeenCalled()
+  })
+
+  it('restores the committed selection when cancellation follows a throttled live commit', () => {
+    vi.spyOn(performance, 'now').mockReturnValue(100)
+    const onSelectionChange = vi.fn<(ids: string[]) => void>()
+    const onGestureEnd = vi.fn<(event: MouseEvent, wasActualDrag: boolean) => void>()
+    const { getByTestId } = render(
+      <MarqueeHarness
+        committedSelectionIds={['previous-selection']}
+        liveCommitThrottleMs={66}
+        onSelectionChange={onSelectionChange}
+        onGestureEnd={onGestureEnd}
+      />,
+    )
+    const container = getByTestId('marquee-container')
+
+    Object.defineProperties(container, {
+      clientWidth: { configurable: true, value: 200 },
+      clientHeight: { configurable: true, value: 200 },
+      getBoundingClientRect: {
+        configurable: true,
+        value: () => createRect(0, 0, 200, 200),
+      },
+    })
+
+    fireEvent.mouseDown(container, { button: 0, clientX: 5, clientY: 5 })
+    fireEvent.mouseMove(document, { clientX: 50, clientY: 50 })
+    flushAnimationFrames()
+
+    expect(onSelectionChange).toHaveBeenCalledWith(['clip-1'])
+
+    fireEvent.blur(window)
+
+    expect(onSelectionChange).toHaveBeenLastCalledWith(['previous-selection'])
+    expect(onSelectionChange).toHaveBeenCalledTimes(2)
+    expect(onGestureEnd).not.toHaveBeenCalled()
   })
 
   it('uses a batch geometry resolver for data-driven item surfaces', () => {

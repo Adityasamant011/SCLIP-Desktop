@@ -68,6 +68,9 @@ interface UseMarqueeSelectionOptions {
   /** Optional callback for lightweight live preview updates during drag */
   onPreviewSelectionChange?: (selectedIds: string[]) => void
 
+  /** Current committed selection, used to roll back throttled live commits on cancellation. */
+  committedSelectionIds?: readonly string[]
+
   /** Called when an accepted marquee pointer gesture releases. */
   onGestureEnd?: (event: MouseEvent, wasActualDrag: boolean) => void
 
@@ -180,6 +183,7 @@ export function useMarqueeSelection({
   resolveItems,
   onSelectionChange,
   onPreviewSelectionChange,
+  committedSelectionIds,
   onGestureEnd,
   onGestureCancel,
   enabled = true,
@@ -223,6 +227,7 @@ export function useMarqueeSelection({
   const hasMovedRef = useRef(false)
   const onSelectionChangeRef = useRef(onSelectionChange)
   const onPreviewSelectionChangeRef = useRef(onPreviewSelectionChange)
+  const committedSelectionIdsRef = useRef(committedSelectionIds)
   const prevSelectedIdsRef = useRef<string[]>([])
   const rafIdRef = useRef<number | null>(null)
   const itemsRef = useRef(items)
@@ -232,6 +237,8 @@ export function useMarqueeSelection({
   const liveCommitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingLiveCommitIdsRef = useRef<string[] | null>(null)
   const lastLiveCommitTimeRef = useRef(0)
+  const gestureStartSelectionIdsRef = useRef<string[] | null>(null)
+  const hasLiveCommittedRef = useRef(false)
 
   // Keep refs up to date
   useEffect(() => {
@@ -241,6 +248,10 @@ export function useMarqueeSelection({
   useEffect(() => {
     onPreviewSelectionChangeRef.current = onPreviewSelectionChange
   }, [onPreviewSelectionChange])
+
+  useEffect(() => {
+    committedSelectionIdsRef.current = committedSelectionIds
+  }, [committedSelectionIds])
 
   useEffect(() => {
     itemsRef.current = items
@@ -270,6 +281,7 @@ export function useMarqueeSelection({
     }
     pendingLiveCommitIdsRef.current = null
     lastLiveCommitTimeRef.current = performance.now()
+    hasLiveCommittedRef.current = true
     onSelectionChangeRef.current?.(ids)
   }, [])
 
@@ -356,6 +368,9 @@ export function useMarqueeSelection({
     if (!isDraggingRef.current) return
 
     const wasActualDrag = hasMovedRef.current
+    const selectionToRestore = hasLiveCommittedRef.current
+      ? gestureStartSelectionIdsRef.current
+      : null
 
     if (rafIdRef.current !== null) {
       cancelAnimationFrame(rafIdRef.current)
@@ -372,12 +387,17 @@ export function useMarqueeSelection({
     resolvedItemsRef.current = null
     pendingLiveCommitIdsRef.current = null
     lastLiveCommitTimeRef.current = 0
+    gestureStartSelectionIdsRef.current = null
+    hasLiveCommittedRef.current = false
 
     setIsActive(false)
     publishSnapshot(INACTIVE_SNAPSHOT)
 
     if (commitSelectionOnMouseUp) {
       onPreviewSelectionChangeRef.current?.([])
+    }
+    if (selectionToRestore !== null) {
+      onSelectionChangeRef.current?.(selectionToRestore)
     }
     onGestureCancel?.(wasActualDrag)
   })
@@ -440,6 +460,10 @@ export function useMarqueeSelection({
     }
     isDraggingRef.current = true
     hasMovedRef.current = false
+    gestureStartSelectionIdsRef.current = committedSelectionIdsRef.current
+      ? [...committedSelectionIdsRef.current]
+      : null
+    hasLiveCommittedRef.current = false
     prevSelectedIdsRef.current = [] // Reset accumulated selection for new marquee
     resolvedItemsRef.current = null
     pendingLiveCommitIdsRef.current = null
@@ -589,6 +613,8 @@ export function useMarqueeSelection({
       }
       onPreviewSelectionChangeRef.current?.([])
     }
+    gestureStartSelectionIdsRef.current = null
+    hasLiveCommittedRef.current = false
   })
 
   // Cleanup RAF on unmount

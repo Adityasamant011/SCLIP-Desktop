@@ -5,6 +5,8 @@ import { useMarqueeSelection, type MarqueeItem } from '@/shared/marquee/use-marq
 interface UseMediaLibraryMarqueeParams {
   compositions: ReadonlyArray<{ id: string }>
   filteredMediaItems: MediaMetadata[]
+  selectedMediaIds: string[]
+  selectedCompositionIds: string[]
   scrollContainerRef: React.RefObject<HTMLDivElement | null>
   setSelection: (selection: { mediaIds: string[]; compositionIds: string[] }) => void
 }
@@ -18,6 +20,8 @@ interface UseMediaLibraryMarqueeParams {
 export function useMediaLibraryMarquee({
   compositions,
   filteredMediaItems,
+  selectedMediaIds,
+  selectedCompositionIds,
   scrollContainerRef,
   setSelection,
 }: UseMediaLibraryMarqueeParams) {
@@ -115,12 +119,20 @@ export function useMediaLibraryMarquee({
     ],
     [compositions, filteredMediaItems, scrollContainerRef],
   )
+  const committedSelectionIds = useMemo(
+    () => [
+      ...selectedCompositionIds.map((id) => `composition:${id}`),
+      ...selectedMediaIds.map((id) => `media:${id}`),
+    ],
+    [selectedCompositionIds, selectedMediaIds],
+  )
 
   const { marquee } = useMarqueeSelection({
     containerRef: scrollContainerRef as React.RefObject<HTMLElement>,
     items: marqueeItems,
     enabled: marqueeItems.length > 0,
     onPreviewSelectionChange: setPreviewAssetIds,
+    committedSelectionIds,
     commitSelectionOnMouseUp: true,
     liveCommitThrottleMs: 66,
     onSelectionChange: (ids) => {
