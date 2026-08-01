@@ -766,7 +766,11 @@ const TimelineViewportCuller = memo(function TimelineViewportCuller({
   useEffect(() => {
     const node = rootRef.current
     if (!node || typeof IntersectionObserver === 'undefined') return
-    const motionScrollRoot = node.closest('[data-testid="motion-layer-scroll-area"]')
+    // Classic Edit has its own scroller. Observing against the browser viewport
+    // can report every row as hidden while the panel is opening and stay stale.
+    const scrollRoot =
+      node.closest('[data-dopesheet-scroll-viewport]') ??
+      node.closest('[data-testid="motion-layer-scroll-area"]')
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (!entry) return
@@ -774,7 +778,7 @@ const TimelineViewportCuller = memo(function TimelineViewportCuller({
         setIsNearViewport(entry.isIntersecting)
       },
       {
-        root: motionScrollRoot,
+        root: scrollRoot,
         rootMargin: '96px 0px',
       },
     )
