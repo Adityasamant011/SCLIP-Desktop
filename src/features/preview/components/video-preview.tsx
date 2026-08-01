@@ -622,10 +622,16 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
     (frame: number) => {
       const nextFrame = Math.max(0, Math.round(frame))
       latestPlayerDisplayedFrameRef.current = nextFrame
-      setPlayerDisplayedFrame((prevFrame) => (prevFrame === nextFrame ? prevFrame : nextFrame))
+      // Ordinary playback consumes this imperatively through the ref below.
+      // Mirroring every Clock tick into React state invalidates the entire
+      // VideoPreview tree (including editor overlays) even though only color
+      // comparison needs a rendered-frame state value.
+      if (comparisonEnabled) {
+        setPlayerDisplayedFrame((prevFrame) => (prevFrame === nextFrame ? prevFrame : nextFrame))
+      }
       handleFrameChange(frame)
     },
-    [handleFrameChange],
+    [comparisonEnabled, handleFrameChange],
   )
 
   const getLivePlaybackFrame = useCallback(() => {
