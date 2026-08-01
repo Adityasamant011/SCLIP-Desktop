@@ -38,6 +38,11 @@ export interface TransformCommandOptions {
   autoKeyframeOperations?: AutoKeyframeOperation[]
 }
 
+export interface BatchTransformCommandOptions extends TransformCommandOptions {
+  /** Optional non-transform item writes committed with the same batch gesture. */
+  itemUpdates?: ReadonlyMap<string, Partial<TimelineItem>>
+}
+
 export interface LoadTimelineOptions {
   allowProjectUpgrade?: boolean
 }
@@ -142,7 +147,7 @@ export interface TimelineActions {
   ) => void
   updateItemsTransformMap: (
     transformsMap: Map<string, Partial<TransformProperties>>,
-    options?: TransformCommandOptions,
+    options?: BatchTransformCommandOptions,
   ) => void
   commitMaskEdit: (
     id: string,

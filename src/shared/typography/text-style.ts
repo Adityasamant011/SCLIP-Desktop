@@ -13,7 +13,7 @@ import { FONT_WEIGHT_MAP } from '@/shared/typography/fonts'
 import { getTextItemSpans } from '@/shared/utils/text-item-spans'
 
 /** Authoritative fallbacks for unspecified text-item properties. */
-const TEXT_DEFAULTS = {
+export const TEXT_DEFAULTS = {
   fontSize: 60,
   fontFamily: 'Inter',
   fontWeight: 'normal',

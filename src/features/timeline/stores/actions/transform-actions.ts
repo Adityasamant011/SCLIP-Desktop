@@ -6,7 +6,11 @@ import type { TransformProperties } from '@/types/transform'
 import type { AnimatableProperty } from '@/types/keyframe'
 import type { MaskVertex } from '@/types/masks'
 import type { LayoutConfig } from '../../utils/bento-layout'
-import type { TransformCommandOptions, TransformHistoryOperation } from '../../types'
+import type {
+  BatchTransformCommandOptions,
+  TransformCommandOptions,
+  TransformHistoryOperation,
+} from '../../types'
 import type { AutoKeyframeOperation } from '@/features/timeline/deps/keyframes'
 import { computeLayout, buildTransitionChains } from '../../utils/bento-layout'
 import { useItemsStore } from '../items-store'
@@ -241,23 +245,29 @@ export function updateItemsTransform(
 
 export function updateItemsTransformMap(
   transformsMap: Map<string, Partial<TransformProperties>>,
-  options?: TransformCommandOptions,
+  options?: BatchTransformCommandOptions,
 ): void {
-  if (transformsMap.size === 0 && (options?.autoKeyframeOperations?.length ?? 0) === 0) return
+  const itemUpdates = options?.itemUpdates
+  if (
+    transformsMap.size === 0 &&
+    (options?.autoKeyframeOperations?.length ?? 0) === 0 &&
+    (itemUpdates?.size ?? 0) === 0
+  ) {
+    return
+  }
   const operation = options?.operation ?? inferTransformOperationFromMap(transformsMap)
   const autoKeyframeOperations = options?.autoKeyframeOperations ?? []
   execute(
     'UPDATE_TRANSFORMS',
     () => {
-      if (transformsMap.size > 0) {
-        useItemsStore.getState()._updateItemsTransformMap(transformsMap)
-      }
+      useItemsStore.getState()._updateItemsTransformMap(transformsMap, itemUpdates)
       applyAutoKeyframeOperationsInCommand(autoKeyframeOperations)
       useTimelineSettingsStore.getState().markDirty()
     },
     {
       count: transformsMap.size,
       operation,
+      itemUpdateCount: itemUpdates?.size ?? 0,
       autoKeyframeOperationCount: autoKeyframeOperations.length,
     },
   )

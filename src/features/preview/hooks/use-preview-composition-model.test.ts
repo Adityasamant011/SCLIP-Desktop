@@ -2,7 +2,11 @@
 
 import { describe, expect, it } from 'vite-plus/test'
 import type { TimelineTrack } from '@/types/timeline'
-import { buildPreviewCompositionData, mergeLiveItemPreview } from './use-preview-composition-model'
+import {
+  buildPreviewCompositionData,
+  mergeLiveItemPresentation,
+  mergeLiveItemPreview,
+} from './use-preview-composition-model'
 
 describe('mergeLiveItemPreview', () => {
   it('merges live shape properties into the canvas renderer snapshot', () => {
@@ -24,6 +28,40 @@ describe('mergeLiveItemPreview', () => {
       }),
     ).toMatchObject({ trimPathOffset: 135, taperStartWidth: 20 })
     expect(shape.trimPathOffset).toBe(0)
+  })
+})
+
+describe('mergeLiveItemPresentation', () => {
+  it('uses committed text styling with the live transform while retaining snapshot timing', () => {
+    const snapshot = {
+      id: 'text-1',
+      trackId: 'track-1',
+      type: 'text' as const,
+      label: 'Title',
+      text: 'CINEMA',
+      color: '#ffffff',
+      fontSize: 120,
+      textSpans: [{ text: 'CINEMA', fontSize: 120 }],
+      from: 10,
+      durationInFrames: 100,
+      transform: { x: 0, y: 0, width: 600, height: 180 },
+    }
+    const committed = {
+      ...snapshot,
+      fontSize: 84,
+      textSpans: [{ text: 'CINEMA', fontSize: 84 }],
+      from: 20,
+      durationInFrames: 80,
+      transform: { x: 20, y: 10, width: 420, height: 126 },
+    }
+
+    expect(mergeLiveItemPresentation(snapshot, committed)).toMatchObject({
+      fontSize: 84,
+      textSpans: [{ text: 'CINEMA', fontSize: 84 }],
+      from: 10,
+      durationInFrames: 100,
+      transform: { x: 20, y: 10, width: 420, height: 126 },
+    })
   })
 })
 

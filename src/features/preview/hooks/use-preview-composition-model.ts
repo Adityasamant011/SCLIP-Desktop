@@ -111,6 +111,52 @@ export function mergeLiveItemPreview(
   return liveItem
 }
 
+/**
+ * Keep item-local presentation fields current while the composition-wide item
+ * snapshot is deferred. Timeline placement/topology still comes from the
+ * stable snapshot, but a just-committed text resize must not briefly combine
+ * its new transform with stale typography after the gizmo preview clears.
+ */
+export function mergeLiveItemPresentation(
+  item: TimelineItem,
+  liveItem: TimelineItem | undefined,
+): TimelineItem {
+  if (!liveItem || liveItem.id !== item.id || liveItem.type !== item.type) return item
+
+  const itemWithLiveTransform =
+    'transform' in liveItem &&
+    'transform' in item &&
+    liveItem.transform !== item.transform
+      ? ({ ...item, transform: liveItem.transform } as TimelineItem)
+      : item
+
+  if (item.type !== 'text' || liveItem.type !== 'text') return itemWithLiveTransform
+
+  return {
+    ...itemWithLiveTransform,
+    text: liveItem.text,
+    textSpans: liveItem.textSpans,
+    spanLayout: liveItem.spanLayout,
+    textStyleScale: liveItem.textStyleScale,
+    textMotion: liveItem.textMotion,
+    color: liveItem.color,
+    fontSize: liveItem.fontSize,
+    fontFamily: liveItem.fontFamily,
+    fontWeight: liveItem.fontWeight,
+    fontStyle: liveItem.fontStyle,
+    underline: liveItem.underline,
+    letterSpacing: liveItem.letterSpacing,
+    backgroundColor: liveItem.backgroundColor,
+    backgroundRadius: liveItem.backgroundRadius,
+    textAlign: liveItem.textAlign,
+    verticalAlign: liveItem.verticalAlign,
+    lineHeight: liveItem.lineHeight,
+    textPadding: liveItem.textPadding,
+    textShadow: liveItem.textShadow,
+    stroke: liveItem.stroke,
+  } as TimelineItem
+}
+
 export function usePreviewCompositionBaseModel({
   tracks,
   itemsByTrackId,
@@ -280,15 +326,8 @@ export function usePreviewCompositionModel({
     const item = fastScrubLiveItemsByIdRef.current.get(itemId)
     if (!item) return undefined
     const liveItem = useItemsStore.getState().itemById[itemId]
-    const itemWithLiveTransform =
-      liveItem &&
-      'transform' in liveItem &&
-      'transform' in item &&
-      liveItem.transform !== item.transform
-        ? ({ ...item, transform: liveItem.transform } as TimelineItem)
-        : item
     return mergeLiveItemPreview(
-      itemWithLiveTransform,
+      mergeLiveItemPresentation(item, liveItem),
       useGizmoStore.getState().preview?.[itemId],
     )
   }, [])

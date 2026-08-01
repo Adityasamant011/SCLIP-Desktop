@@ -1,4 +1,11 @@
 import { useMemo, useCallback, useState, useRef } from 'react'
+import { flushSync } from 'react-dom'
+import { resolveAnimatedTextItem } from '@/features/preview/deps/keyframes'
+import {
+  useKeyframesStore,
+  useTimelineSettingsStore,
+} from '@/features/preview/deps/timeline-store'
+import { useResolvedPlaybackFrame } from '@/shared/state/playback/use-resolved-playback-frame'
 import type { TimelineItem } from '@/types/timeline'
 import type {
   GizmoHandle,
@@ -27,6 +34,10 @@ import {
 } from '../utils/canvas-snap-utils'
 import { useGizmoStore, type ItemPreview } from '../stores/gizmo-store'
 import { notifyOnBlockedMouseDragIntent } from '../utils/mouse-drag-intent'
+import {
+  buildGroupScaledTextProperties,
+  type GroupScaledTextProperties,
+} from '../utils/group-text-scale'
 
 interface GroupGizmoProps {
   items: TimelineItem[]
@@ -35,6 +46,7 @@ interface GroupGizmoProps {
   onTransformEnd: (
     transforms: Map<string, Transform>,
     operation: 'move' | 'resize' | 'rotate',
+    textUpdates?: ReadonlyMap<string, GroupScaledTextProperties>,
   ) => void
   /** Called when clicking (not dragging) on a specific item to select just that item */
   onItemClick?: (itemId: string) => void
@@ -72,6 +84,7 @@ export function GroupGizmo({
 
   // Ref to track latest preview transforms for mouseup handler (avoids closure issues)
   const previewTransformsRef = useRef<Map<string, Transform> | null>(null)
+  const previewTextUpdatesRef = useRef<Map<string, GroupScaledTextProperties> | null>(null)
 
   // Unified preview store actions
   const setPreview = useGizmoStore((s) => s.setPreview)
@@ -84,6 +97,24 @@ export function GroupGizmo({
 
   const { projectSize } = coordParams
   const scale = getEffectiveScale(coordParams)
+  const fps = useTimelineSettingsStore((state) => state.fps)
+  const animationFrame = useResolvedPlaybackFrame()
+  const keyframesByItemId = useKeyframesStore((state) => state.keyframesByItemId)
+
+  const resolvedItems = useMemo(
+    () =>
+      items.map((item) =>
+        item.type === 'text'
+          ? resolveAnimatedTextItem(
+              item,
+              keyframesByItemId[item.id],
+              animationFrame - item.from,
+              { width: projectSize.width, height: projectSize.height, fps },
+            )
+          : item,
+      ),
+    [animationFrame, fps, items, keyframesByItemId, projectSize.height, projectSize.width],
+  )
 
   // Get visual transforms for all items (includes keyframes and any existing preview)
   // Note: During group interaction, we use our own preview which takes priority
@@ -110,10 +141,13 @@ export function GroupGizmo({
 
   // Helper to convert Map<string, Transform> to Record<string, ItemPreview> for store
   const mapToPreviewRecord = useCallback(
-    (transforms: Map<string, Transform>): Record<string, ItemPreview> => {
+    (
+      transforms: Map<string, Transform>,
+      textUpdates?: ReadonlyMap<string, GroupScaledTextProperties>,
+    ): Record<string, ItemPreview> => {
       const record: Record<string, ItemPreview> = {}
       for (const [id, transform] of transforms) {
-        record[id] = { transform }
+        record[id] = { transform, properties: textUpdates?.get(id) }
       }
       return record
     },
@@ -122,10 +156,14 @@ export function GroupGizmo({
 
   // Helper to update preview in store and ref
   const setPreviewTransforms = useCallback(
-    (transforms: Map<string, Transform> | null) => {
+    (
+      transforms: Map<string, Transform> | null,
+      textUpdates: Map<string, GroupScaledTextProperties> | null = null,
+    ) => {
       previewTransformsRef.current = transforms
+      previewTextUpdatesRef.current = textUpdates
       if (transforms) {
-        setPreview(mapToPreviewRecord(transforms))
+        setPreview(mapToPreviewRecord(transforms, textUpdates ?? undefined))
       } else {
         clearPreview()
       }
@@ -221,7 +259,9 @@ export function GroupGizmo({
 
       const finalTransforms = previewTransformsRef.current ?? itemTransforms
       if (transformsChanged(startTransformsRef.current, finalTransforms)) {
-        onTransformEnd(finalTransforms, operation)
+        flushSync(() => {
+          onTransformEnd(finalTransforms, operation, previewTextUpdatesRef.current ?? undefined)
+        })
       }
 
       resetInteractionState()
@@ -457,7 +497,10 @@ export function GroupGizmo({
           projectSize.height,
           maintainAspectRatio,
         )
-        setPreviewTransforms(newTransforms)
+        setPreviewTransforms(
+          newTransforms,
+          buildGroupScaledTextProperties(resolvedItems, groupState.itemTransforms, newTransforms),
+        )
       }
 
       const handleMouseUp = () => {
@@ -471,6 +514,7 @@ export function GroupGizmo({
     },
     [
       items,
+      resolvedItems,
       itemTransforms,
       projectSize,
       toCanvasPoint,
