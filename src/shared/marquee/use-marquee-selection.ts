@@ -71,6 +71,9 @@ interface UseMarqueeSelectionOptions {
   /** Called when an accepted marquee pointer gesture releases. */
   onGestureEnd?: (event: MouseEvent, wasActualDrag: boolean) => void
 
+  /** Called when an accepted marquee gesture loses its release and is cancelled. */
+  onGestureCancel?: (wasActualDrag: boolean) => void
+
   /** Whether marquee selection is enabled */
   enabled?: boolean
 
@@ -178,6 +181,7 @@ export function useMarqueeSelection({
   onSelectionChange,
   onPreviewSelectionChange,
   onGestureEnd,
+  onGestureCancel,
   enabled = true,
   appendMode = false,
   threshold = 5,
@@ -348,7 +352,41 @@ export function useMarqueeSelection({
 
   // Handle mouse down - start marquee
   // Using useEffectEvent so changes to enabled, appendMode don't re-register listeners
+  const cancelGesture = useEffectEvent(() => {
+    if (!isDraggingRef.current) return
+
+    const wasActualDrag = hasMovedRef.current
+
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current)
+      rafIdRef.current = null
+    }
+    if (liveCommitTimeoutRef.current !== null) {
+      clearTimeout(liveCommitTimeoutRef.current)
+      liveCommitTimeoutRef.current = null
+    }
+
+    isDraggingRef.current = false
+    hasMovedRef.current = false
+    marqueeRef.current = { startX: 0, startY: 0, currentX: 0, currentY: 0 }
+    resolvedItemsRef.current = null
+    pendingLiveCommitIdsRef.current = null
+    lastLiveCommitTimeRef.current = 0
+
+    setIsActive(false)
+    publishSnapshot(INACTIVE_SNAPSHOT)
+
+    if (commitSelectionOnMouseUp) {
+      onPreviewSelectionChangeRef.current?.([])
+    }
+    onGestureCancel?.(wasActualDrag)
+  })
+
   const onMouseDown = useEffectEvent((e: MouseEvent) => {
+    // A previous drag may have lost its mouseup while the page was unfocused.
+    // Never let that stale gesture compete with a new interaction.
+    cancelGesture()
+
     if (!enabledRef.current || !containerRef.current || !boundsRef.current) return
 
     // Only trigger on left click
@@ -574,11 +612,21 @@ export function useMarqueeSelection({
     document.addEventListener('mousedown', onMouseDown, true)
     document.addEventListener('mousemove', onMouseMove)
     document.addEventListener('mouseup', onMouseUp, true)
+    window.addEventListener('blur', cancelGesture)
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        cancelGesture()
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
 
     return () => {
       document.removeEventListener('mousedown', onMouseDown, true)
       document.removeEventListener('mousemove', onMouseMove)
       document.removeEventListener('mouseup', onMouseUp, true)
+      window.removeEventListener('blur', cancelGesture)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
   }, [])
 

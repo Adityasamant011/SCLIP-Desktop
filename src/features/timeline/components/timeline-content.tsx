@@ -397,6 +397,7 @@ interface TimelineMarqueeLayerProps {
   onSelectionChange: (ids: string[]) => void
   onMarqueeActiveChange: (active: boolean) => void
   onMarqueeGestureEnd: (event: MouseEvent) => void
+  onMarqueeGestureCancel: () => void
 }
 
 const TimelineMarqueeLayer = memo(function TimelineMarqueeLayer({
@@ -407,6 +408,7 @@ const TimelineMarqueeLayer = memo(function TimelineMarqueeLayer({
   onSelectionChange,
   onMarqueeActiveChange,
   onMarqueeGestureEnd,
+  onMarqueeGestureCancel,
 }: TimelineMarqueeLayerProps) {
   const previewItemIdsRef = useRef<string[]>([])
 
@@ -491,6 +493,7 @@ const TimelineMarqueeLayer = memo(function TimelineMarqueeLayer({
     onSelectionChange,
     onPreviewSelectionChange: setPreviewItemIds,
     onGestureEnd: onMarqueeGestureEnd,
+    onGestureCancel: onMarqueeGestureCancel,
     enabled: itemIds.length > 0,
     threshold: 5,
     commitSelectionOnMouseUp: true,
@@ -1414,6 +1417,20 @@ export const TimelineContent = memo(function TimelineContent({
     }
   }, [])
 
+  const cancelMarqueePointerGesture = useCallback(() => {
+    const wasMarqueePointerGesture = marqueePointerDownRef.current
+    marqueePointerDownRef.current = false
+    marqueeStartPreviewFrameRef.current = null
+    marqueeReleasePreviewRef.current = null
+
+    if (!wasMarqueePointerGesture) return
+    if (marqueeReleaseRafRef.current !== null) {
+      cancelAnimationFrame(marqueeReleaseRafRef.current)
+      marqueeReleaseRafRef.current = null
+    }
+    setPreviewFrameRef.current(null)
+  }, [])
+
   useEffect(
     () => () => {
       if (marqueeReleaseRafRef.current !== null) {
@@ -2127,6 +2144,7 @@ export const TimelineContent = memo(function TimelineContent({
           onSelectionChange={handleMarqueeSelectionChange}
           onMarqueeActiveChange={handleMarqueeActiveChange}
           onMarqueeGestureEnd={finishMarqueePointerGesture}
+          onMarqueeGestureCancel={cancelMarqueePointerGesture}
         />
 
         {itemIds.length === 0 && (
