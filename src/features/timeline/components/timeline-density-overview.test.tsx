@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import { useEditorStore } from '@/shared/state/editor'
 import { useSelectionStore } from '@/shared/state/selection'
 import type { TimelineItem } from '@/types/timeline'
+import { useLinkedEditPreviewStore } from '../stores/linked-edit-preview-store'
 import { TimelineDensityOverview } from './timeline-density-overview'
 
 const overviewItems: TimelineItem[] = [
@@ -33,6 +34,7 @@ describe('TimelineDensityOverview', () => {
     useSelectionStore.getState().selectItems([])
     useSelectionStore.getState().setActiveTool('select')
     useEditorStore.setState({ linkedSelectionEnabled: false })
+    useLinkedEditPreviewStore.getState().clear()
     vi.stubGlobal('requestAnimationFrame', () => 1)
   })
 
@@ -70,6 +72,29 @@ describe('TimelineDensityOverview', () => {
 
     expect(buckets[0]?.style.left).toContain('--timeline-percent-per-frame')
     expect(buckets[0]?.style.width).toContain('--timeline-percent-per-frame')
+  })
+
+  it('culls density shells to linked edit preview geometry', () => {
+    useLinkedEditPreviewStore.getState().setUpdates([
+      { id: 'overview-1', durationInFrames: 12 },
+    ])
+
+    const view = render(
+      <TimelineDensityOverview
+        items={overviewItems}
+        selectedItemIds={new Set(['overview-1'])}
+        trackLocked={false}
+        trackHidden={false}
+      />,
+    )
+    const bucket = view.container.querySelector<HTMLElement>(
+      '[data-timeline-density-bucket]',
+    )
+
+    expect(bucket?.style.width).toBe(
+      'calc(12 * var(--timeline-percent-per-frame, 0%))',
+    )
+    expect(bucket?.className).toContain('ring-primary')
   })
 
   it('replays a razor click onto the promoted native clip', () => {
