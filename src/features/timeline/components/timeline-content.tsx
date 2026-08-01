@@ -902,6 +902,10 @@ export const TimelineContent = memo(function TimelineContent({
   // scheduleViewportSync can hand it to syncViewportFromContainer instead of
   // reading container.scrollLeft back (a forced reflow after a width write).
   const scrollLeftRef = useRef(0)
+  // The rendered content width is derived below and changes only with content,
+  // viewport size, or settled zoom. Keep it available to playback follow-scroll
+  // without reading container.scrollWidth on every clock frame.
+  const timelineWidthRef = useRef(0)
 
   // Cached viewport box dimensions. clientWidth/clientHeight are invariant under
   // scroll and horizontal zoom (only the *content* width changes), so reading
@@ -969,10 +973,10 @@ export const TimelineContent = memo(function TimelineContent({
 
       const cachedViewportWidth = viewportDimsRef.current?.width ?? 0
       const viewportWidth = cachedViewportWidth > 0 ? cachedViewportWidth : container.clientWidth
-      const maxScrollLeft = Math.max(0, container.scrollWidth - viewportWidth)
+      const maxScrollLeft = Math.max(0, timelineWidthRef.current - viewportWidth)
       const nextScrollLeft = getPlaybackFollowScrollLeft({
         playheadX: frameToPixelsRef.current(state.currentFrame),
-        scrollLeft: container.scrollLeft,
+        scrollLeft: scrollLeftRef.current,
         viewportWidth,
         maxScrollLeft,
         playbackDirection: state.playbackRate < 0 ? -1 : 1,
@@ -1567,6 +1571,7 @@ export const TimelineContent = memo(function TimelineContent({
   }, [furthestItemEndFrame, fps, containerWidth])
 
   actualDurationRef.current = actualDuration
+  timelineWidthRef.current = timelineWidth
 
   useLayoutEffect(() => {
     const container = containerRef.current

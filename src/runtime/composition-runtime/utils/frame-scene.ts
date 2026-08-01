@@ -207,6 +207,30 @@ export function resolveActiveShapeMasksAtFrame(
     })
 }
 
+/**
+ * Select a stable clock snapshot while no mask is active.
+ *
+ * Active masks can animate, so their actual frame must flow through. Outside
+ * every mask range, only crossing a mask boundary can change the resolved mask
+ * set. Negative tokens distinguish those inactive regions from real frames.
+ */
+export function selectMaskRenderFrame(
+  masks: Array<ShapeItem | ShapeMaskWithTrackOrder>,
+  frame: number,
+): number {
+  let completedMaskCount = 0
+
+  for (const maskSource of masks) {
+    const mask = 'mask' in maskSource ? maskSource.mask : maskSource
+    const end = mask.from + mask.durationInFrames
+
+    if (frame >= mask.from && frame < end) return frame
+    if (frame >= end) completedMaskCount += 1
+  }
+
+  return -(completedMaskCount + 1)
+}
+
 export function resolveFrameCompositionScene({
   renderPlan,
   frame,
