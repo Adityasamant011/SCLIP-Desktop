@@ -266,7 +266,11 @@ export function GizmoOverlay({
   useEffect(() => {
     if (!isPlaying) {
       // When paused/skimming, sync to the effective preview frame
-      frozenFrameRef.current = getResolvedFrameForPlaybackState(usePlaybackStore.getState())
+      const nextFrame = getResolvedFrameForPlaybackState(usePlaybackStore.getState())
+      if (frozenFrameRef.current !== nextFrame) {
+        frozenFrameRef.current = nextFrame
+        setForceUpdate((n) => n + 1)
+      }
     }
   }, [getResolvedFrameForPlaybackState, isPlaying])
 
@@ -813,6 +817,7 @@ export function GizmoOverlay({
     visibleItems,
     projectSize,
     itemsWithLiveTransforms,
+    frozenFrameRef.current,
   )
 
   // Create marquee items with pre-computed bounding rects for collision detection
@@ -1484,7 +1489,8 @@ export function GizmoOverlay({
           })}
 
         {/* Transform gizmo(s) for selected items - hidden while another canvas editor is active */}
-        {isExclusiveCanvasEditorActive ? null : selectedItems.length === 1 && selectedItems[0] ? (
+        {isExclusiveCanvasEditorActive || isPlaying ? null : selectedItems.length === 1 &&
+          selectedItems[0] ? (
           <TransformGizmo
             item={selectedItems[0]}
             coordParams={coordParams}

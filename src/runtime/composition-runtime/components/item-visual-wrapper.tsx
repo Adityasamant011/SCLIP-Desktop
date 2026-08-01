@@ -20,6 +20,7 @@ import { getShapePath } from '../utils/shape-path'
 import {
   useCornerPinStore,
   useGizmoStore,
+  usePlaybackStore,
 } from '@/runtime/composition-runtime/deps/stores'
 import { useItemVisualState } from './hooks/use-item-visual-state'
 import { useRuntimeItemKeyframes } from './hooks/use-runtime-item-keyframes'
@@ -38,6 +39,7 @@ import {
   useLiveTimelineItemResolver,
 } from '../contexts/live-item-transform-context'
 import { KeyframesContext } from '../contexts/keyframes-context-core'
+import { shouldRasterizeSvgMaskForFrame } from '../utils/mask-rendering-policy'
 
 interface ItemVisualWrapperProps {
   item: TimelineItem
@@ -412,8 +414,13 @@ export const ItemVisualWrapper: React.FC<ItemVisualWrapperProps> = ({
     () => useGizmoStore.subscribe(syncGizmoPresentation),
     [syncGizmoPresentation],
   )
-  const shouldRasterizeSvgMask =
-    state.maskType === 'svg-mask' && !!state.svgMaskPaths && state.maskFeather > 0
+  const isPlaying = usePlaybackStore((playback) => playback.isPlaying)
+  const shouldRasterizeSvgMask = shouldRasterizeSvgMaskForFrame({
+    maskType: state.maskType,
+    hasPaths: !!state.svgMaskPaths,
+    feather: state.maskFeather,
+    isPlaying,
+  })
   const hasCornerPinnedMask = masks.some((mask) => hasCornerPin(mask.shape.cornerPin))
 
   // Compute mask style based on mask type

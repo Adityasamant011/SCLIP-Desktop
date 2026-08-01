@@ -142,12 +142,10 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
     playerRef,
     scrubCanvasRef,
     gpuEffectsCanvasRef,
-    scrubFrameDirtyRef,
     bypassPreviewSeekRef,
     isGizmoInteractingRef,
     preferPlayerForStyledTextScrubRef,
     adaptiveQualityStateRef,
-    scrubOffscreenCanvasRef,
     transitionSessionTraceRef,
     transitionTelemetryRef,
     transitionSessionBufferedFramesRef,
@@ -174,7 +172,6 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
     proxyReadyCount,
     playerSize,
     needsOverflow,
-    playerContainerRef,
     playerContainerRect,
     backgroundRef,
     setPlayerContainerRefCallback,
@@ -191,12 +188,10 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
     useProxyMedia: useProxy,
     blobUrlVersion,
   })
-  const showGpuEffectsOverlay = useGpuEffectsOverlay(
-    gpuEffectsCanvasRef,
-    playerContainerRef,
-    scrubOffscreenCanvasRef,
-    scrubFrameDirtyRef,
-  )
+  const {
+    needsOverlay: showGpuEffectsOverlay,
+    shouldWarmRenderer: shouldWarmGpuEffectsRenderer,
+  } = useGpuEffectsOverlay(fps)
   const isMaskEditing = useMaskEditorStore((s) => s.isEditing)
   const isCornerPinEditing = useCornerPinStore((s) => s.isEditing)
   const isPowerWindowEditing = usePowerWindowEditorStore((s) => s.isEditing)
@@ -507,6 +502,7 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
   // makes the first neutral-EV drag look stuck until another parameter changes.
   const forceFastScrubOverlay =
     showGpuEffectsOverlay || isPowerWindowEditing || isSpatialEffectEditing
+  const previousForceFastScrubOverlayRef = useRef(forceFastScrubOverlay)
 
   // The split comparison is the only render-time branch that needs playback
   // state. Keep the selected value stable for the normal (non-split) preview
@@ -561,6 +557,29 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
     pushTransitionTrace,
     ...previewRuntimeRefs.transitionSessionControllerRefs,
   })
+  useEffect(() => {
+    const wasForced = previousForceFastScrubOverlayRef.current
+    previousForceFastScrubOverlayRef.current = forceFastScrubOverlay
+    if (!wasForced || forceFastScrubOverlay) return
+
+    const playbackState = usePlaybackStore.getState()
+    if (
+      playbackState.previewFrame !== null ||
+      isPausedTransitionOverlayActive(playbackState.currentFrame, playbackState)
+    ) {
+      return
+    }
+
+    // A rendered-only item just left the routing window. Release its last
+    // bitmap immediately so an ordinary Player frame cannot remain occluded.
+    hideFastScrubOverlay()
+    setDisplayedFrame(null)
+  }, [
+    forceFastScrubOverlay,
+    hideFastScrubOverlay,
+    isPausedTransitionOverlayActive,
+    setDisplayedFrame,
+  ])
   const shouldPreferPlayerForPreview = useCallback(
     (previewFrame: number | null) => {
       const playbackState = usePlaybackStore.getState()
@@ -603,10 +622,16 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
     (frame: number) => {
       const nextFrame = Math.max(0, Math.round(frame))
       latestPlayerDisplayedFrameRef.current = nextFrame
-      setPlayerDisplayedFrame((prevFrame) => (prevFrame === nextFrame ? prevFrame : nextFrame))
+      // Ordinary playback consumes this imperatively through the ref below.
+      // Mirroring every Clock tick into React state invalidates the entire
+      // VideoPreview tree (including editor overlays) even though only color
+      // comparison needs a rendered-frame state value.
+      if (comparisonEnabled) {
+        setPlayerDisplayedFrame((prevFrame) => (prevFrame === nextFrame ? prevFrame : nextFrame))
+      }
       handleFrameChange(frame)
     },
-    [handleFrameChange],
+    [comparisonEnabled, handleFrameChange],
   )
 
   const getLivePlaybackFrame = useCallback(() => {
@@ -624,6 +649,7 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
       fps,
       isResolving,
       forceFastScrubOverlay,
+      preserveRendererAcrossOverlayRouting: shouldWarmGpuEffectsRenderer,
       domTextScrubOverlayEnabled: domTextScrubOverlayPlan.enabled,
       items,
       playerSize,
@@ -651,6 +677,27 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
       setDisplayedFrame,
       ...previewRuntimeRefs.rendererControllerRefs,
     })
+  useEffect(() => {
+    if (!shouldWarmGpuEffectsRenderer || isResolving) return
+
+    let cancelled = false
+    const warmRenderer = () => {
+      if (!cancelled) void ensureFastScrubRenderer()
+    }
+    if (typeof window.requestIdleCallback === 'function') {
+      const idleId = window.requestIdleCallback(warmRenderer, { timeout: 750 })
+      return () => {
+        cancelled = true
+        window.cancelIdleCallback(idleId)
+      }
+    }
+
+    const timeoutId = window.setTimeout(warmRenderer, 0)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timeoutId)
+    }
+  }, [ensureFastScrubRenderer, isResolving, shouldWarmGpuEffectsRenderer])
   usePreviewRenderPump({
     fps,
     forceFastScrubOverlay,

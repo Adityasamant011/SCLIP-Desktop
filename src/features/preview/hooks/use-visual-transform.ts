@@ -39,6 +39,7 @@ export function useVisualTransforms(
   items: TimelineItem[],
   projectSize: ProjectSize,
   allItemsOverride?: TimelineItem[],
+  frameOverride?: number,
 ): Map<string, ResolvedTransform> {
   const fps = useTimelineSettingsStore((s) => s.fps)
   const allItems = useItemsStore((state) => allItemsOverride ?? state.items)
@@ -53,7 +54,14 @@ export function useVisualTransforms(
     s.activeGizmo?.mode === 'translate' ? null : s.previewTransform,
   )
   const preview = useGizmoStore((s) => s.preview)
-  const animationFrame = useResolvedPlaybackFrame()
+  // Frozen editor chrome (notably GizmoOverlay during playback) can provide
+  // its presentation frame explicitly. Keeping the external-store snapshot
+  // disabled in that mode prevents live playback ticks from re-rendering a
+  // scene-wide overlay whose controls are not being presented.
+  const resolvedPlaybackFrame = useResolvedPlaybackFrame(
+    frameOverride === undefined && items.length > 0,
+  )
+  const animationFrame = frameOverride ?? resolvedPlaybackFrame
 
   return useMemo(() => {
     const transforms = new Map<string, ResolvedTransform>()

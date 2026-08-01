@@ -1,4 +1,9 @@
+const reversedAudioBufferCache = new WeakMap<AudioBuffer, AudioBuffer>()
+
 export function createReversedAudioBuffer(buffer: AudioBuffer): AudioBuffer {
+  const cached = reversedAudioBufferCache.get(buffer)
+  if (cached) return cached
+
   const reversed = new AudioBuffer({
     numberOfChannels: buffer.numberOfChannels,
     length: buffer.length,
@@ -11,5 +16,6 @@ export function createReversedAudioBuffer(buffer: AudioBuffer): AudioBuffer {
       output[i] = input[input.length - 1 - i] ?? 0
     }
   }
+  reversedAudioBufferCache.set(buffer, reversed)
   return reversed
 }

@@ -54,6 +54,7 @@ import {
   selectBoundarySourcePrewarmSources,
   shouldDropStalePausedPreviewRender,
   shouldPreservePausedTransportPresentation,
+  shouldProbePreviewSourcePixels,
   shouldRejectBlankReleasedScrubHandoff,
   shouldRejectBlankTransportHandoff,
   shouldRecoverFailedActivePreseekSchedule,
@@ -410,6 +411,9 @@ export function usePreviewRenderPump({
     const isEffectivelyBlankPreviewSource = (
       source: OffscreenCanvas | HTMLCanvasElement,
     ): boolean => {
+      if (!shouldProbePreviewSourcePixels(usePlaybackStore.getState().isPlaying)) {
+        return false
+      }
       try {
         blankProbeCanvas ??= new OffscreenCanvas(8, 8)
         const context = blankProbeCanvas.getContext('2d', { willReadFrequently: true })

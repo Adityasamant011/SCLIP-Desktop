@@ -1,7 +1,12 @@
 import React, { useEffect, useMemo, useCallback } from 'react'
-import { AbsoluteFill, Sequence, useClock } from '@/runtime/composition-runtime/deps/player'
+import {
+  AbsoluteFill,
+  Sequence,
+  useClock,
+  useClockFrameSelector,
+} from '@/runtime/composition-runtime/deps/player'
 import { timelineToSourceFrames } from '@/runtime/composition-runtime/deps/timeline'
-import { useCurrentFrame, useVideoConfig } from '../hooks/use-player-compat'
+import { useVideoConfig } from '../hooks/use-player-compat'
 import type { CompositionInputProps } from '@/types/export'
 import type { TimelineItem } from '@/types/timeline'
 import { Item, type MaskInfo } from '../components/item'
@@ -43,7 +48,7 @@ import {
   type AudioTrackItem,
   type ShapeMaskWithTrackOrder,
 } from '../utils/scene-assembly'
-import { resolveActiveShapeMasksAtFrame } from '../utils/frame-scene'
+import { resolveActiveShapeMasksAtFrame, selectMaskRenderFrame } from '../utils/frame-scene'
 import { KeyframesContext } from '../contexts/keyframes-context-core'
 import {
   EMPTY_MASK_INFOS,
@@ -74,13 +79,24 @@ const VIDEO_CLIP_PREMOUNT_SECONDS = 2
 
 const ActiveMasksContext = React.createContext<MaskInfo[]>(EMPTY_MASK_INFOS)
 
-const FrameActiveMasksProvider: React.FC<{
+type ActiveMasksProviderProps = {
   masks: ShapeMaskWithTrackOrder[]
   canvasWidth: number
   canvasHeight: number
   children: React.ReactNode
-}> = ({ masks, canvasWidth, canvasHeight, children }) => {
-  const frame = useCurrentFrame()
+}
+
+const FrameResolvedActiveMasksProvider: React.FC<ActiveMasksProviderProps> = ({
+  masks,
+  canvasWidth,
+  canvasHeight,
+  children,
+}) => {
+  const selectRelevantMaskFrame = useCallback(
+    (frame: number) => selectMaskRenderFrame(masks, frame),
+    [masks],
+  )
+  const frame = useClockFrameSelector(selectRelevantMaskFrame)
   const { fps } = useVideoConfig()
   const keyframesCtx = React.useContext(KeyframesContext)
   const previousMasksRef = React.useRef<MaskInfo[]>(EMPTY_MASK_INFOS)
@@ -120,6 +136,23 @@ const FrameActiveMasksProvider: React.FC<{
   ])
 
   return <ActiveMasksContext.Provider value={activeMasks}>{children}</ActiveMasksContext.Provider>
+}
+
+/**
+ * Avoid subscribing the entire visual layer to the playback clock when the
+ * composition has no masks. The frame-aware provider is mounted only while
+ * masks exist, so ordinary projects keep this boundary stable during playback.
+ */
+const ActiveMasksProvider: React.FC<ActiveMasksProviderProps> = (props) => {
+  if (props.masks.length === 0) {
+    return (
+      <ActiveMasksContext.Provider value={EMPTY_MASK_INFOS}>
+        {props.children}
+      </ActiveMasksContext.Provider>
+    )
+  }
+
+  return <FrameResolvedActiveMasksProvider {...props} />
 }
 
 /**
@@ -647,7 +680,7 @@ export const MainComposition: React.FC<MainCompositionProps> = ({
 
             {/* ALL VISUAL LAYERS - videos and non-media in SINGLE wrapper for proper z-index stacking */}
             {/* This ensures items from different tracks respect z-index across all types */}
-            <FrameActiveMasksProvider
+            <ActiveMasksProvider
               masks={visibleShapeMasks}
               canvasWidth={canvasWidth}
               canvasHeight={canvasHeight}
@@ -712,7 +745,7 @@ export const MainComposition: React.FC<MainCompositionProps> = ({
                     )
                   })}
               </AbsoluteFill>
-            </FrameActiveMasksProvider>
+            </ActiveMasksProvider>
             </AbsoluteFill>
           </CompositionSpaceProvider>
         </KeyframesProvider>

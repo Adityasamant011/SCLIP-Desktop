@@ -39,7 +39,7 @@ const previewGraphMocks = vi.hoisted(() => ({
 
 const soundTouchWorkletMocks = vi.hoisted(() => ({
   ensureSoundTouchPreviewWorkletLoaded: vi.fn(),
-  serializeAudioBufferForSoundTouchPreview: vi.fn(() => ({
+  prepareAudioBufferForSoundTouchPreview: vi.fn(async () => ({
     leftChannel: new Float32Array(0),
     rightChannel: new Float32Array(0),
     frameCount: 0,
@@ -60,8 +60,8 @@ vi.mock('../utils/preview-audio-graph', () => ({
 }))
 vi.mock('../utils/soundtouch-preview-worklet', () => ({
   ensureSoundTouchPreviewWorkletLoaded: soundTouchWorkletMocks.ensureSoundTouchPreviewWorkletLoaded,
-  serializeAudioBufferForSoundTouchPreview:
-    soundTouchWorkletMocks.serializeAudioBufferForSoundTouchPreview,
+  prepareAudioBufferForSoundTouchPreview:
+    soundTouchWorkletMocks.prepareAudioBufferForSoundTouchPreview,
   SOUND_TOUCH_PREVIEW_PROCESSOR_NAME: 'soundtouch-preview-processor',
 }))
 vi.mock('@/runtime/composition-runtime/deps/stores', () => ({
@@ -234,6 +234,36 @@ describe('SoundTouchWorkletAudio', () => {
         type: 'set-playing',
         playing: true,
       })
+    })
+  })
+
+  it('reads an authored reversed clip backwards without reversing its buffer on the UI thread', async () => {
+    playbackStateMocks.current = {
+      ...playbackStateMocks.current,
+      frame: 90,
+      playing: true,
+      transportPlaybackRate: 1,
+    }
+    soundTouchWorkletMocks.ensureSoundTouchPreviewWorkletLoaded.mockResolvedValue(true)
+
+    render(
+      <SoundTouchWorkletAudio
+        audioBuffer={makeAudioBuffer(12)}
+        itemId="reversed-audio-1"
+        durationInFrames={360}
+        playbackRate={1}
+        isReversed
+        reverseSourceEnd={360}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(workletNodeMocks.messages).toContainEqual(
+        expect.objectContaining({
+          type: 'seek',
+          direction: -1,
+        }),
+      )
     })
   })
 })

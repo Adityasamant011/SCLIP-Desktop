@@ -103,6 +103,12 @@ function VisualTransformsProbe({ item = ITEM }: { item?: TimelineItem }) {
   )
 }
 
+function FrozenVisualTransformsProbe({ frame }: { frame: number }) {
+  probeRenderCount += 1
+  const transforms = useVisualTransforms([ITEM], PROJECT_SIZE, undefined, frame)
+  return <div data-testid="frozen-visual-probe" data-x={String(transforms.get(ITEM.id)?.x)} />
+}
+
 function resetStores() {
   if (typeof localStorage !== 'undefined') {
     if (typeof localStorage.clear === 'function') {
@@ -201,6 +207,23 @@ describe('useVisualTransforms skimming frame resolution', () => {
 
     expect(probeRenderCount).toBe(rendersBeforeDrag)
     expect(screen.getByTestId('visual-probe')).toHaveAttribute('data-x', '110')
+  })
+
+  it('does not re-render a frozen overlay for live playback frame changes', () => {
+    render(<FrozenVisualTransformsProbe frame={10} />)
+
+    expect(screen.getByTestId('frozen-visual-probe')).toHaveAttribute('data-x', '110')
+    const rendersBeforePlayback = probeRenderCount
+
+    act(() => {
+      const playback = usePlaybackStore.getState()
+      playback.play()
+      playback.setCurrentFrame(20)
+      playback.setCurrentFrame(30)
+    })
+
+    expect(probeRenderCount).toBe(rendersBeforePlayback)
+    expect(screen.getByTestId('frozen-visual-probe')).toHaveAttribute('data-x', '110')
   })
 
   it('uses previewFrame while paused', async () => {

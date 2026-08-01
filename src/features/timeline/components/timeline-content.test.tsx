@@ -242,7 +242,11 @@ describe('TimelineContent playback selection behavior', () => {
     }
 
     Object.defineProperty(scrollContainer, 'clientWidth', { configurable: true, value: 400 })
-    Object.defineProperty(scrollContainer, 'scrollWidth', { configurable: true, value: 3000 })
+    const scrollWidthRead = vi.fn(() => 3000)
+    Object.defineProperty(scrollContainer, 'scrollWidth', {
+      configurable: true,
+      get: scrollWidthRead,
+    })
     const liveScroll = vi.fn()
     scrollContainer.addEventListener(TIMELINE_LIVE_SCROLL_EVENT, liveScroll)
 
@@ -259,6 +263,7 @@ describe('TimelineContent playback selection behavior', () => {
     expect(scrollContainer.scrollLeft).toBeCloseTo((151 / 30) * 100 - 400 * 0.2)
     expect(useTimelineViewportStore.getState().scrollLeft).toBeCloseTo(scrollContainer.scrollLeft)
     expect(liveScroll).toHaveBeenCalledOnce()
+    expect(scrollWidthRead).not.toHaveBeenCalled()
   })
 
   it('does not re-render the full timeline tree for live or settled gesture zoom', () => {

@@ -5,11 +5,50 @@ import {
   resolveActiveShapeMasksAtFrame,
   resolveFrameCompositionScene,
   resolveItemTransformAtFrame,
+  selectMaskRenderFrame,
 } from './frame-scene'
 import { resolveCompositionRenderPlan } from './scene-assembly'
 import { createTransformParentBinding } from '@/shared/utils/transform-parenting'
 
 describe('frame scene', () => {
+  it('keeps inactive mask clock snapshots stable between boundaries', () => {
+    const masks = [
+      {
+        id: 'mask-1',
+        type: 'shape' as const,
+        trackId: 'track-1',
+        from: 10,
+        durationInFrames: 10,
+        label: 'Mask 1',
+        shapeType: 'rectangle' as const,
+        fillColor: '#fff',
+        isMask: true,
+        transform: { x: 0, y: 0, width: 100, height: 100, rotation: 0, opacity: 1 },
+      },
+      {
+        id: 'mask-2',
+        type: 'shape' as const,
+        trackId: 'track-1',
+        from: 30,
+        durationInFrames: 10,
+        label: 'Mask 2',
+        shapeType: 'rectangle' as const,
+        fillColor: '#fff',
+        isMask: true,
+        transform: { x: 0, y: 0, width: 100, height: 100, rotation: 0, opacity: 1 },
+      },
+    ]
+
+    expect(selectMaskRenderFrame(masks, 0)).toBe(-1)
+    expect(selectMaskRenderFrame(masks, 9)).toBe(-1)
+    expect(selectMaskRenderFrame(masks, 10)).toBe(10)
+    expect(selectMaskRenderFrame(masks, 19)).toBe(19)
+    expect(selectMaskRenderFrame(masks, 20)).toBe(-2)
+    expect(selectMaskRenderFrame(masks, 29)).toBe(-2)
+    expect(selectMaskRenderFrame(masks, 30)).toBe(30)
+    expect(selectMaskRenderFrame(masks, 40)).toBe(-3)
+  })
+
   it('recenters implicit preview anchors while retaining explicit anchors', () => {
     const base = {
       x: 0,

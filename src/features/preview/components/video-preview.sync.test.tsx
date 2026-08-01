@@ -2591,17 +2591,24 @@ describe('VideoPreview sync behavior', () => {
       } as unknown as TimelineItem,
     ])
 
-    // The timeline contains a gpu-effect clip, so the overlay stays warm from
-    // the start (project-level always-on) rather than switching on at the clip
-    // boundary — this is what makes the effect appear instantly on landing.
+    // A future effect must not route ordinary frame 0 through the continuous
+    // renderer. The bounded router switches only when the seek lands on it.
     const { scrubCanvas } = await renderPreviewAfterInitialSeek()
-    expect(scrubCanvas.style.visibility).toBe('visible')
+    expect(scrubCanvas.style.visibility).toBe('hidden')
 
     act(() => {
       usePlaybackStore.getState().setCurrentFrame(24)
     })
 
     await waitForSingleRendererFrame(24, scrubCanvas, { expectedDisplayedFrame: 24 })
+
+    act(() => {
+      usePlaybackStore.getState().setCurrentFrame(0)
+    })
+    await waitFor(() => {
+      expect(scrubCanvas.style.visibility).toBe('hidden')
+      expect(getDisplayedFrame()).toBeNull()
+    })
   })
 
   it('keeps corner-pinned text on the rendered overlay even when Player is already at the frame', async () => {
@@ -2639,10 +2646,10 @@ describe('VideoPreview sync behavior', () => {
 
     mockedPlayerFrame = 24
 
-    // Corner-pin is overlay-only content, so the overlay is warm from the start
-    // (project-level always-on) even though the Player already sits at the frame.
+    // Player position alone does not force the project-wide overlay; the
+    // playback store landing activates it at the corner-pinned frame.
     const { scrubCanvas } = await renderPreviewAfterInitialSeek()
-    expect(scrubCanvas.style.visibility).toBe('visible')
+    expect(scrubCanvas.style.visibility).toBe('hidden')
 
     act(() => {
       usePlaybackStore.getState().setCurrentFrame(24)

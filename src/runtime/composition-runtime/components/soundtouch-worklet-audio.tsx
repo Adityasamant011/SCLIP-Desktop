@@ -16,7 +16,7 @@ import {
 } from '../utils/preview-audio-graph'
 import {
   ensureSoundTouchPreviewWorkletLoaded,
-  serializeAudioBufferForSoundTouchPreview,
+  prepareAudioBufferForSoundTouchPreview,
   SOUND_TOUCH_PREVIEW_PROCESSOR_NAME,
 } from '../utils/soundtouch-preview-worklet'
 import type { SoundTouchPreviewProcessorMessage } from '../utils/soundtouch-preview-shared'
@@ -126,8 +126,11 @@ export const SoundTouchWorkletAudio: React.FC<SoundTouchWorkletAudioProps> = Rea
     mutedRef.current = muted
     finalVolumeRef.current = finalVolume
 
-    const postMessage = (message: SoundTouchPreviewProcessorMessage): void => {
-      nodeRef.current?.port.postMessage(message)
+    const postMessage = (
+      message: SoundTouchPreviewProcessorMessage,
+      transfer: Transferable[] = [],
+    ): void => {
+      nodeRef.current?.port.postMessage(message, transfer)
     }
 
     const postSeekSeconds = (seconds: number, sampleRate: number, direction: -1 | 1 = 1): void => {
@@ -291,18 +294,33 @@ export const SoundTouchWorkletAudio: React.FC<SoundTouchWorkletAudioProps> = Rea
         return
       }
 
-      const serialized = serializeAudioBufferForSoundTouchPreview(
-        audioBuffer,
-        graph.context.sampleRate,
-      )
-      postMessage({
-        type: 'append-source',
-        startFrame: Math.max(0, Math.floor(sourceStartOffsetSec * graph.context.sampleRate)),
-        leftChannel: serialized.leftChannel.buffer as ArrayBuffer,
-        rightChannel: serialized.rightChannel.buffer as ArrayBuffer,
-        frameCount: serialized.frameCount,
-        sampleRate: serialized.sampleRate,
-      })
+      let cancelled = false
+      void prepareAudioBufferForSoundTouchPreview(audioBuffer, graph.context.sampleRate)
+        .then((serialized) => {
+          if (cancelled || nodeRef.current !== node) return
+          const leftChannel = serialized.leftChannel.buffer as ArrayBuffer
+          const rightChannel = serialized.rightChannel.buffer as ArrayBuffer
+          postMessage(
+            {
+              type: 'append-source',
+              startFrame: Math.max(0, Math.floor(sourceStartOffsetSec * graph.context.sampleRate)),
+              leftChannel,
+              rightChannel,
+              frameCount: serialized.frameCount,
+              sampleRate: serialized.sampleRate,
+            },
+            [leftChannel, rightChannel],
+          )
+        })
+        .catch((error) => {
+          if (cancelled) return
+          log.warn('Failed to prepare SoundTouch preview source', { error })
+          setFallbackRequested(true)
+        })
+
+      return () => {
+        cancelled = true
+      }
     }, [audioBuffer, nodeReady, sourceStartOffsetSec])
 
     useEffect(() => {

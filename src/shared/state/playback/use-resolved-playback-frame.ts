@@ -25,15 +25,22 @@ function getResolvedPlaybackFrameSnapshot(): number {
   })
 }
 
+function getDisabledPlaybackFrameSnapshot(): number {
+  return 0
+}
+
 /**
  * Subscribe to the resolved visible frame as one scalar snapshot. Requested
  * scrub frames do not re-render gizmos while the fast overlay is still
  * presenting an older `displayedFrame`.
  */
-export function useResolvedPlaybackFrame(): number {
+export function useResolvedPlaybackFrame(enabled = true): number {
+  const getSnapshot = enabled
+    ? getResolvedPlaybackFrameSnapshot
+    : getDisabledPlaybackFrameSnapshot
   return useSyncExternalStore(
     subscribeResolvedPlaybackFrame,
-    getResolvedPlaybackFrameSnapshot,
-    getResolvedPlaybackFrameSnapshot,
+    getSnapshot,
+    getSnapshot,
   )
 }
