@@ -13,6 +13,7 @@ import {
   selectBoundarySourcePrewarmSources,
   shouldDropStalePausedPreviewRender,
   shouldPreservePausedTransportPresentation,
+  shouldProbePreviewSourcePixels,
   shouldRejectBlankReleasedScrubHandoff,
   shouldRejectBlankTransportHandoff,
   shouldRecoverFailedActivePreseekSchedule,
@@ -32,6 +33,11 @@ function makeState(overrides: Partial<RenderPumpFrameState> = {}): RenderPumpFra
 }
 
 describe('render pump frame plan', () => {
+  it('avoids synchronous canvas pixel probes during playback', () => {
+    expect(shouldProbePreviewSourcePixels(true)).toBe(false)
+    expect(shouldProbePreviewSourcePixels(false)).toBe(true)
+  })
+
   it('routes reverse shuttle through the rendered playback overlay', () => {
     expect(
       shouldUseRenderedPlaybackOverlay(

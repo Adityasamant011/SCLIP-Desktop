@@ -1,7 +1,10 @@
 // @vitest-environment node
 
 import { describe, expect, it } from 'vite-plus/test'
-import { serializeAudioBufferForSoundTouchPreview } from './soundtouch-preview-worklet'
+import {
+  prepareAudioBufferForSoundTouchPreview,
+  serializeAudioBufferForSoundTouchPreview,
+} from './soundtouch-preview-worklet'
 
 function makeAudioBuffer(channels: Float32Array[], sampleRate: number): AudioBuffer {
   return {
@@ -37,5 +40,17 @@ describe('serializeAudioBufferForSoundTouchPreview', () => {
     expect(serialized.leftChannel.length).toBe(8)
     expect(serialized.rightChannel.length).toBe(8)
     expect(serialized.rightChannel[3]).toBeCloseTo(serialized.leftChannel[3] ?? 0, 5)
+  })
+
+  it('returns independently transferable channel copies from the prepared-source cache', async () => {
+    const buffer = makeAudioBuffer([new Float32Array([0, 1, 0, -1])], 4)
+
+    const first = await prepareAudioBufferForSoundTouchPreview(buffer, 8)
+    first.leftChannel[0] = 99
+    const second = await prepareAudioBufferForSoundTouchPreview(buffer, 8)
+
+    expect(second.frameCount).toBe(8)
+    expect(second.leftChannel[0]).toBe(0)
+    expect(second.leftChannel.buffer).not.toBe(first.leftChannel.buffer)
   })
 })

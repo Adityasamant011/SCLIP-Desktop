@@ -110,6 +110,17 @@ export function shouldUseRenderedPlaybackOverlay(
 }
 
 /**
+ * Pixel probes are useful when a paused scrub handoff may be replacing a known
+ * good canvas with a cleared one. During playback, however, probing a WebGPU-
+ * backed canvas forces a synchronous GPU readback and can block the UI thread
+ * for several frames. Active playback relies on the renderer's aborted/pending
+ * contract instead of sampling pixels.
+ */
+export function shouldProbePreviewSourcePixels(isPlaying: boolean): boolean {
+  return !isPlaying
+}
+
+/**
  * Keeps the last valid rendered surface pinned while an exact replacement is
  * prepared. Scrubs always own this lane; continuous-overlay playback also
  * borrows it for the single play/pause handoff frame so nested composition
