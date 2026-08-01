@@ -129,4 +129,102 @@ describe('filmstripStorage', () => {
       'blob:frame-4',
     ])
   })
+
+  it('does not publish a full load after a newer single-frame load', async () => {
+    let resumeFirstYield: (() => void) | undefined
+    let markFirstYieldReached: (() => void) | undefined
+    const firstYieldReached = new Promise<void>((resolve) => {
+      markFirstYieldReached = resolve
+    })
+    let yieldCount = 0
+    vi.stubGlobal('scheduler', {
+      yield: vi.fn(() => {
+        yieldCount++
+        if (yieldCount !== 1) return Promise.resolve()
+        markFirstYieldReached?.()
+        return new Promise<void>((resolve) => {
+          resumeFirstYield = resolve
+        })
+      }),
+    })
+    let now = 0
+    vi.spyOn(performance, 'now').mockImplementation(() => {
+      now += 5
+      return now
+    })
+
+    const staleLoad = filmstripStorage.load('media-single-frame-race')
+    await firstYieldReached
+    const newerFrame = await filmstripStorage.loadSingleFrame('media-single-frame-race', 1)
+    resumeFirstYield?.()
+
+    expect(await staleLoad).toBeNull()
+    expect(newerFrame?.url).toBe('blob:frame-1')
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:frame-0')
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith('blob:frame-1')
+  })
+
+  it('does not let an older full load replace a newer full load', async () => {
+    let resumeFirstYield: (() => void) | undefined
+    let markFirstYieldReached: (() => void) | undefined
+    const firstYieldReached = new Promise<void>((resolve) => {
+      markFirstYieldReached = resolve
+    })
+    let yieldCount = 0
+    vi.stubGlobal('scheduler', {
+      yield: vi.fn(() => {
+        yieldCount++
+        if (yieldCount !== 1) return Promise.resolve()
+        markFirstYieldReached?.()
+        return new Promise<void>((resolve) => {
+          resumeFirstYield = resolve
+        })
+      }),
+    })
+    let now = 0
+    vi.spyOn(performance, 'now').mockImplementation(() => {
+      now += 5
+      return now
+    })
+
+    const staleLoad = filmstripStorage.load('media-full-load-race')
+    await firstYieldReached
+    const newerLoad = await filmstripStorage.load('media-full-load-race')
+    resumeFirstYield?.()
+
+    expect(await staleLoad).toBeNull()
+    expect(newerLoad?.frames.map((frame) => frame.url)).toEqual(['blob:frame-1', 'blob:frame-2'])
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:frame-0')
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith('blob:frame-1')
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith('blob:frame-2')
+  })
+
+  it('does not publish a full load after its media URLs are cleared', async () => {
+    let resumeYield: (() => void) | undefined
+    let markYieldReached: (() => void) | undefined
+    const yieldReached = new Promise<void>((resolve) => {
+      markYieldReached = resolve
+    })
+    vi.stubGlobal('scheduler', {
+      yield: vi.fn(() => {
+        markYieldReached?.()
+        return new Promise<void>((resolve) => {
+          resumeYield = resolve
+        })
+      }),
+    })
+    let now = 0
+    vi.spyOn(performance, 'now').mockImplementation(() => {
+      now += 5
+      return now
+    })
+
+    const staleLoad = filmstripStorage.load('media-clear-race')
+    await yieldReached
+    filmstripStorage.revokeUrls('media-clear-race')
+    resumeYield?.()
+
+    expect(await staleLoad).toBeNull()
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:frame-0')
+  })
 })

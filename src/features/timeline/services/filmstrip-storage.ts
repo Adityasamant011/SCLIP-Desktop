@@ -44,7 +44,8 @@ type CooperativeScheduler = {
 }
 
 async function yieldToMainThread(): Promise<void> {
-  const scheduler = (globalThis as typeof globalThis & { scheduler?: CooperativeScheduler }).scheduler
+  const scheduler = (globalThis as typeof globalThis & { scheduler?: CooperativeScheduler })
+    .scheduler
   if (scheduler?.yield) {
     await scheduler.yield()
     return
@@ -89,9 +90,42 @@ interface LoadedFilmstrip {
   existingIndices: number[]
 }
 
+interface FrameUrlOperationToken {
+  clearGeneration: number
+  mediaGeneration: number
+}
+
 class FilmstripStorage {
   private objectUrls = new Map<string, Map<number, string>>()
+  private frameUrlGenerations = new Map<string, number>()
+  private clearGeneration = 0
   private legacyInitPromise: Promise<FileSystemDirectoryHandle | null> | null = null
+
+  private beginFrameUrlOperation(mediaId: string): FrameUrlOperationToken {
+    const mediaGeneration = (this.frameUrlGenerations.get(mediaId) ?? 0) + 1
+    this.frameUrlGenerations.set(mediaId, mediaGeneration)
+    return {
+      clearGeneration: this.clearGeneration,
+      mediaGeneration,
+    }
+  }
+
+  private invalidateFrameUrlOperations(mediaId: string): void {
+    this.frameUrlGenerations.set(mediaId, (this.frameUrlGenerations.get(mediaId) ?? 0) + 1)
+  }
+
+  private ownsFrameUrlOperation(mediaId: string, token: FrameUrlOperationToken): boolean {
+    return (
+      token.clearGeneration === this.clearGeneration &&
+      token.mediaGeneration === this.frameUrlGenerations.get(mediaId)
+    )
+  }
+
+  private revokeUncommittedFrameUrls(entries: Array<{ url: string }>): void {
+    for (const { url } of entries) {
+      URL.revokeObjectURL(url)
+    }
+  }
 
   private scheduleRevoke(urls: string[]): void {
     if (urls.length === 0) return
@@ -111,6 +145,7 @@ class FilmstripStorage {
   }
 
   private setFrameUrl(mediaId: string, index: number, url: string): void {
+    this.invalidateFrameUrlOperations(mediaId)
     const urlsByIndex = this.objectUrls.get(mediaId) ?? new Map<number, string>()
     const previous = urlsByIndex.get(index)
     urlsByIndex.set(index, url)
@@ -124,7 +159,12 @@ class FilmstripStorage {
   private replaceAllFrameUrls(
     mediaId: string,
     entries: Array<{ index: number; url: string }>,
-  ): void {
+    token: FrameUrlOperationToken,
+  ): boolean {
+    if (!this.ownsFrameUrlOperation(mediaId, token)) {
+      return false
+    }
+
     const previous = this.objectUrls.get(mediaId)
     const next = new Map<number, string>()
     for (const entry of entries) {
@@ -132,7 +172,7 @@ class FilmstripStorage {
     }
     this.objectUrls.set(mediaId, next)
 
-    if (!previous) return
+    if (!previous) return true
 
     const toRevoke: string[] = []
     for (const [index, url] of previous) {
@@ -142,6 +182,7 @@ class FilmstripStorage {
       }
     }
     this.scheduleRevoke(toRevoke)
+    return true
   }
 
   private async readMetadata(mediaId: string): Promise<FilmstripMetadata | null> {
@@ -152,6 +193,7 @@ class FilmstripStorage {
     const existing = await this.readMetadata(mediaId)
     if (existing) {
       if (existing.version === FILMSTRIP_FRAME_SCHEMA_VERSION) return existing
+      this.invalidateFrameUrlOperations(mediaId)
       const staleUrls = this.objectUrls.get(mediaId)
       if (staleUrls) this.scheduleRevoke([...staleUrls.values()])
       await Promise.resolve(
@@ -286,9 +328,14 @@ class FilmstripStorage {
   }
 
   async load(mediaId: string): Promise<LoadedFilmstrip | null> {
+    const urlOperation = this.beginFrameUrlOperation(mediaId)
+    const nextUrls: Array<{ index: number; url: string }> = []
+    let urlsCommitted = false
+
     try {
       const metadata = await this.ensureWorkspaceFilmstrip(mediaId)
       if (!metadata) return null
+      if (!this.ownsFrameUrlOperation(mediaId, urlOperation)) return null
 
       // Resolve the filmstrip dir once and read all matching files via the
       // same handle iterator. readBlob-per-path would re-walk the 4-segment
@@ -316,11 +363,15 @@ class FilmstripStorage {
         .map(({ index, blob }) => ({ index, blob }))
         .sort((a, b) => a.index - b.index)
 
-      const nextUrls: Array<{ index: number; url: string }> = []
       const frames: FilmstripFrame[] = []
       let sliceStartedAt = performance.now()
 
       for (const [frameIndex, { index, blob }] of frameFiles.entries()) {
+        if (!this.ownsFrameUrlOperation(mediaId, urlOperation)) {
+          this.revokeUncommittedFrameUrls(nextUrls)
+          return null
+        }
+
         const url = URL.createObjectURL(blob)
         nextUrls.push({ index, url })
         frames.push({
@@ -339,7 +390,11 @@ class FilmstripStorage {
           sliceStartedAt = performance.now()
         }
       }
-      this.replaceAllFrameUrls(mediaId, nextUrls)
+      urlsCommitted = this.replaceAllFrameUrls(mediaId, nextUrls, urlOperation)
+      if (!urlsCommitted) {
+        this.revokeUncommittedFrameUrls(nextUrls)
+        return null
+      }
 
       const existingIndices = frameFiles.map((frame) => frame.index)
 
@@ -354,6 +409,9 @@ class FilmstripStorage {
       )
       return { metadata, frames, existingIndices }
     } catch (error) {
+      if (!urlsCommitted) {
+        this.revokeUncommittedFrameUrls(nextUrls)
+      }
       logger.warn('Failed to load filmstrip:', error)
       return null
     }
@@ -465,6 +523,7 @@ class FilmstripStorage {
   }
 
   revokeUrls(mediaId: string): void {
+    this.invalidateFrameUrlOperations(mediaId)
     const urlsByIndex = this.objectUrls.get(mediaId)
     if (!urlsByIndex) return
 
@@ -475,25 +534,35 @@ class FilmstripStorage {
   }
 
   async clearAll(): Promise<void> {
-    for (const mediaId of this.objectUrls.keys()) {
-      this.revokeUrls(mediaId)
-    }
-
-    // In v2, filmstrips live per-media under `media/<id>/cache/filmstrip/`.
-    // Enumerate media dirs and prune each one's filmstrip subtree.
+    // Invalidate loads that started before or during the clear, including
+    // media that have not published an object URL map yet.
+    this.clearGeneration++
     try {
-      const mediaEntries = await listDirectory(requireWorkspaceRoot(), ['media'])
-      for (const entry of mediaEntries) {
-        if (entry.kind !== 'directory') continue
-        await removeEntry(requireWorkspaceRoot(), filmstripDir(entry.name), {
-          recursive: true,
-        }).catch(() => undefined)
+      for (const mediaId of this.objectUrls.keys()) {
+        this.revokeUrls(mediaId)
       }
-    } catch {
-      // media dir may not exist yet — nothing to clear
-    }
 
-    await this.clearLegacyFilmstrips()
+      // In v2, filmstrips live per-media under `media/<id>/cache/filmstrip/`.
+      // Enumerate media dirs and prune each one's filmstrip subtree.
+      try {
+        const mediaEntries = await listDirectory(requireWorkspaceRoot(), ['media'])
+        for (const entry of mediaEntries) {
+          if (entry.kind !== 'directory') continue
+          await removeEntry(requireWorkspaceRoot(), filmstripDir(entry.name), {
+            recursive: true,
+          }).catch(() => undefined)
+        }
+      } catch {
+        // media dir may not exist yet — nothing to clear
+      }
+
+      await this.clearLegacyFilmstrips()
+    } finally {
+      this.clearGeneration++
+      for (const mediaId of this.objectUrls.keys()) {
+        this.revokeUrls(mediaId)
+      }
+    }
   }
 }
 
