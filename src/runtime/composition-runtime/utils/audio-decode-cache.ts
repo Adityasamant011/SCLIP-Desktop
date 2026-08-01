@@ -109,6 +109,51 @@ export interface PlaybackAudioSlice {
   isComplete: boolean
 }
 
+interface DecodeAudioSampleData {
+  numberOfFrames?: number
+  numberOfChannels?: number
+  sampleRate?: number
+  timestamp?: number
+  duration?: number
+  copyTo: (
+    destination: Float32Array,
+    options: { planeIndex: number; format: 'f32-planar' },
+  ) => void
+  close: () => void
+}
+
+function extractDecodeSampleStereoChunk(sample: DecodeAudioSampleData): {
+  left: Float32Array
+  right: Float32Array
+  frameCount: number
+} | null {
+  const frameCount = Math.max(0, sample.numberOfFrames ?? 0)
+  const channelCount = Math.max(1, sample.numberOfChannels ?? 1)
+  if (frameCount === 0) {
+    return null
+  }
+
+  const channels: Float32Array[] = []
+  for (let c = 0; c < channelCount; c++) {
+    const channelData = new Float32Array(frameCount)
+    sample.copyTo(channelData, { planeIndex: c, format: 'f32-planar' })
+    channels.push(channelData)
+  }
+  const { left, right } = downmixToStereo(channels, frameCount)
+  return { left, right, frameCount }
+}
+
+function getDecodeSampleEndTime(sample: DecodeAudioSampleData): number | null {
+  if (
+    !Number.isFinite(sample.timestamp) ||
+    !Number.isFinite(sample.duration) ||
+    Number(sample.duration) <= 0
+  ) {
+    return null
+  }
+  return Number(sample.timestamp) + Number(sample.duration)
+}
+
 function getPlaybackSliceCoverageEnd(slice: PlaybackAudioSlice): number {
   return slice.startTime + slice.buffer.duration
 }
@@ -376,7 +421,11 @@ async function decodeAudioWindow(
 
       const safeStartTime = Math.max(0, startTime)
       const targetCoverageEndTime = safeStartTime + Math.max(0.5, durationSeconds)
-      const sink = new mb.AudioBufferSink(audioTrack)
+      // Use AudioSampleSink here as well as in the proven full-decode path.
+      // AudioBufferSink can fail for custom codecs even after their decoder is
+      // registered, which used to turn a small playback-window request into a
+      // slow full decode and leave transport advancing without audio.
+      const sink = new mb.AudioSampleSink(audioTrack)
 
       let sliceStartTime: number | null = null
       let coverageEndTime = safeStartTime
@@ -386,59 +435,64 @@ async function decodeAudioWindow(
       const rightChunks: Float32Array[] = []
       const seenBufferKeys = new Set<string>()
 
-      const appendWrappedBuffer = (wrappedBuffer: {
-        buffer: AudioBuffer
-        timestamp: number
-        duration: number
-      }) => {
-        const audioBuffer = wrappedBuffer.buffer
-        const frameCount = audioBuffer.length
-        const channelCount = Math.max(1, audioBuffer.numberOfChannels)
-        if (frameCount === 0) {
+      const appendSample = (sample: DecodeAudioSampleData) => {
+        const chunk = extractDecodeSampleStereoChunk(sample)
+        if (!chunk) {
           return
         }
 
-        const dedupeKey = `${wrappedBuffer.timestamp}:${wrappedBuffer.duration}`
+        const timestamp = Number.isFinite(sample.timestamp)
+          ? Number(sample.timestamp)
+          : coverageEndTime
+        const duration =
+          Number.isFinite(sample.duration) && Number(sample.duration) > 0
+            ? Number(sample.duration)
+            : chunk.frameCount / Math.max(1, sample.sampleRate ?? sampleRate)
+
+        const dedupeKey = `${timestamp}:${duration}`
         if (seenBufferKeys.has(dedupeKey)) {
           return
         }
         seenBufferKeys.add(dedupeKey)
 
         if (sliceStartTime === null) {
-          sliceStartTime = wrappedBuffer.timestamp
+          sliceStartTime = timestamp
         }
-        coverageEndTime = Math.max(
-          coverageEndTime,
-          wrappedBuffer.timestamp + wrappedBuffer.duration,
-        )
-        if (audioBuffer.sampleRate > 0) {
-          sampleRate = audioBuffer.sampleRate
+        coverageEndTime = Math.max(coverageEndTime, timestamp + duration)
+        if (sample.sampleRate && sample.sampleRate > 0) {
+          sampleRate = sample.sampleRate
         }
 
-        const channels: Float32Array[] = []
-        for (let c = 0; c < channelCount; c++) {
-          channels.push(audioBuffer.getChannelData(c))
-        }
-        const { left, right } = downmixToStereo(channels, frameCount)
-        leftChunks.push(left)
-        rightChunks.push(right)
-        totalFrames += frameCount
+        leftChunks.push(chunk.left)
+        rightChunks.push(chunk.right)
+        totalFrames += chunk.frameCount
       }
 
-      const initialWrappedBuffer = await sink.getBuffer(safeStartTime)
-      if (initialWrappedBuffer) {
-        appendWrappedBuffer(initialWrappedBuffer)
+      const initialSample = (await sink.getSample(safeStartTime)) as DecodeAudioSampleData | null
+      let initialSampleEndTime: number | null = null
+      if (initialSample) {
+        try {
+          appendSample(initialSample)
+          initialSampleEndTime = getDecodeSampleEndTime(initialSample)
+        } finally {
+          initialSample.close()
+        }
       }
 
-      const iteratorStartTime = initialWrappedBuffer
-        ? Math.max(
-            safeStartTime,
-            initialWrappedBuffer.timestamp + initialWrappedBuffer.duration,
-          )
-        : safeStartTime
+      const iteratorStartTime =
+        initialSampleEndTime === null
+          ? safeStartTime
+          : Math.max(safeStartTime, initialSampleEndTime)
       if (coverageEndTime < targetCoverageEndTime) {
-        for await (const wrappedBuffer of sink.buffers(iteratorStartTime, targetCoverageEndTime)) {
-          appendWrappedBuffer(wrappedBuffer)
+        for await (const sample of sink.samples(
+          iteratorStartTime,
+          targetCoverageEndTime,
+        ) as AsyncIterable<DecodeAudioSampleData>) {
+          try {
+            appendSample(sample)
+          } finally {
+            sample.close()
+          }
           if (coverageEndTime >= targetCoverageEndTime) {
             break
           }
@@ -1195,37 +1249,19 @@ async function decodeFullAudio(
 
       for await (const sample of sink.samples()) {
         try {
-          const sampleData = sample as {
-            numberOfFrames?: number
-            numberOfChannels?: number
-            sampleRate?: number
-            copyTo: (
-              destination: Float32Array,
-              options: { planeIndex: number; format: 'f32-planar' },
-            ) => void
-          }
-          const frameCount = Math.max(0, sampleData.numberOfFrames ?? 0)
-          const channelCount = Math.max(1, sampleData.numberOfChannels ?? 1)
-          if (frameCount === 0) {
+          const sampleData = sample as DecodeAudioSampleData
+          const chunk = extractDecodeSampleStereoChunk(sampleData)
+          if (!chunk) {
             continue
           }
           if (sampleData.sampleRate && sampleData.sampleRate > 0) {
             sampleRate = sampleData.sampleRate
           }
 
-          // Extract channels and downmix to stereo immediately.
-          const channels: Float32Array[] = []
-          for (let c = 0; c < channelCount; c++) {
-            const channelData = new Float32Array(frameCount)
-            sampleData.copyTo(channelData, { planeIndex: c, format: 'f32-planar' })
-            channels.push(channelData)
-          }
-          const { left, right } = downmixToStereo(channels, frameCount)
-
           // Accumulate for current bin
-          binLeftChunks.push(left)
-          binRightChunks.push(right)
-          binAccumFrames += frameCount
+          binLeftChunks.push(chunk.left)
+          binRightChunks.push(chunk.right)
+          binAccumFrames += chunk.frameCount
 
           // Flush bin when it reaches the target duration
           const binFramesAtSource = BIN_DURATION_SEC * sampleRate
