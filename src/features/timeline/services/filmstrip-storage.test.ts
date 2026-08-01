@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 
 const fsMocks = vi.hoisted(() => ({
   readBlob: vi.fn(),
@@ -83,11 +83,50 @@ describe('filmstripStorage', () => {
     ])
   })
 
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
   it('does not revoke unrequested frame URLs during single-frame loads', async () => {
     await filmstripStorage.load('media-1')
     await filmstripStorage.loadSingleFrame('media-1', 1)
 
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:frame-1')
     expect(URL.revokeObjectURL).not.toHaveBeenCalledWith('blob:frame-0')
+  })
+
+  it('yields while materializing persisted frame URLs', async () => {
+    const storedFrames = Array.from({ length: 5 }, (_, index) => ({
+      name: `${index}.jpg`,
+      blob: new Blob([`frame-${index}`], { type: 'image/jpeg' }),
+    }))
+    fsMocks.readJson.mockResolvedValue({
+      version: 2,
+      width: 160,
+      height: 90,
+      isComplete: true,
+      frameCount: storedFrames.length,
+    })
+    fsMocks.readDirectoryFiles.mockResolvedValue(storedFrames)
+
+    let now = 0
+    vi.spyOn(performance, 'now').mockImplementation(() => {
+      now += 5
+      return now
+    })
+    const timeoutSpy = vi.spyOn(globalThis, 'setTimeout')
+
+    const loaded = await filmstripStorage.load('media-yield')
+
+    expect(timeoutSpy).toHaveBeenCalledTimes(storedFrames.length - 1)
+    expect(loaded?.frames.map((frame) => frame.index)).toEqual([0, 1, 2, 3, 4])
+    expect(loaded?.frames.map((frame) => frame.url)).toEqual([
+      'blob:frame-0',
+      'blob:frame-1',
+      'blob:frame-2',
+      'blob:frame-3',
+      'blob:frame-4',
+    ])
   })
 })

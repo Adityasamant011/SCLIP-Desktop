@@ -37,6 +37,21 @@ const PRIMARY_FRAME_EXT = 'jpg'
 const LEGACY_FRAME_EXT = 'webp'
 const FRAME_EXTENSIONS = new Set([PRIMARY_FRAME_EXT, LEGACY_FRAME_EXT])
 const FILMSTRIP_FRAME_SCHEMA_VERSION = 2
+const FILMSTRIP_URL_CREATION_SLICE_BUDGET_MS = 4
+
+type CooperativeScheduler = {
+  yield?: () => Promise<void>
+}
+
+async function yieldToMainThread(): Promise<void> {
+  const scheduler = (globalThis as typeof globalThis & { scheduler?: CooperativeScheduler }).scheduler
+  if (scheduler?.yield) {
+    await scheduler.yield()
+    return
+  }
+
+  await new Promise<void>((resolve) => setTimeout(resolve, 0))
+}
 
 function parseFrameFileNameParts(name: string): { index: number; ext: string } | null {
   const dotIndex = name.lastIndexOf('.')
@@ -302,16 +317,28 @@ class FilmstripStorage {
         .sort((a, b) => a.index - b.index)
 
       const nextUrls: Array<{ index: number; url: string }> = []
-      const frames: FilmstripFrame[] = frameFiles.map(({ index, blob }) => {
+      const frames: FilmstripFrame[] = []
+      let sliceStartedAt = performance.now()
+
+      for (const [frameIndex, { index, blob }] of frameFiles.entries()) {
         const url = URL.createObjectURL(blob)
         nextUrls.push({ index, url })
-        return {
+        frames.push({
           index,
           timestamp: index / FRAME_RATE,
           url,
           byteSize: blob.size,
+        })
+
+        const hasMoreFrames = frameIndex < frameFiles.length - 1
+        if (
+          hasMoreFrames &&
+          performance.now() - sliceStartedAt >= FILMSTRIP_URL_CREATION_SLICE_BUDGET_MS
+        ) {
+          await yieldToMainThread()
+          sliceStartedAt = performance.now()
         }
-      })
+      }
       this.replaceAllFrameUrls(mediaId, nextUrls)
 
       const existingIndices = frameFiles.map((frame) => frame.index)
