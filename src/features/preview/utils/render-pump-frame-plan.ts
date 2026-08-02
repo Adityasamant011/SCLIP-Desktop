@@ -301,6 +301,44 @@ interface SelectBoundarySourcePrewarmSourcesParams {
   fps: number
 }
 
+function selectDirectionalWindowEntries<T>({
+  entries,
+  targetFrame,
+  direction,
+  windowFrames,
+  maxEntries,
+  getFrame,
+}: {
+  entries: readonly T[]
+  targetFrame: number
+  direction: ScrubDirection
+  windowFrames: number
+  maxEntries: number
+  getFrame: (entry: T) => number
+}): T[] {
+  const minFrame = targetFrame - windowFrames
+  const maxFrame = targetFrame + windowFrames
+  const directionalEntries: T[] = []
+  const fallbackEntries: T[] = []
+
+  // Both callers pass entries sorted by frame, so the first out-of-window
+  // entry lets us stop scanning the remainder.
+  for (const entry of entries) {
+    const frame = getFrame(entry)
+    if (frame < minFrame) continue
+    if (frame > maxFrame) break
+    fallbackEntries.push(entry)
+    if (direction > 0 && frame < targetFrame - 1) continue
+    if (direction < 0 && frame > targetFrame + 1) continue
+    directionalEntries.push(entry)
+  }
+
+  const candidates = directionalEntries.length > 0 ? directionalEntries : fallbackEntries
+  return [...candidates]
+    .sort((a, b) => Math.abs(getFrame(a) - targetFrame) - Math.abs(getFrame(b) - targetFrame))
+    .slice(0, maxEntries)
+}
+
 export function resolveRenderPumpTargetFrame({
   state,
   forceFastScrubOverlay,
@@ -345,14 +383,6 @@ export function resolveScrubDirectionPlan({
     const targetDelta = targetFrame - prevTargetFrame
     return {
       direction: targetDelta > 0 ? 1 : targetDelta < 0 ? -1 : 0,
-      scrubUpdates: 0,
-      scrubDroppedFrames: 0,
-    }
-  }
-
-  if (targetFrame !== null) {
-    return {
-      direction: 0,
       scrubUpdates: 0,
       scrubDroppedFrames: 0,
     }
@@ -435,24 +465,14 @@ export function selectBoundaryPrewarmFrames({
   if (boundaryFrames.length === 0) return []
 
   const windowFrames = Math.max(4, Math.round(fps * FAST_SCRUB_BOUNDARY_PREWARM_WINDOW_SECONDS))
-  const minFrame = targetFrame - windowFrames
-  const maxFrame = targetFrame + windowFrames
-  const directionalCandidates: number[] = []
-  const fallbackCandidates: number[] = []
-
-  for (const boundary of boundaryFrames) {
-    if (boundary < minFrame) continue
-    if (boundary > maxFrame) break
-    fallbackCandidates.push(boundary)
-    if (direction > 0 && boundary < targetFrame - 1) continue
-    if (direction < 0 && boundary > targetFrame + 1) continue
-    directionalCandidates.push(boundary)
-  }
-
-  const candidates = directionalCandidates.length > 0 ? directionalCandidates : fallbackCandidates
-  const selectedBoundaries = [...candidates]
-    .sort((a, b) => Math.abs(a - targetFrame) - Math.abs(b - targetFrame))
-    .slice(0, FAST_SCRUB_BOUNDARY_PREWARM_MAX_BOUNDARIES_PER_FRAME)
+  const selectedBoundaries = selectDirectionalWindowEntries({
+    entries: boundaryFrames,
+    targetFrame,
+    direction,
+    windowFrames,
+    maxEntries: FAST_SCRUB_BOUNDARY_PREWARM_MAX_BOUNDARIES_PER_FRAME,
+    getFrame: (boundary) => boundary,
+  })
 
   const frames: number[] = []
   const seen = new Set<number>()
@@ -477,24 +497,14 @@ export function selectBoundarySourcePrewarmSources({
   if (boundarySources.length === 0) return []
 
   const windowFrames = Math.max(8, Math.round(fps * FAST_SCRUB_SOURCE_PREWARM_WINDOW_SECONDS))
-  const minFrame = targetFrame - windowFrames
-  const maxFrame = targetFrame + windowFrames
-  const directionalEntries: FastScrubBoundarySource[] = []
-  const fallbackEntries: FastScrubBoundarySource[] = []
-
-  for (const entry of boundarySources) {
-    if (entry.frame < minFrame) continue
-    if (entry.frame > maxFrame) break
-    fallbackEntries.push(entry)
-    if (direction > 0 && entry.frame < targetFrame - 1) continue
-    if (direction < 0 && entry.frame > targetFrame + 1) continue
-    directionalEntries.push(entry)
-  }
-
-  const candidateEntries = directionalEntries.length > 0 ? directionalEntries : fallbackEntries
-  const selectedEntries = [...candidateEntries]
-    .sort((a, b) => Math.abs(a.frame - targetFrame) - Math.abs(b.frame - targetFrame))
-    .slice(0, FAST_SCRUB_BOUNDARY_SOURCE_PREWARM_MAX_ENTRIES_PER_FRAME)
+  const selectedEntries = selectDirectionalWindowEntries({
+    entries: boundarySources,
+    targetFrame,
+    direction,
+    windowFrames,
+    maxEntries: FAST_SCRUB_BOUNDARY_SOURCE_PREWARM_MAX_ENTRIES_PER_FRAME,
+    getFrame: (entry) => entry.frame,
+  })
 
   const sources: string[] = []
   for (const entry of selectedEntries) {
