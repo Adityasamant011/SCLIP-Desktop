@@ -243,6 +243,35 @@ describe('TimelineHeader zoom slider', () => {
     }
   })
 
+  it('releases slider focus after an outside pointer release', async () => {
+    render(<TimelineHeader />)
+    const thumb = screen.getByRole('slider')
+
+    thumb.focus()
+    expect(thumb).toHaveFocus()
+
+    fireEvent.pointerDown(thumb)
+    fireEvent.pointerUp(window)
+    await act(async () => {})
+
+    expect(thumb).not.toHaveFocus()
+  })
+
+  it('releases slider focus after a normal value commit', async () => {
+    render(<TimelineHeader />)
+    const thumb = screen.getByRole('slider')
+
+    thumb.focus()
+    expect(thumb).toHaveFocus()
+
+    fireEvent.pointerDown(thumb)
+    fireEvent.mouseDown(thumb)
+    fireEvent.mouseUp(thumb)
+    await act(async () => {})
+
+    expect(thumb).not.toHaveFocus()
+  })
+
   it('synchronizes controlled slider state for repeated keyboard steps', () => {
     const onZoomChange = vi.fn()
     render(<TimelineHeader onZoomChange={onZoomChange} />)
