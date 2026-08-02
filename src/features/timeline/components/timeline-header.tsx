@@ -343,9 +343,18 @@ const TimelineZoomControls = memo(function TimelineZoomControls({
       latestSliderValueRef.current = sliderValue
       renderSliderPreview(sliderValue)
       commitSliderZoom(sliderValue, latestSliderValue)
-      finishSliderZoomInteraction()
+      if (sliderKeyboardInputRef.current) {
+        releaseSliderZoomGesture()
+      } else {
+        finishSliderZoomInteraction()
+      }
     },
-    [commitSliderZoom, finishSliderZoomInteraction, renderSliderPreview],
+    [
+      commitSliderZoom,
+      finishSliderZoomInteraction,
+      releaseSliderZoomGesture,
+      renderSliderPreview,
+    ],
   )
 
   const controlledSliderValue = zoomToSlider(settledZoomLevel)
@@ -385,7 +394,11 @@ const TimelineZoomControls = memo(function TimelineZoomControls({
           sliderKeyboardInputRef.current = true
         }}
         onKeyUpCapture={() => {
-          sliderKeyboardInputRef.current = false
+          // Keep the keyboard marker set through Radix's onValueCommit, which
+          // runs later in this keyup event. The next microtask ends the input.
+          queueMicrotask(() => {
+            sliderKeyboardInputRef.current = false
+          })
         }}
         onBlurCapture={() => {
           sliderKeyboardInputRef.current = false

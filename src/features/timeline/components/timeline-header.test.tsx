@@ -272,12 +272,14 @@ describe('TimelineHeader zoom slider', () => {
     expect(thumb).not.toHaveFocus()
   })
 
-  it('synchronizes controlled slider state for repeated keyboard steps', () => {
+  it('synchronizes repeated keyboard steps without discarding slider focus', async () => {
     const onZoomChange = vi.fn()
     render(<TimelineHeader onZoomChange={onZoomChange} />)
     const slider = screen.getByTestId('zoom-slider')
     const thumb = screen.getByRole('slider')
     const initialValue = Number(slider.dataset.value)
+
+    thumb.focus()
 
     fireEvent.keyDown(thumb, { key: 'ArrowRight' })
     expect(Number(slider.dataset.value)).toBeCloseTo(initialValue + 0.005)
@@ -290,7 +292,13 @@ describe('TimelineHeader zoom slider', () => {
     expect(useZoomStore.getState().level).toBe(1)
 
     fireEvent.keyUp(thumb, { key: 'ArrowRight' })
+    await act(async () => {})
     expect(onZoomChange).toHaveBeenCalledTimes(2)
+    expect(thumb).toHaveFocus()
+
+    fireEvent.keyDown(thumb, { key: 'ArrowRight' })
+    expect(Number(slider.dataset.value)).toBeCloseTo(initialValue + 0.015)
+    expect(onZoomChange).toHaveBeenCalledTimes(3)
   })
 
   it('toggles the keyframe panel without a selected clip', () => {
