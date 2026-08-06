@@ -74,6 +74,7 @@ import { setTimelineDensityMarqueePreview } from '../utils/timeline-density-marq
 import { notifyTimelineLiveScroll } from '@/shared/timeline/live-scroll-sync'
 import { getPlaybackFollowScrollLeft } from '../utils/playback-follow-scroll'
 import { TimelineSettledContentZoomProvider } from './timeline-settled-content-zoom-provider'
+import { getTimelineZoomInteractionShieldBounds } from '../utils/timeline-zoom-interaction-shield'
 
 const ACTIVE_TIMELINE_GESTURE_CURSOR_CLASSES = [
   'timeline-cursor-trim-left',
@@ -1935,18 +1936,34 @@ export const TimelineContent = memo(function TimelineContent({
 
     const cached = viewportDimsRef.current
     const rect = cached ? null : container.getBoundingClientRect()
-    shield.style.left = `${cached?.left ?? rect?.left ?? 0}px`
-    shield.style.top = `${cached?.top ?? rect?.top ?? 0}px`
-    shield.style.width = `${cached?.width ?? rect?.width ?? container.clientWidth}px`
-    shield.style.height = `${cached?.fullHeight ?? rect?.height ?? container.clientHeight}px`
+    const shieldBounds = getTimelineZoomInteractionShieldBounds({
+      left: cached?.left ?? rect?.left ?? 0,
+      top: cached?.top ?? rect?.top ?? 0,
+      width: cached?.width ?? rect?.width ?? container.clientWidth,
+      height: cached?.fullHeight ?? rect?.height ?? container.clientHeight,
+    })
+    shield.style.left = `${shieldBounds.left}px`
+    // Keep the ruler interactive while content geometry settles. A ruler press
+    // owns transport immediately and must never land on this track-only shield.
+    shield.style.top = `${shieldBounds.top}px`
+    shield.style.width = `${shieldBounds.width}px`
+    shield.style.height = `${shieldBounds.height}px`
     shield.style.display = 'block'
   }, [])
 
   useEffect(() => {
+    const hideShieldIfSettled = (isZoomInteracting: boolean) => {
+      if (isZoomInteracting) return
+      const shield = zoomInteractionShieldRef.current
+      if (shield) shield.style.display = 'none'
+    }
+
+    // HMR or a remount can preserve an imperative `display: block` write after
+    // the zoom store has already settled. Reconcile the DOM immediately.
+    hideShieldIfSettled(useZoomStore.getState().isZoomInteracting)
     return useZoomStore.subscribe((state, previousState) => {
       if (!state.isZoomInteracting && previousState.isZoomInteracting) {
-        const shield = zoomInteractionShieldRef.current
-        if (shield) shield.style.display = 'none'
+        hideShieldIfSettled(state.isZoomInteracting)
       }
     })
   }, [])
@@ -2131,6 +2148,7 @@ export const TimelineContent = memo(function TimelineContent({
         <div
           ref={zoomInteractionShieldRef}
           data-timeline-zoom-interaction-shield
+          data-marquee-ignore
           aria-hidden="true"
           className="fixed z-50"
           style={{ display: 'none' }}

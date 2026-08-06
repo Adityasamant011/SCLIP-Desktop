@@ -905,7 +905,8 @@ describe('VideoPreview sync behavior', () => {
     blobUrlListeners.clear()
     mockBlobUrlVersion.current = 0
     resolveMediaUrlMock.mockClear()
-    resolveProxyUrlMock.mockClear()
+    resolveProxyUrlMock.mockReset()
+    resolveProxyUrlMock.mockReturnValue(null)
     createCompositionRendererMock.mockClear()
     rendererMockState.instances.length = 0
     canvasPixelReadbackEnabled = false
@@ -1487,6 +1488,117 @@ describe('VideoPreview sync behavior', () => {
     })
     expect(renderer.renderFrame).not.toHaveBeenCalledWith(24)
     expect(renderer.renderFrame).not.toHaveBeenCalledWith(25)
+  })
+
+  it('does not publish a stale renderer after proxy mode changes during initialization', async () => {
+    usePlaybackStore.setState({ useProxy: false })
+    setMockBlobUrl('media-proxy-init-race', 'blob:source-video')
+    resolveProxyUrlMock.mockReturnValue('blob:proxy-video')
+    setSingleVideoItemAtFrame({
+      id: 'item-proxy-init-race',
+      mediaId: 'media-proxy-init-race',
+      effects: [
+        {
+          id: 'effect-proxy-init-race',
+          enabled: true,
+          effect: { type: 'gpu-effect', gpuEffectType: 'gpu-sepia', params: { amount: 0.5 } },
+        },
+      ],
+    })
+
+    const staleRenderer = createRendererDouble()
+    let resolveStaleRenderer: ((renderer: typeof staleRenderer) => void) | null = null
+    createCompositionRendererMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveStaleRenderer = resolve
+        }),
+    )
+
+    renderPreviewWithScrubCanvas()
+    await waitFor(() => expect(createCompositionRendererMock).toHaveBeenCalledTimes(1))
+
+    act(() => {
+      usePlaybackStore.getState().toggleUseProxy()
+    })
+
+    await waitFor(() => {
+      expect(createCompositionRendererMock).toHaveBeenCalledTimes(2)
+      expect(rendererMockState.instances).toHaveLength(1)
+    })
+    const currentRenderer = rendererMockState.instances[0]!
+
+    await act(async () => {
+      resolveStaleRenderer?.(staleRenderer)
+      await Promise.resolve()
+    })
+
+    expect(staleRenderer.dispose).toHaveBeenCalledOnce()
+    act(() => {
+      usePlaybackStore.getState().setPreviewFrame(24)
+    })
+    await waitFor(() => expect(currentRenderer.renderFrame).toHaveBeenCalledWith(24))
+    expect(staleRenderer.renderFrame).not.toHaveBeenCalled()
+  })
+
+  it('rebuilds a reversed fast-scrub renderer with the selected proxy mode', async () => {
+    usePlaybackStore.setState({ useProxy: false })
+    setMockBlobUrl('media-proxy-mode', 'blob:source-video')
+    resolveProxyUrlMock.mockReturnValue('blob:proxy-video')
+    setSingleVideoItemAtFrame({
+      id: 'item-proxy-mode',
+      mediaId: 'media-proxy-mode',
+      isReversed: true,
+      sourceStart: 0,
+      sourceEnd: 120,
+      sourceFps: 30,
+      effects: [
+        {
+          id: 'effect-proxy-mode',
+          enabled: true,
+          effect: { type: 'gpu-effect', gpuEffectType: 'gpu-sepia', params: { amount: 0.5 } },
+        },
+      ],
+    })
+
+    const { renderer } = await renderReadySingleRendererPreview(24)
+    const rendererCalls = createCompositionRendererMock.mock.calls as unknown as Array<
+      [
+        {
+          tracks: Array<{
+            items: Array<{ src?: string; audioSrc?: string; isReversed?: boolean }>
+          }>
+        },
+        unknown,
+        unknown,
+        { useProxyMedia?: boolean },
+      ]
+    >
+    const firstInput = rendererCalls[0]?.[0]
+    const firstOptions = rendererCalls[0]?.[3]
+    expect(firstInput?.tracks[0]?.items[0]).toMatchObject({
+      src: 'blob:source-video',
+      audioSrc: 'blob:source-video',
+      isReversed: true,
+    })
+    expect(firstOptions?.useProxyMedia).toBe(false)
+
+    act(() => {
+      usePlaybackStore.getState().toggleUseProxy()
+    })
+
+    await waitFor(() => {
+      expect(renderer.dispose).toHaveBeenCalledOnce()
+      expect(createCompositionRendererMock).toHaveBeenCalledTimes(2)
+    })
+    const secondInput = rendererCalls[1]?.[0]
+    const secondOptions = rendererCalls[1]?.[3]
+    expect(secondInput?.tracks[0]?.items[0]).toMatchObject({
+      src: 'blob:proxy-video',
+      audioSrc: 'blob:source-video',
+      isReversed: true,
+    })
+    expect(secondOptions?.useProxyMedia).toBe(true)
   })
 
   it('reuses the active fast-scrub renderer for committed transform updates on gpu-effect clips', async () => {

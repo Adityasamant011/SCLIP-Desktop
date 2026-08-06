@@ -195,6 +195,32 @@ export function selectPreviewVideoSource(options: {
   return candidates[0] ?? null
 }
 
+export function getPreviewVideoSourceCandidates({
+  itemSource,
+  proxySource,
+  registeredSource,
+  cachedSource,
+  useProxyMedia,
+}: {
+  itemSource?: string | null
+  proxySource?: string | null
+  registeredSource?: string | null
+  cachedSource?: string | null
+  useProxyMedia: boolean
+}): Array<string | null | undefined> {
+  if (useProxyMedia) {
+    return [proxySource, itemSource, registeredSource, cachedSource]
+  }
+
+  // blobUrlManager owns the current original-media URL and is also what the
+  // active preseek scheduler uses with proxy playback disabled. Timeline item
+  // src values can lag a proxy-mode toggle, so never let an explicit proxy URL
+  // outrank or masquerade as the original source here.
+  return [cachedSource, registeredSource, itemSource].map((candidate) =>
+    candidate === proxySource ? null : candidate,
+  )
+}
+
 // Predicate helpers (GPU-effect / animated-image classifiers) live in
 // `render-engine-predicates.ts`. `subCompositionRenderDataHasGpuEffects` is
 // re-exported so existing import sites (and its test) keep working.
@@ -1226,17 +1252,19 @@ export async function createCompositionRenderer(
           : selectExportVideoSource(item, registeredSource)
       }
       return selectPreviewVideoSource({
-        candidates: [
-          item.src,
-          item.mediaId ? resolveProxyUrl(item.mediaId) : null,
+        candidates: getPreviewVideoSourceCandidates({
+          itemSource: item.src,
+          proxySource: item.mediaId ? resolveProxyUrl(item.mediaId) : null,
           registeredSource,
-          item.mediaId ? blobUrlManager.get(item.mediaId) : null,
-        ],
+          cachedSource: item.mediaId ? blobUrlManager.get(item.mediaId) : null,
+          useProxyMedia,
+        }),
         sourceTime,
         toleranceSeconds,
         getCachedPredecodedBitmap: itemRenderContext.getCachedPredecodedBitmap,
-        getCachedActivePreviewFallbackBitmap:
-          itemRenderContext.getCachedActivePreviewFallbackBitmap,
+        getCachedActivePreviewFallbackBitmap: useProxyMedia
+          ? itemRenderContext.getCachedActivePreviewFallbackBitmap
+          : undefined,
         isActivePreviewSourceTarget: itemRenderContext.isActivePreviewSourceTarget,
       })
     },
