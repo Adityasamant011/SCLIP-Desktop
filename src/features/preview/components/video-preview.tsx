@@ -134,6 +134,7 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
   const [splitAfterRenderedFrame, setSplitAfterRenderedFrame] = useState<number | null>(null)
   const splitAfterRendererRef = useRef<CompositionRendererInstance | null>(null)
   const splitAfterInitPromiseRef = useRef<Promise<CompositionRendererInstance | null> | null>(null)
+  const splitAfterInitGenerationRef = useRef(0)
   const splitAfterCanvasRef = useRef<OffscreenCanvas | null>(null)
   const splitAfterRendererStructureKeyRef = useRef<string | null>(null)
   const splitAfterRenderInFlightRef = useRef(false)
@@ -407,6 +408,7 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
   )
 
   const disposeSplitAfterRenderer = useCallback(() => {
+    splitAfterInitGenerationRef.current += 1
     splitAfterInitPromiseRef.current = null
     splitAfterRendererStructureKeyRef.current = null
     splitAfterCanvasRef.current = null
@@ -446,7 +448,9 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
       if (splitAfterRendererRef.current) return splitAfterRendererRef.current
       if (splitAfterInitPromiseRef.current) return splitAfterInitPromiseRef.current
 
-      splitAfterInitPromiseRef.current = (async () => {
+      const initGeneration = splitAfterInitGenerationRef.current
+      let initPromise!: Promise<CompositionRendererInstance | null>
+      initPromise = (async () => {
         try {
           const canvas = new OffscreenCanvas(renderSize.width, renderSize.height)
           const ctx = canvas.getContext('2d')
@@ -464,6 +468,10 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
             getLiveKeyframes,
             renderText: !domTextScrubOverlayPlan.enabled,
           })
+          if (splitAfterInitGenerationRef.current !== initGeneration) {
+            renderer.dispose()
+            return null
+          }
 
           splitAfterCanvasRef.current = canvas
           splitAfterRendererRef.current = renderer
@@ -473,16 +481,21 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
           }
           return renderer
         } catch {
-          splitAfterCanvasRef.current = null
-          splitAfterRendererRef.current = null
-          splitAfterRendererStructureKeyRef.current = null
+          if (splitAfterInitGenerationRef.current === initGeneration) {
+            splitAfterCanvasRef.current = null
+            splitAfterRendererRef.current = null
+            splitAfterRendererStructureKeyRef.current = null
+          }
           return null
         } finally {
-          splitAfterInitPromiseRef.current = null
+          if (splitAfterInitPromiseRef.current === initPromise) {
+            splitAfterInitPromiseRef.current = null
+          }
         }
       })()
+      splitAfterInitPromiseRef.current = initPromise
 
-      return splitAfterInitPromiseRef.current
+      return initPromise
     }, [
       disposeSplitAfterRenderer,
       fastScrubInputProps,
@@ -499,6 +512,10 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
       renderSize.width,
       useProxy,
     ])
+
+  useEffect(() => {
+    disposeSplitAfterRenderer()
+  }, [disposeSplitAfterRenderer, fastScrubRendererStructureKey])
 
   // Enter the composited path in the same render that activates the editor.
   // Waiting for the timeline-wide effect scan adds a reactive round trip that

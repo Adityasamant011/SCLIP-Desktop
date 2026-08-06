@@ -1490,6 +1490,57 @@ describe('VideoPreview sync behavior', () => {
     expect(renderer.renderFrame).not.toHaveBeenCalledWith(25)
   })
 
+  it('does not publish a stale renderer after proxy mode changes during initialization', async () => {
+    usePlaybackStore.setState({ useProxy: false })
+    setMockBlobUrl('media-proxy-init-race', 'blob:source-video')
+    resolveProxyUrlMock.mockReturnValue('blob:proxy-video')
+    setSingleVideoItemAtFrame({
+      id: 'item-proxy-init-race',
+      mediaId: 'media-proxy-init-race',
+      effects: [
+        {
+          id: 'effect-proxy-init-race',
+          enabled: true,
+          effect: { type: 'gpu-effect', gpuEffectType: 'gpu-sepia', params: { amount: 0.5 } },
+        },
+      ],
+    })
+
+    const staleRenderer = createRendererDouble()
+    let resolveStaleRenderer: ((renderer: typeof staleRenderer) => void) | null = null
+    createCompositionRendererMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveStaleRenderer = resolve
+        }),
+    )
+
+    renderPreviewWithScrubCanvas()
+    await waitFor(() => expect(createCompositionRendererMock).toHaveBeenCalledTimes(1))
+
+    act(() => {
+      usePlaybackStore.getState().toggleUseProxy()
+    })
+
+    await waitFor(() => {
+      expect(createCompositionRendererMock).toHaveBeenCalledTimes(2)
+      expect(rendererMockState.instances).toHaveLength(1)
+    })
+    const currentRenderer = rendererMockState.instances[0]!
+
+    await act(async () => {
+      resolveStaleRenderer?.(staleRenderer)
+      await Promise.resolve()
+    })
+
+    expect(staleRenderer.dispose).toHaveBeenCalledOnce()
+    act(() => {
+      usePlaybackStore.getState().setPreviewFrame(24)
+    })
+    await waitFor(() => expect(currentRenderer.renderFrame).toHaveBeenCalledWith(24))
+    expect(staleRenderer.renderFrame).not.toHaveBeenCalled()
+  })
+
   it('rebuilds a reversed fast-scrub renderer with the selected proxy mode', async () => {
     usePlaybackStore.setState({ useProxy: false })
     setMockBlobUrl('media-proxy-mode', 'blob:source-video')
