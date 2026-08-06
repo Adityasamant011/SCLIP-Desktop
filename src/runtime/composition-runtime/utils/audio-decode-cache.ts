@@ -92,7 +92,6 @@ function evictIfNeeded(): void {
   }
 }
 const DEFAULT_PLAYABLE_PARTIAL_READY_SECONDS = 2
-const PLAYABLE_PARTIAL_TIMEOUT_MS = 8000
 const PLAYABLE_PARTIAL_PREROLL_SECONDS = 0.25
 const STARTUP_PLAYABLE_PARTIAL_READY_SECONDS = 1
 const PENDING_PLAYBACK_SLICE_REUSE_HEADROOM_SECONDS = 1
@@ -213,12 +212,6 @@ function rememberPlaybackSlice(mediaId: string, slice: PlaybackAudioSlice): void
 
 function binKey(mediaId: string, binIndex: number): string {
   return `${mediaId}:bin:${binIndex}`
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms)
-  })
 }
 
 function createInputSource(mb: Awaited<typeof import('mediabunny')>, src: PreviewAudioSource) {
@@ -531,14 +524,16 @@ async function decodeAudioWindow(
 
 /**
  * Playback-first helper for custom-decoded audio:
- * returns a partial buffer as soon as enough decoded bins are available,
- * while full decode continues in the background.
+ * returns a bounded buffer around the requested playback position. This path
+ * deliberately never starts a whole-file decode: callers retain the returned
+ * AudioBuffer, so a long source would otherwise defeat the shared cache budget.
  */
 export async function getOrDecodeAudioSliceForPlayback(
   mediaId: string,
   src: PreviewAudioSource,
   options?: {
     minReadySeconds?: number
+    /** @deprecated Retained for call-site compatibility; window decoding no longer escalates. */
     waitTimeoutMs?: number
     targetTimeSeconds?: number
     preRollSeconds?: number
@@ -558,10 +553,8 @@ export async function getOrDecodeAudioSliceForPlayback(
     1,
     options?.minReadySeconds ?? DEFAULT_PLAYABLE_PARTIAL_READY_SECONDS,
   )
-  const waitTimeoutMs = Math.max(0, options?.waitTimeoutMs ?? PLAYABLE_PARTIAL_TIMEOUT_MS)
   const targetTimeSeconds = Math.max(0, options?.targetTimeSeconds ?? 0)
   const preRollSeconds = Math.max(0, options?.preRollSeconds ?? PLAYABLE_PARTIAL_PREROLL_SECONDS)
-  const pendingFullDecodePromise = pendingDecodes.get(mediaId) ?? null
 
   const cachedPlaybackSlice = playbackSliceCache.get(mediaId)
   if (
@@ -611,17 +604,12 @@ export async function getOrDecodeAudioSliceForPlayback(
       rememberPlaybackSlice(mediaId, slice)
       return slice
     } catch (windowError) {
-      log.warn('Targeted preview audio window decode failed, falling back to full decode', {
+      log.warn('Targeted preview audio window decode failed', {
         mediaId,
         targetTimeSeconds,
         error: windowError,
       })
-    }
-
-    return {
-      buffer: await getOrDecodeAudio(mediaId, src),
-      startTime: 0,
-      isComplete: true,
+      throw windowError
     }
   })()
 
@@ -632,19 +620,6 @@ export async function getOrDecodeAudioSliceForPlayback(
   })
 
   try {
-    if (waitTimeoutMs > 0) {
-      return await Promise.race([
-        partialPromise,
-        (async () => {
-          await sleep(waitTimeoutMs)
-          return {
-            buffer: await (pendingFullDecodePromise ?? getOrDecodeAudio(mediaId, src)),
-            startTime: 0,
-            isComplete: true,
-          } satisfies PlaybackAudioSlice
-        })(),
-      ])
-    }
     return await partialPromise
   } finally {
     const pendingSlice = pendingPlaybackSliceDecodes.get(mediaId)
