@@ -402,7 +402,7 @@ export function buildPreviewCompositionData({
       const proxyUrl =
         item.type === 'video' ? resolveProxyUrlFn(item.mediaId) || sourceUrl : sourceUrl
       const resolvedSrc = useProxy && item.type === 'video' ? proxyUrl : sourceUrl
-      const fastScrubSrc = item.type === 'video' ? proxyUrl : sourceUrl
+      const fastScrubSrc = resolvedSrc
       const hasMatchingAudioSrc = item.type !== 'video' || item.audioSrc === sourceUrl
 
       const resolvedItem =

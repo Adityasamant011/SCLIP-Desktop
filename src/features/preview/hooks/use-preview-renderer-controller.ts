@@ -114,6 +114,7 @@ interface UsePreviewRendererControllerParams {
   preserveRendererAcrossOverlayRouting: boolean
   domTextScrubOverlayEnabled: boolean
   items: TimelineItem[]
+  useProxy: boolean
   playerSize: { width: number; height: number }
   playerRenderSize: { width: number; height: number }
   renderSize: { width: number; height: number }
@@ -192,6 +193,7 @@ export function usePreviewRendererController({
   preserveRendererAcrossOverlayRouting,
   domTextScrubOverlayEnabled,
   items,
+  useProxy,
   playerSize,
   playerRenderSize,
   renderSize,
@@ -466,7 +468,7 @@ export function usePreviewRendererController({
           offscreenCtx,
           {
             mode: 'preview',
-            useProxyMedia: true,
+            useProxyMedia: useProxy,
             getPreviewTransformOverride,
             getPreviewEffectsOverride,
             getPreviewCornerPinOverride,
@@ -508,6 +510,7 @@ export function usePreviewRendererController({
     isResolving,
     renderSize.height,
     renderSize.width,
+    useProxy,
   ])
 
   const ensureBgTransitionRenderer =
@@ -531,7 +534,7 @@ export function usePreviewRendererController({
           const { createCompositionRenderer } = await importCompositionRenderer()
           const renderer = await createCompositionRenderer(fastScrubInputProps, canvas, ctx, {
             mode: 'preview',
-            useProxyMedia: true,
+            useProxyMedia: useProxy,
             getPreviewTransformOverride,
             getPreviewEffectsOverride,
             getPreviewCornerPinOverride,
@@ -570,6 +573,7 @@ export function usePreviewRendererController({
       isResolving,
       renderSize.height,
       renderSize.width,
+      useProxy,
     ])
 
   const ensureFastScrubRenderer =
@@ -610,7 +614,7 @@ export function usePreviewRendererController({
             offscreenCtx,
             {
               mode: 'preview',
-              useProxyMedia: true,
+              useProxyMedia: useProxy,
               getPreviewTransformOverride,
               getPreviewEffectsOverride,
               getPreviewCornerPinOverride,
@@ -728,6 +732,7 @@ export function usePreviewRendererController({
       scrubRendererRef,
       scrubRendererStructureKeyRef,
       scrubRequestedFrameRef,
+      useProxy,
     ])
   ensureFastScrubRendererRef.current = ensureFastScrubRenderer
 
@@ -1778,7 +1783,9 @@ export function usePreviewRendererController({
       // ensureFastScrubRenderer() is already in flight before this idle
       // callback fires, and the pool must still warm.
       warmDecoderPrewarmWorkerPool()
-      warmScrubProxyFallback()
+      if (useProxy) {
+        warmScrubProxyFallback()
+      }
       if (scrubRendererRef.current || scrubInitPromiseRef.current) return
       void ensureFastScrubRenderer()
     }
@@ -1807,7 +1814,7 @@ export function usePreviewRendererController({
         clearTimeout(timeoutId)
       }
     }
-  }, [ensureFastScrubRenderer, isResolving, scrubInitPromiseRef, scrubRendererRef])
+  }, [ensureFastScrubRenderer, isResolving, scrubInitPromiseRef, scrubRendererRef, useProxy])
 
   useEffect(() => {
     return () => {
