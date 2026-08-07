@@ -292,7 +292,7 @@ export function usePreviewRendererController({
   useLayoutEffect(() => {
     const canvas = scrubCanvasRef.current
     if (!canvas) return
-    const backingSize = getPreviewDisplayCanvasBackingSize(playerSize, playerRenderSize)
+    const backingSize = getPreviewDisplayCanvasBackingSize(playerSize, renderSize)
     if (canvas.width !== backingSize.width) canvas.width = backingSize.width
     if (canvas.height !== backingSize.height) canvas.height = backingSize.height
     if (!showFastScrubOverlayRef.current && !showPlaybackTransitionOverlayRef.current) return
@@ -329,7 +329,7 @@ export function usePreviewRendererController({
     drawSourceToPreviewDisplayCanvas(ctx, canvas, offscreen)
     setDisplayedFrame(renderedFrame)
   }, [
-    playerRenderSize,
+    renderSize,
     playerSize,
     committedPreviewSnapshotRef,
     scrubCanvasRef,

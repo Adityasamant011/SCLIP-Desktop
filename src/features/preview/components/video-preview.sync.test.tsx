@@ -104,6 +104,9 @@ const rendererMockState = vi.hoisted(() => {
   }
 
   const instances: RendererMock[] = []
+  const getBestDomVideoElementForItem = vi.fn<(itemId: string) => HTMLVideoElement | null>(
+    () => null,
+  )
   const create = vi.fn(async () => {
     const prewarmFrame = vi.fn(async (frame: number) => {
       void frame
@@ -129,6 +132,7 @@ const rendererMockState = vi.hoisted(() => {
 
   return {
     create,
+    getBestDomVideoElementForItem,
     instances,
   }
 })
@@ -297,7 +301,8 @@ vi.mock('../utils/media-resolver', () => ({
   resolveProxyUrl: mockState.resolveProxyUrlMock,
 }))
 
-vi.mock('@/features/preview/deps/export', () => ({
+vi.mock('@/features/preview/deps/export', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/features/preview/deps/export')>()),
   importCompositionRenderer: vi.fn(async () => ({
     createCompositionRenderer: rendererMockState.create,
   })),
@@ -416,7 +421,9 @@ vi.mock('@/features/preview/deps/composition-runtime', () => ({
       </div>
     )
   },
-  getBestDomVideoElementForItem: vi.fn(() => null),
+  getBestDomVideoElementForItem: rendererMockState.getBestDomVideoElementForItem,
+  snapSourceTime: (seconds: number) => seconds,
+  transitionSafePlay: vi.fn(),
   getVideoTargetTimeSeconds: (
     safeTrimBefore: number,
     sourceFps: number,
@@ -908,6 +915,8 @@ describe('VideoPreview sync behavior', () => {
     resolveProxyUrlMock.mockReset()
     resolveProxyUrlMock.mockReturnValue(null)
     createCompositionRendererMock.mockClear()
+    rendererMockState.getBestDomVideoElementForItem.mockReset()
+    rendererMockState.getBestDomVideoElementForItem.mockReturnValue(null)
     rendererMockState.instances.length = 0
     canvasPixelReadbackEnabled = false
     blankCanvasState = new WeakSet<HTMLCanvasElement>()
@@ -3913,6 +3922,109 @@ describe('VideoPreview sync behavior', () => {
     await waitForLatestRendererFrame(47, scrubCanvas, { expectedDisplayedFrame: 47 })
   })
 
+  it('ramp-syncs paused DOM video lanes while skimming an A-A transition', async () => {
+    useItemsStore.getState().setTracks([
+      {
+        id: 'track-video',
+        name: 'Video',
+        height: 60,
+        locked: false,
+        visible: true,
+        muted: false,
+        solo: false,
+        order: 0,
+        items: [],
+      },
+      {
+        id: 'track-text',
+        name: 'Text',
+        height: 60,
+        locked: false,
+        visible: true,
+        muted: false,
+        solo: false,
+        order: 1,
+        items: [],
+      },
+    ])
+    const [leftClip, rightClip] = createTransitionClipPair()
+    useItemsStore.getState().setItems([
+      {
+        ...leftClip,
+        mediaId: 'same-media',
+        src: 'blob:same-media',
+        sourceStart: 0,
+        sourceFps: 30,
+      },
+      {
+        ...rightClip,
+        mediaId: 'same-media',
+        src: 'blob:same-media',
+        sourceStart: 60,
+        sourceFps: 30,
+      },
+      {
+        id: 'parented-title',
+        type: 'text',
+        trackId: 'track-text',
+        from: 0,
+        durationInFrames: 100,
+        label: 'Parented title',
+        text: 'Title',
+        color: '#ffffff',
+        transformParent: {
+          parentItemId: 'clip-left',
+          childLocalReference: { x: 0, y: 0, width: 100, height: 50, rotation: 0 },
+          childWorldReference: { x: 0, y: 0, width: 100, height: 50, rotation: 0 },
+        },
+      },
+    ] as TimelineItem[])
+    useTransitionsStore.getState().setTransitions([createCrossfadeTransition()])
+
+    const createReadyVideo = () => {
+      const element = document.createElement('video')
+      Object.defineProperties(element, {
+        duration: { configurable: true, value: 120 },
+        paused: { configurable: true, get: () => false },
+        readyState: { configurable: true, value: 4 },
+        videoHeight: { configurable: true, value: 1080 },
+        videoWidth: { configurable: true, value: 1920 },
+      })
+      vi.spyOn(element, 'pause').mockImplementation(() => undefined)
+      document.body.appendChild(element)
+      return element
+    }
+    const leftElement = createReadyVideo()
+    const rightElement = createReadyVideo()
+    rendererMockState.getBestDomVideoElementForItem.mockImplementation((itemId) =>
+      itemId === 'clip-left' ? leftElement : itemId === 'clip-right' ? rightElement : null,
+    )
+
+    const { container } = renderDefaultPreview()
+    const scrubCanvas = getScrubCanvas(container)
+    act(() => {
+      usePlaybackStore.getState().setPreviewFrame(50)
+    })
+
+    const renderer = await waitForLatestRendererFrame(50, scrubCanvas, {
+      expectedDisplayedFrame: 50,
+    })
+    await waitFor(() => {
+      expect(leftElement.dataset.transitionHold).toBe('1')
+      expect(rightElement.dataset.transitionHold).toBe('1')
+      expect(leftElement.dataset.transitionSourceRamp).toBe('1')
+      expect(rightElement.dataset.transitionSourceRamp).toBe('1')
+      expect(leftElement.dataset.transitionPrearm).toBeUndefined()
+      expect(rightElement.dataset.transitionPrearm).toBeUndefined()
+    })
+
+    const provider = renderer.setDomVideoElementProvider.mock.calls.at(-1)?.[0]
+    expect(provider?.('clip-left')).toBe(leftElement)
+    expect(provider?.('clip-right')).toBe(rightElement)
+    expect(leftElement.currentTime).not.toBe(0)
+    expect(rightElement.currentTime).not.toBe(0)
+  })
+
   it('keeps backward hover preview frame-accurate for gpu-effect clips', async () => {
     setSingleVideoTrack()
     useItemsStore.getState().setItems([
@@ -4695,6 +4807,30 @@ describe('VideoPreview sync behavior', () => {
     expect(
       playerDimensionsHistory.every((entry) => entry.width === 1920 && entry.height === 1080),
     ).toBe(true)
+  })
+
+  it('renders a 4K composition into a smaller realtime preview backing', async () => {
+    setSingleCompoundItemWithGpuEffectAtFrame(0)
+    render(
+      <VideoPreview
+        project={{ width: 3840, height: 2160, backgroundColor: '#000000' }}
+        containerSize={{ width: 984, height: 554 }}
+      />,
+    )
+
+    const [composition, rendererCanvas] = await waitFor(() => {
+      expect(createCompositionRendererMock).toHaveBeenCalled()
+      return createCompositionRendererMock.mock.calls[0] as unknown as [
+        { width: number; height: number },
+        HTMLCanvasElement,
+      ]
+    })
+
+    expect(composition).toMatchObject({ width: 3840, height: 2160 })
+    expect(rendererCanvas.width).toBeLessThanOrEqual(1920)
+    expect(rendererCanvas.height).toBeLessThanOrEqual(1080)
+    expect(rendererCanvas.width * rendererCanvas.height).toBeLessThan(3840 * 2160)
+    expect(lastPlayerDimensions).toEqual({ width: 3840, height: 2160 })
   })
 
   it('refreshes stale resolved media URLs after blob URL invalidation', async () => {

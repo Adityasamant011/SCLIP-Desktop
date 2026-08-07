@@ -1,12 +1,4 @@
-import {
-  useMemo,
-  useCallback,
-  memo,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from 'react'
+import { useMemo, useCallback, memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useRafDeferredValue } from '@/shared/hooks/use-raf-deferred-value'
 import { usePreviewBridgeStore } from '@/shared/state/preview-bridge'
 import { usePlaybackStore } from '@/shared/state/playback'
@@ -189,10 +181,8 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
     useProxyMedia: useProxy,
     blobUrlVersion,
   })
-  const {
-    needsOverlay: showGpuEffectsOverlay,
-    shouldWarmRenderer: shouldWarmGpuEffectsRenderer,
-  } = useGpuEffectsOverlay(fps)
+  const { needsOverlay: showGpuEffectsOverlay, shouldWarmRenderer: shouldWarmGpuEffectsRenderer } =
+    useGpuEffectsOverlay(fps)
   const isMaskEditing = useMaskEditorStore((s) => s.isEditing)
   const isCornerPinEditing = useCornerPinStore((s) => s.isEditing)
   const isPowerWindowEditing = usePowerWindowEditorStore((s) => s.isEditing)
@@ -319,6 +309,7 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
     proxyReadyCount,
     blobUrlVersion,
     project,
+    playerSize,
   })
   const domTextScrubOverlayPlan = useMemo(
     () => buildDomTextScrubOverlayPlan(fastScrubScaledTracks, fastScrubScaledKeyframes),
@@ -382,6 +373,8 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
         fps,
         project.width,
         project.height,
+        renderSize.width,
+        renderSize.height,
         project.backgroundColor ?? '',
         useProxy ? 'proxy' : 'source',
         fastScrubTracksTopologyFingerprint,
@@ -396,6 +389,8 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
       project.backgroundColor,
       project.height,
       project.width,
+      renderSize.height,
+      renderSize.width,
       useProxy,
     ],
   )
@@ -429,10 +424,10 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
   useLayoutEffect(() => {
     const canvas = gpuEffectsCanvasRef.current
     if (!canvas) return
-    const backingSize = getPreviewDisplayCanvasBackingSize(playerSize, playerRenderSize)
+    const backingSize = getPreviewDisplayCanvasBackingSize(playerSize, renderSize)
     if (canvas.width !== backingSize.width) canvas.width = backingSize.width
     if (canvas.height !== backingSize.height) canvas.height = backingSize.height
-  }, [gpuEffectsCanvasRef, playerRenderSize, playerSize])
+  }, [gpuEffectsCanvasRef, playerSize, renderSize])
 
   const ensureSplitAfterRenderer =
     useCallback(async (): Promise<CompositionRendererInstance | null> => {
@@ -607,6 +602,15 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
         forceFastScrubOverlay ||
         isPausedTransitionOverlayActive(playbackState.currentFrame, playbackState)
       if (requiresRenderedPresentation) return false
+      const preservesRenderedPreview =
+        previewFrame !== null && shouldPreserveHighFidelityBackwardPreview(previewFrame)
+      if (preservesRenderedPreview) {
+        // Styled DOM text normally keeps skimming on the Player to preserve
+        // typography. Transition frames are the exception: the Player does
+        // not composite the authored transition, so retain the rendered media
+        // path (and its separate DOM text overlay when that split is safe).
+        return false
+      }
 
       const activeGizmoItemType = useGizmoStore.getState().activeGizmo?.itemType ?? null
       return (
@@ -620,6 +624,7 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
       isPausedTransitionOverlayActive,
       preferPlayerForStyledTextScrubRef,
       previewRuntimeRefs.preferPlayerForDomGizmoRef,
+      shouldPreserveHighFidelityBackwardPreview,
     ],
   )
   const { handleFrameChange, handlePlayStateChange } = usePreviewPlaybackController({
@@ -958,6 +963,7 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
       needsOverflow={needsOverflow}
       playerSize={playerSize}
       playerRenderSize={playerRenderSize}
+      overlayRenderSize={renderSize}
       totalFrames={totalFrames}
       fps={fps}
       initialFrame={initialPlayheadFrameRef.current ?? 0}
@@ -984,11 +990,7 @@ export const VideoPreview = memo(function VideoPreview(props: VideoPreviewProps)
   const { chrome = 'edit', ...previewProps } = props
   const itemsSnapshot = useTransformStableItemsSnapshot()
   return (
-    <DeferredVideoPreview
-      {...previewProps}
-      overlayChrome={chrome}
-      itemsSnapshot={itemsSnapshot}
-    />
+    <DeferredVideoPreview {...previewProps} overlayChrome={chrome} itemsSnapshot={itemsSnapshot} />
   )
 })
 
@@ -1000,12 +1002,7 @@ const DeferredVideoPreview = memo(function DeferredVideoPreview({
   itemsSnapshot: PreviewItemsSnapshot
 }) {
   const deferredItemsSnapshot = useRafDeferredValue(itemsSnapshot)
-  return (
-    <VideoPreviewBase
-      {...props}
-      itemsSnapshot={deferredItemsSnapshot}
-    />
-  )
+  return <VideoPreviewBase {...props} itemsSnapshot={deferredItemsSnapshot} />
 })
 
 export const ColorVideoPreview = memo(function ColorVideoPreview(props: VideoPreviewProps) {

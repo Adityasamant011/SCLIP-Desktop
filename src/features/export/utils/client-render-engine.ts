@@ -39,6 +39,7 @@ import { recordPreviewCanvasPool } from '@/shared/logging/preview-scrub-performa
 
 // Import subsystems
 import { buildKeyframesMap } from './canvas-keyframes'
+import { getLogicalCanvasSize } from './canvas-render-scale'
 import { type AdjustmentLayerWithTrackOrder } from './canvas-effects'
 import { GpuPipelineManager } from './gpu-pipeline-manager'
 import { isItemFullyOccluding, type FrameOcclusionContext } from './frame-occlusion'
@@ -711,6 +712,8 @@ export async function createCompositionRenderer(
   const canvasSettings: CanvasSettings = {
     width: canvas.width,
     height: canvas.height,
+    logicalWidth: composition.width,
+    logicalHeight: composition.height,
     fps,
     getPreviewTransform: renderMode === 'preview' ? getPreviewTransformOverride : undefined,
   }
@@ -2068,7 +2071,7 @@ export async function createCompositionRenderer(
         {
           renderPlan: getCurrentRenderPlan(),
           frame,
-          canvas: canvasSettings,
+          canvas: getLogicalCanvasSize(canvasSettings),
           getKeyframes: getCurrentKeyframes,
           getItem: canvasSettings.getExpressionItem,
           getPreviewTransform: renderMode === 'preview' ? getPreviewTransformOverride : undefined,

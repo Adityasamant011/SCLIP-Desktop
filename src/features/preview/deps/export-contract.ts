@@ -7,6 +7,12 @@ export {
   SharedVideoExtractorPool,
   type VideoFrameSource,
 } from '@/features/export/utils/shared-video-extractor'
+export {
+  isFrameInsideSourceTimeRamp,
+  resolveAATransitionRamps,
+  resolveTransitionRenderTimelineSpan,
+  resolveVideoRenderSourceTimeSeconds,
+} from '@/features/export/utils/render-span'
 
 export type CreateCompositionRenderer =
   (typeof import('@/features/export/utils/client-render-engine'))['createCompositionRenderer']
