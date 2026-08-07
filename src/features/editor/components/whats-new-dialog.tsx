@@ -42,7 +42,7 @@ function formatWeekRange(mondayIso: string): string {
 }
 
 function formatEntrySubtitle(entry: ChangelogEntry): string {
-  if (entry.subtitle) return entry.subtitle
+  if (entry.subtitleKey) return i18n.t(`changelog.${entry.subtitleKey}`)
   if (entry.version === 'current')
     return i18n.t('editor.whatsNew.asOf', { date: formatSingleDate(entry.date) })
   return i18n.t('editor.whatsNew.weekOf', { range: formatWeekRange(entry.date) })

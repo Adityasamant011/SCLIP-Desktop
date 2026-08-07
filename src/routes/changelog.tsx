@@ -27,36 +27,36 @@ const data = changelogData as ChangelogFile
 const releases: ChangelogEntry[] = data.current ? [data.current, ...data.releases] : data.releases
 const groupOrder: ChangelogGroup[] = ['added', 'fixed', 'improved']
 
-function formatSingleDate(iso: string): string {
+function formatSingleDate(iso: string, language?: string): string {
   const date = new Date(`${iso}T00:00:00Z`)
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(language, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
   }).format(date)
 }
 
-function formatWeekRange(mondayIso: string): string {
+function formatWeekRange(mondayIso: string, language?: string): string {
   const monday = new Date(`${mondayIso}T00:00:00Z`)
   const sunday = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000)
-  const formatter = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' })
+  const formatter = new Intl.DateTimeFormat(language, { month: 'short', day: 'numeric' })
   return `${formatter.format(monday)} — ${formatter.format(sunday)}`
 }
 
-function formatReleasePeriod(release: ChangelogEntry, t: TFunction): string {
-  if (release.subtitle) return release.subtitle
+function formatReleasePeriod(release: ChangelogEntry, t: TFunction, language?: string): string {
+  if (release.subtitleKey) return t(`changelog.${release.subtitleKey}`)
   if (release.version === 'current') {
-    return t('editor.whatsNew.asOf', { date: formatSingleDate(release.date) })
+    return t('editor.whatsNew.asOf', { date: formatSingleDate(release.date, language) })
   }
-  return t('editor.whatsNew.weekOf', { range: formatWeekRange(release.date) })
+  return t('editor.whatsNew.weekOf', { range: formatWeekRange(release.date, language) })
 }
 
 function getChangeCount(release: ChangelogEntry): number {
   return groupOrder.reduce((count, group) => count + (release.groups[group]?.length ?? 0), 0)
 }
 
-function formatChangeCount(count: number): string {
-  return `${count} ${count === 1 ? 'change' : 'changes'}`
+function formatChangeCount(count: number, t: TFunction): string {
+  return t('changelog.changeCount', { count })
 }
 
 function getReleaseMarkerClass(isLatest: boolean): string {
@@ -78,7 +78,7 @@ function ChangelogReleaseTitle({
       <h2 className="text-xl font-semibold tracking-tight">{label}</h2>
       {isLatest && (
         <span className="rounded-full bg-primary/15 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-primary">
-          Latest
+          {t('changelog.latest')}
         </span>
       )}
     </div>
@@ -117,7 +117,7 @@ function ChangelogGroupSection({
 }
 
 function ChangelogRelease({ release, index }: { release: ChangelogEntry; index: number }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const isLatest = index === 0
   const changeCount = getChangeCount(release)
 
@@ -135,10 +135,12 @@ function ChangelogRelease({ release, index }: { release: ChangelogEntry; index: 
         <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-5 marker:hidden sm:px-7 [&::-webkit-details-marker]:hidden">
           <div>
             <ChangelogReleaseTitle release={release} isLatest={isLatest} />
-            <p className="mt-1 text-sm text-muted-foreground">{formatReleasePeriod(release, t)}</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {formatReleasePeriod(release, t, i18n.resolvedLanguage)}
+            </p>
           </div>
           <div className="flex shrink-0 items-center gap-3 text-sm text-muted-foreground">
-            <span className="hidden sm:inline">{formatChangeCount(changeCount)}</span>
+            <span className="hidden sm:inline">{formatChangeCount(changeCount, t)}</span>
             <ArrowRight className="h-4 w-4 transition-transform duration-200 group-open:rotate-90" />
           </div>
         </summary>
@@ -154,19 +156,21 @@ function ChangelogRelease({ release, index }: { release: ChangelogEntry; index: 
 }
 
 function ChangelogPage() {
+  const { t } = useTranslation()
+
   return (
     <div className="min-h-screen bg-background text-foreground select-text">
       <div className="pointer-events-none fixed inset-x-0 top-0 h-96 bg-[radial-gradient(circle_at_50%_0%,color-mix(in_oklab,var(--primary)_12%,transparent),transparent_68%)]" />
 
       <header className="relative border-b border-border/70 px-6 py-5">
         <div className="mx-auto flex max-w-5xl items-center justify-between gap-4">
-          <Link to="/" aria-label="FreeCut home">
+          <Link to="/" aria-label={t('changelog.homeAria')}>
             <FreeCutLogo size="md" />
           </Link>
           <Button asChild variant="ghost" size="sm" className="gap-2">
             <Link to="/">
               <ArrowLeft className="h-4 w-4" />
-              Back to home
+              {t('changelog.backToHome')}
             </Link>
           </Button>
         </div>
@@ -177,12 +181,13 @@ function ChangelogPage() {
           <div className="mb-14 max-w-3xl">
             <div className="mb-5 flex items-center gap-2 font-mono text-xs uppercase tracking-[0.22em] text-primary">
               <CalendarDays className="h-4 w-4" />
-              Release notes
+              {t('changelog.releaseNotes')}
             </div>
-            <h1 className="text-4xl font-bold tracking-tight sm:text-6xl">What’s new in FreeCut</h1>
+            <h1 className="text-4xl font-bold tracking-tight sm:text-6xl">
+              {t('changelog.title')}
+            </h1>
             <p className="mt-5 max-w-2xl text-lg leading-8 text-muted-foreground">
-              A weekly cut of new editing tools, workflow improvements, and fixes. The newest
-              release is open; expand any earlier week to see its full change list.
+              {t('changelog.description')}
             </p>
           </div>
 
@@ -194,14 +199,14 @@ function ChangelogPage() {
 
           <div className="mt-16 flex flex-col items-start justify-between gap-5 rounded-xl border border-border bg-card px-6 py-7 sm:flex-row sm:items-center sm:px-8">
             <div>
-              <h2 className="text-xl font-semibold">Ready to make something?</h2>
+              <h2 className="text-xl font-semibold">{t('changelog.ctaTitle')}</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                Open FreeCut and put the latest tools to work.
+                {t('changelog.ctaDescription')}
               </p>
             </div>
             <Button asChild className="gap-2">
               <Link to="/projects">
-                Open FreeCut
+                {t('changelog.openFreeCut')}
                 <ArrowRight className="h-4 w-4" />
               </Link>
             </Button>
