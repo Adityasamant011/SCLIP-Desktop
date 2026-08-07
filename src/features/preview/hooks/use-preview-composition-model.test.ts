@@ -250,6 +250,24 @@ describe('buildPreviewCompositionData', () => {
     expect(result.renderSize).toEqual({ width: 1280, height: 720 })
   })
 
+  it('keeps project coordinates while using a smaller physical preview target', () => {
+    const result = buildPreviewCompositionData({
+      combinedTracks: [],
+      fps: 30,
+      items: [],
+      keyframes: [],
+      transitions: [],
+      resolvedUrls: new Map(),
+      useProxy: false,
+      blobUrlVersion: 0,
+      project: { width: 3840, height: 2160 },
+      previewRenderSize: { width: 1504, height: 846 },
+    })
+
+    expect(result.fastScrubInputProps).toMatchObject({ width: 3840, height: 2160 })
+    expect(result.renderSize).toEqual({ width: 1504, height: 846 })
+  })
+
   it('uses an already-acquired blob URL before resolvedUrls catches up', () => {
     const track: TimelineTrack = {
       id: 'track-1',

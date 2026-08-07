@@ -41,6 +41,12 @@ import { getTextRasterCacheKey, renderSubtitleSegmentItem, renderTextItem } from
 import { isTextMotionActive } from '@/shared/typography/text-motion'
 import { renderCompositionItem } from './composition'
 import type { CornerPinWarpCacheEntry } from './types'
+import {
+  getLogicalCanvasSize,
+  scaleShapeItemForCanvas,
+  scaleSubtitleItemForCanvas,
+  scaleTextItemForCanvas,
+} from '../canvas-render-scale'
 
 /** Total RAM budget for the preview corner-pin warp cache. */
 const CORNER_PIN_WARP_CACHE_MAX_BYTES = 256_000_000 // ~256MB
@@ -73,24 +79,43 @@ export async function renderItem(
   preCornerPinMasks: EffectSourceMask[] = [],
 ): Promise<void> {
   const itemKeyframes = rctx.getCurrentKeyframes?.(item.id) ?? rctx.keyframesMap.get(item.id)
+  const logicalCanvasSettings = getLogicalCanvasSize(rctx.canvasSettings)
   const shapeExpressionContext =
     rctx.canvasSettings.getExpressionItem && rctx.canvasSettings.getExpressionKeyframes
       ? {
           globalFrame: frame,
-          canvas: rctx.canvasSettings,
+          canvas: logicalCanvasSettings,
           getItem: rctx.canvasSettings.getExpressionItem,
           getKeyframes: rctx.canvasSettings.getExpressionKeyframes,
         }
       : undefined
   const animatedTextItem =
     item.type === 'text'
-      ? {
-          ...resolveAnimatedTextItem(item, itemKeyframes, frame - item.from, rctx.canvasSettings),
-          cornerPin: item.cornerPin,
-        }
+      ? scaleTextItemForCanvas(
+          {
+            ...resolveAnimatedTextItem(
+              item,
+              itemKeyframes,
+              frame - item.from,
+              logicalCanvasSettings,
+            ),
+            cornerPin: item.cornerPin,
+          },
+          rctx.canvasSettings,
+        )
       : item.type === 'shape'
-        ? resolveAnimatedShapeItem(item, itemKeyframes, frame - item.from, shapeExpressionContext)
-        : item
+        ? scaleShapeItemForCanvas(
+            resolveAnimatedShapeItem(
+              item,
+              itemKeyframes,
+              frame - item.from,
+              shapeExpressionContext,
+            ),
+            rctx.canvasSettings,
+          )
+        : item.type === 'subtitle'
+          ? scaleSubtitleItemForCanvas(item, rctx.canvasSettings)
+          : item
   const frameResolvedItem = applyAnimatedCropToItem(animatedTextItem, frame, rctx, renderSpan)
   const resolvedTransform = resolveItemTransform(transform)
   const frameResolvedTransform =
