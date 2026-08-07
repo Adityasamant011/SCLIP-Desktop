@@ -183,6 +183,7 @@
       "heroSubtitle": "Profesyonel video düzenleme, kurulum yok. Tarayıcınızda etkileyici içerikler oluşturun.",
       "disclaimer": "⚠️ UYARI: Bu hâlâ beta aşamasında ve hatalar olabilir. Yine de deneyimi sevmenizi umuyorum.",
       "getStarted": "Başla",
+      "viewChangelog": "Yenilikler",
       "starOnGitHub": "GitHub'da yıldızla",
       "showcaseHeading": "Çok özellikli düzenleme yetenekleri",
       "showcaseSubheading": "Eksiksiz bir video düzenleme paketi, doğrudan tarayıcınızda.",
@@ -202,17 +203,33 @@
           "title": "Zaman Çizelgesi Düzenleme",
           "description": "Video, ses, metin ve şekillerle çok kanallı düzenleme"
         },
-        "keyframe": {
-          "title": "Basit Ana Kare Düzenleyici",
-          "description": "Akıcı geçişler için sezgisel ana kare animasyonu"
+        "motion": {
+          "title": "Hareket Çalışma Alanı",
+          "description": "Hassas zamanlama ve yeniden kullanılabilir eğrilerle katmanlı animasyonlar oluşturun"
         },
-        "projects": {
-          "title": "Proje Yönetimi",
-          "description": "Projelerinizi oluşturun, düzenleyin ve yönetin"
+        "colorGrade": {
+          "title": "Renk Düzenleme",
+          "description": "Renk tekerleri, eğriler, skoplar ve ayar katmanlarıyla renkleri düzenleyin"
+        },
+        "keyframe": {
+          "title": "Ana Kare Düzenleyici",
+          "description": "Grafik veya pozlama cetveli görünümünde hareketi hassasça şekillendirin"
+        },
+        "semantic": {
+          "title": "Anlamsal Sahne Arama",
+          "description": "Ekranda olanları arayarak doğru anı bulun"
         },
         "export": {
           "title": "Web Üzerinden Dışa Aktarma",
           "description": "Videolarınızı tarayıcınızla yerel olarak render alın."
+        },
+        "audioEq": {
+          "title": "Ses EQ ve Miksaj",
+          "description": "Klip ve parça sesini görsel ekolayzır kontrolleriyle şekillendirin"
+        },
+        "hotkeys": {
+          "title": "Özel Klavye Kısayolları",
+          "description": "Düzenleme kısayollarınızı inceleyin, değiştirin, içe ve dışa aktarın"
         }
       },
       "faq": {

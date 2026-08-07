@@ -258,6 +258,7 @@
       "heroSubtitle": "Montage vidéo professionnel, zéro installation. Créez du contenu remarquable dans votre navigateur.",
       "disclaimer": "⚠️ AVERTISSEMENT : ceci est encore très en bêta et peut comporter des bogues. J'espère que vous apprécierez tout de même l'expérience.",
       "getStarted": "Commencer",
+      "viewChangelog": "Nouveautés",
       "starOnGitHub": "Mettre une étoile sur GitHub",
       "showcaseHeading": "Des capacités de montage riches en fonctionnalités",
       "showcaseSubheading": "Une suite de montage vidéo complète, directement dans votre navigateur.",
@@ -277,17 +278,33 @@
           "title": "Montage sur la timeline",
           "description": "Montage multipiste avec vidéo, audio, texte et formes"
         },
-        "keyframe": {
-          "title": "Éditeur d'images clés simple",
-          "description": "Animation par images clés intuitive pour des transitions fluides"
+        "motion": {
+          "title": "Espace Motion",
+          "description": "Créez des animations en couches avec un minutage précis et des courbes réutilisables"
         },
-        "projects": {
-          "title": "Gestion de projets",
-          "description": "Créez, organisez et gérez vos projets"
+        "colorGrade": {
+          "title": "Étalonnage colorimétrique",
+          "description": "Étalonnez avec roues chromatiques, courbes, scopes et calques de réglage"
+        },
+        "keyframe": {
+          "title": "Éditeur d'images clés",
+          "description": "Réglez précisément le mouvement dans la vue courbes ou feuille d'exposition"
+        },
+        "semantic": {
+          "title": "Recherche sémantique de scènes",
+          "description": "Trouvez le bon moment en recherchant ce qui se passe à l'écran"
         },
         "export": {
           "title": "Exportez sur le Web",
           "description": "Rendez vos vidéos localement avec votre navigateur."
+        },
+        "audioEq": {
+          "title": "Égalisation et mixage audio",
+          "description": "Façonnez le son des clips et pistes avec des contrôles visuels"
+        },
+        "hotkeys": {
+          "title": "Raccourcis clavier personnalisés",
+          "description": "Consultez, modifiez, importez et exportez vos raccourcis de montage"
         }
       },
       "faq": {

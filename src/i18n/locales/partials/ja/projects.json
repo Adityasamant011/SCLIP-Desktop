@@ -258,6 +258,7 @@
       "heroSubtitle": "プロ仕様の動画編集を、インストール不要で。ブラウザで魅力的なコンテンツを作りましょう。",
       "disclaimer": "⚠️ 免責事項: これはまだベータ段階で、不具合がある場合があります。それでも楽しんでいただければ幸いです。",
       "getStarted": "はじめる",
+      "viewChangelog": "新機能",
       "starOnGitHub": "GitHubでスターを付ける",
       "showcaseHeading": "多機能な編集機能",
       "showcaseSubheading": "完全な動画編集スイートを、ブラウザの中で。",
@@ -277,17 +278,33 @@
           "title": "タイムライン編集",
           "description": "動画、音声、テキスト、図形によるマルチトラック編集"
         },
-        "keyframe": {
-          "title": "シンプルなキーフレームエディター",
-          "description": "なめらかなトランジションのための直感的なキーフレームアニメーション"
+        "motion": {
+          "title": "モーションワークスペース",
+          "description": "正確なタイミングと再利用可能なイージングでレイヤーアニメーションを作成"
         },
-        "projects": {
-          "title": "プロジェクト管理",
-          "description": "プロジェクトの作成、整理、管理"
+        "colorGrade": {
+          "title": "カラーグレーディング",
+          "description": "カラーホイール、カーブ、スコープ、調整レイヤーで色を調整"
+        },
+        "keyframe": {
+          "title": "キーフレームエディター",
+          "description": "グラフまたはドープシート表示で動きを細かく調整"
+        },
+        "semantic": {
+          "title": "セマンティックシーン検索",
+          "description": "画面の内容を検索して目的の瞬間を発見"
         },
         "export": {
           "title": "ウェブでエクスポート",
           "description": "ブラウザで動画をローカルにレンダリングします。"
+        },
+        "audioEq": {
+          "title": "オーディオEQとミキシング",
+          "description": "ビジュアルEQでクリップとトラックの音を調整"
+        },
+        "hotkeys": {
+          "title": "カスタムキーボードショートカット",
+          "description": "編集ショートカットの確認、変更、読み込み、書き出し"
         }
       },
       "faq": {

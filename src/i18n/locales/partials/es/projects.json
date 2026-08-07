@@ -258,6 +258,7 @@
       "heroSubtitle": "Edición de video profesional, cero instalación. Crea contenido impresionante en tu navegador.",
       "disclaimer": "⚠️ AVISO: Esto está muy en beta y puede tener errores. Espero que aun así disfrutes la experiencia.",
       "getStarted": "Empezar",
+      "viewChangelog": "Novedades",
       "starOnGitHub": "Dale una estrella en GitHub",
       "showcaseHeading": "Capacidades de edición con muchas funciones",
       "showcaseSubheading": "Un conjunto completo de edición de video, directamente en tu navegador.",
@@ -277,17 +278,33 @@
           "title": "Edición en la línea de tiempo",
           "description": "Edición multipista con video, audio, texto y formas"
         },
-        "keyframe": {
-          "title": "Editor de fotogramas clave sencillo",
-          "description": "Animación de fotogramas clave intuitiva para transiciones suaves"
+        "motion": {
+          "title": "Espacio de movimiento",
+          "description": "Crea animaciones por capas con tiempos precisos y curvas reutilizables"
         },
-        "projects": {
-          "title": "Gestión de proyectos",
-          "description": "Crea, organiza y gestiona tus proyectos"
+        "colorGrade": {
+          "title": "Gradación de color",
+          "description": "Ajusta el color con ruedas, curvas, osciloscopios y capas de ajuste"
+        },
+        "keyframe": {
+          "title": "Editor de fotogramas clave",
+          "description": "Ajusta el movimiento con precisión en la vista de gráfica o exposición"
+        },
+        "semantic": {
+          "title": "Búsqueda semántica de escenas",
+          "description": "Encuentra el momento adecuado buscando lo que ocurre en pantalla"
         },
         "export": {
           "title": "Exporta en la web",
           "description": "Renderiza tus videos localmente con tu navegador."
+        },
+        "audioEq": {
+          "title": "Ecualización y mezcla de audio",
+          "description": "Ajusta el audio de clips y pistas con controles visuales"
+        },
+        "hotkeys": {
+          "title": "Atajos de teclado personalizados",
+          "description": "Revisa, reasigna, importa y exporta tus atajos de edición"
         }
       },
       "faq": {

@@ -258,6 +258,7 @@
       "heroSubtitle": "Edição de vídeo profissional, zero instalação. Crie conteúdo incrível no seu navegador.",
       "disclaimer": "⚠️ AVISO: isto está muito em beta e pode ter bugs. Espero que você ainda assim aproveite a experiência.",
       "getStarted": "Começar",
+      "viewChangelog": "Novidades",
       "starOnGitHub": "Dar uma estrela no GitHub",
       "showcaseHeading": "Recursos de edição cheios de funcionalidades",
       "showcaseSubheading": "Um conjunto completo de edição de vídeo, diretamente no seu navegador.",
@@ -277,17 +278,33 @@
           "title": "Edição na linha do tempo",
           "description": "Edição multipista com vídeo, áudio, texto e formas"
         },
-        "keyframe": {
-          "title": "Editor de quadros-chave simples",
-          "description": "Animação de quadros-chave intuitiva para transições suaves"
+        "motion": {
+          "title": "Espaço de movimento",
+          "description": "Crie animações em camadas com tempo preciso e curvas reutilizáveis"
         },
-        "projects": {
-          "title": "Gerenciamento de projetos",
-          "description": "Crie, organize e gerencie seus projetos"
+        "colorGrade": {
+          "title": "Gradação de cores",
+          "description": "Ajuste cores com rodas, curvas, escopos e camadas de ajuste"
+        },
+        "keyframe": {
+          "title": "Editor de quadros-chave",
+          "description": "Ajuste o movimento com precisão na visualização de gráfico ou exposição"
+        },
+        "semantic": {
+          "title": "Busca semântica de cenas",
+          "description": "Encontre o momento certo pesquisando o que acontece na tela"
         },
         "export": {
           "title": "Exporte na web",
           "description": "Renderize seus vídeos localmente com seu navegador."
+        },
+        "audioEq": {
+          "title": "Equalização e mixagem de áudio",
+          "description": "Ajuste o áudio de clipes e faixas com controles visuais"
+        },
+        "hotkeys": {
+          "title": "Atalhos de teclado personalizados",
+          "description": "Revise, remapeie, importe e exporte seus atalhos de edição"
         }
       },
       "faq": {

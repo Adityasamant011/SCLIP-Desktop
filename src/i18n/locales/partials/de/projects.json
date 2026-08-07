@@ -258,6 +258,7 @@
       "heroSubtitle": "Professionelle Videobearbeitung, keine Installation. Erstelle beeindruckende Inhalte in deinem Browser.",
       "disclaimer": "⚠️ HINWEIS: Dies ist noch sehr in der Beta-Phase und kann fehlerhaft sein. Ich hoffe, du genießt die Erfahrung trotzdem.",
       "getStarted": "Loslegen",
+      "viewChangelog": "Neuigkeiten",
       "starOnGitHub": "Auf GitHub mit Stern markieren",
       "showcaseHeading": "Vielseitige Bearbeitungsfunktionen",
       "showcaseSubheading": "Eine komplette Videobearbeitungssuite, direkt in deinem Browser.",
@@ -277,17 +278,33 @@
           "title": "Timeline-Bearbeitung",
           "description": "Mehrspurige Bearbeitung mit Video, Audio, Text und Formen"
         },
-        "keyframe": {
-          "title": "Einfacher Keyframe-Editor",
-          "description": "Intuitive Keyframe-Animation für sanfte Übergänge"
+        "motion": {
+          "title": "Motion-Arbeitsbereich",
+          "description": "Erstelle mehrschichtige Animationen mit präzisem Timing und wiederverwendbarem Easing"
         },
-        "projects": {
-          "title": "Projektverwaltung",
-          "description": "Erstelle, organisiere und verwalte deine Projekte"
+        "colorGrade": {
+          "title": "Farbkorrektur",
+          "description": "Gradings mit Farbrädern, Kurven, Scopes und Einstellungsebenen"
+        },
+        "keyframe": {
+          "title": "Keyframe-Editor",
+          "description": "Bewegungen präzise in der Graph- oder Dopesheet-Ansicht gestalten"
+        },
+        "semantic": {
+          "title": "Semantische Szenensuche",
+          "description": "Finde den richtigen Moment anhand des Bildinhalts"
         },
         "export": {
           "title": "Im Web exportieren",
           "description": "Rendere deine Videos lokal mit deinem Browser."
+        },
+        "audioEq": {
+          "title": "Audio-EQ und Mischung",
+          "description": "Bearbeite Clip- und Spuraudio mit visuellen Equalizer-Reglern"
+        },
+        "hotkeys": {
+          "title": "Eigene Tastenkürzel",
+          "description": "Prüfe, ändere, importiere und exportiere deine Bearbeitungskürzel"
         }
       },
       "faq": {
