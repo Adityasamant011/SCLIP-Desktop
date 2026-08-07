@@ -258,6 +258,7 @@
       "heroSubtitle": "Professional video editing, zero installation. Create stunning content in your browser.",
       "disclaimer": "⚠️ DISCLAIMER: This is very much in beta and might be buggy. I hope you still enjoy the experience.",
       "getStarted": "Get Started",
+      "viewChangelog": "What's New",
       "starOnGitHub": "Star on GitHub",
       "showcaseHeading": "Multi featured editing capabilities",
       "showcaseSubheading": "A complete video editing suite, right in your browser.",
@@ -277,17 +278,33 @@
           "title": "Timeline Editing",
           "description": "Multi-track editing with video, audio, text, and shapes"
         },
-        "keyframe": {
-          "title": "Simple KeyFrame Editor",
-          "description": "Intuitive keyframe animation for smooth transitions"
+        "motion": {
+          "title": "Motion Workspace",
+          "description": "Build layered animations with precise timing and reusable easing"
         },
-        "projects": {
-          "title": "Project Management",
-          "description": "Create, organize, and manage your projects"
+        "colorGrade": {
+          "title": "Color Grading",
+          "description": "Grade with color wheels, curves, scopes, and adjustment layers"
+        },
+        "keyframe": {
+          "title": "Keyframe Editor",
+          "description": "Shape motion precisely in the graph or dopesheet view"
+        },
+        "semantic": {
+          "title": "Semantic Scene Search",
+          "description": "Find the right moment by searching what happens on screen"
         },
         "export": {
           "title": "Export on the Web",
           "description": "Render your videos locally with your browser."
+        },
+        "audioEq": {
+          "title": "Audio EQ and Mixing",
+          "description": "Shape clip and track audio with visual equalizer controls"
+        },
+        "hotkeys": {
+          "title": "Custom Keyboard Shortcuts",
+          "description": "Review, remap, import, and export your editing shortcuts"
         }
       },
       "faq": {

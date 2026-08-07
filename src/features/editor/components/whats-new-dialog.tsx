@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ComponentType } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Sparkles, Bug, Zap, ExternalLink } from 'lucide-react'
+import { Link } from '@tanstack/react-router'
+import { Sparkles, Bug, Zap, ArrowRight } from 'lucide-react'
 import { i18n } from '@/i18n'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -11,8 +12,6 @@ import type { ChangelogEntry, ChangelogFile, ChangelogGroup } from '@/data/chang
 import { markChangelogSeen } from './whats-new-seen'
 
 const data = changelogData as ChangelogFile
-const GITHUB_REPO_URL = 'https://github.com/walterlow/freecut'
-
 const GROUP_CONFIG: Record<
   ChangelogGroup,
   { labelKey: string; icon: ComponentType<{ className?: string }> }
@@ -43,7 +42,7 @@ function formatWeekRange(mondayIso: string): string {
 }
 
 function formatEntrySubtitle(entry: ChangelogEntry): string {
-  if (entry.subtitle) return entry.subtitle
+  if (entry.subtitleKey) return i18n.t(`changelog.${entry.subtitleKey}`)
   if (entry.version === 'current')
     return i18n.t('editor.whatsNew.asOf', { date: formatSingleDate(entry.date) })
   return i18n.t('editor.whatsNew.weekOf', { range: formatWeekRange(entry.date) })
@@ -135,15 +134,13 @@ export function WhatsNewDialog({ open, onOpenChange }: WhatsNewDialogProps) {
               ? t('editor.whatsNew.released', { version: latestReleaseVersion })
               : t('editor.whatsNew.preRelease')}
           </span>
-          <a
-            href={`${GITHUB_REPO_URL}/blob/main/CHANGELOG.md`}
-            target="_blank"
-            rel="noopener noreferrer"
+          <Link
+            to="/changelog"
             className="flex items-center gap-1 hover:text-foreground hover:underline"
           >
             {t('editor.whatsNew.fullChangelog')}
-            <ExternalLink className="h-3 w-3" />
-          </a>
+            <ArrowRight className="h-3 w-3" />
+          </Link>
         </div>
       </DialogContent>
     </Dialog>
