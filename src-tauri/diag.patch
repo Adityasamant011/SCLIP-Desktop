@@ -1,0 +1,29 @@
+*** Begin Patch
+*** Update File: src-tauri/src/mcp_server.rs
+@@ 561,7 +561,7 @@
+                    Ok(SocketMessage::ToolCall { id, tool, args }) => {
+-                        let call_id = id.clone();
++                        eprintln!("[Sclip DIAG] handle_socket_connection: received ToolCall id={} tool={}", id, tool);
++                        let call_id = id.clone();
+ 
+                        // Create oneshot channel for this request
+                        let (tx, rx) = oneshot::channel();
+@@ 571,6 +571,9 @@
+                        {
+                            let mut pending = PENDING_REQUESTS.lock().await;
+                            pending.insert(call_id.clone(), tx);
++                            eprintln!("[Sclip DIAG] handle_socket_connection: inserted into PENDING_REQUESTS, count={}", pending.len());
+                        }
+ 
+                        // Emit the tool call to the webview
+-                        let _ = app_handle.emit(
++                        let emit_result = app_handle.emit(
+                            TOOL_CALL_EVENT,
+                            serde_json::json!({
+                                "id": call_id,
+                                "tool": tool,
+                                "args": args,
+                            }),
+                        );
++                        eprintln!("[Sclip DIAG] handle_socket_connection: emit result={:?}", emit_result);
+*** End Patch

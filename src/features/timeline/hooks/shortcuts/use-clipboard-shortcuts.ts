@@ -21,6 +21,7 @@ import {
   wouldCreateCompositionCycle,
 } from '../../utils/composition-graph'
 import { handleTranscriptClipboardCopy } from '../../utils/transcript-copy-bridge'
+import { hasNativeTextSelection } from '../../utils/native-text-selection'
 
 function revealPastedItems(itemIds: readonly string[]): void {
   if (itemIds.length === 0) {
@@ -83,6 +84,10 @@ export function useClipboardShortcuts() {
   const itemsClipboard = useClipboardStore((s) => s.itemsClipboard)
   const clipboardHotkeyOptions = {
     ...HOTKEY_OPTIONS,
+    // Let the browser handle Cmd/Ctrl+C when the user has highlighted real
+    // interface text. Without this, the capture-phase timeline handler blocks
+    // the native clipboard before its callback can inspect the selection.
+    preventDefault: (event: KeyboardEvent) => !hasNativeTextSelection(event),
     eventListenerOptions: { capture: true } as const,
   }
 
@@ -90,6 +95,10 @@ export function useClipboardShortcuts() {
   useHotkeys(
     hotkeys.COPY,
     (event) => {
+      if (hasNativeTextSelection(event)) {
+        return
+      }
+
       // Transcript editor copies the selected words instead of the clip.
       if (handleTranscriptClipboardCopy(false)) {
         event.preventDefault()

@@ -68,7 +68,10 @@ export {
   buildDroppedMediaTimelineItems,
   getDroppedMediaDurationInFrames,
 } from '@/features/timeline/utils/dropped-media'
-export { resolveDroppedMediaEntriesFromPayload } from '@/features/timeline/utils/drop-execution'
+export {
+  resolveDroppedMediaEntriesFromExternalFiles,
+  resolveDroppedMediaEntriesFromPayload,
+} from '@/features/timeline/utils/drop-execution'
 export {
   createDefaultControllerItem,
   createDefaultGradientItem,

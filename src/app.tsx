@@ -1,17 +1,27 @@
 import { Suspense, lazy, useEffect, useState } from 'react'
-import { RouterProvider, createRouter } from '@tanstack/react-router'
+import { RouterProvider, createRouter, createHashHistory } from '@tanstack/react-router'
 import { GlobalTooltip } from '@/components/ui/global-tooltip'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { ErrorBoundary } from '@/app/error-boundary'
 import { PwaInstallPrompt } from '@/app/pwa-install-prompt'
 import { RouteErrorScreen } from '@/app/route-error'
 import { WorkspaceGate } from '@/features/workspace-gate/workspace-gate'
+import { RenderQueueRunner } from '@/features/export/components/render-queue-runner'
 import { routeTree } from './routeTree.gen'
+
+import { initMcpBridge } from '@/infrastructure/sclip-mcp-bridge'
+import { installAutomaticCorrectionCapture } from '@/infrastructure/automatic-correction-capture'
+
+// Initialize MCP bridge eagerly
+if (typeof window !== 'undefined') {
+  installAutomaticCorrectionCapture()
+  initMcpBridge().catch(console.error)
+}
 
 // Route errors (thrown from beforeLoad/loader) never reach the React
 // ErrorBoundary below — TanStack catches them first. Without this, they render
 // its untranslated built-in fallback with the message hidden in production.
-const router = createRouter({ routeTree, defaultErrorComponent: RouteErrorScreen })
+const router = createRouter({ routeTree, defaultErrorComponent: RouteErrorScreen, history: createHashHistory() })
 const LazyToaster = lazy(async () => {
   const { Toaster } = await import('@/components/ui/sonner')
   return { default: Toaster }
@@ -25,6 +35,11 @@ declare module '@tanstack/react-router' {
 
 export function App() {
   const [showToaster, setShowToaster] = useState(false)
+
+  // Ensure MCP Bridge is attached when React mounts
+  useEffect(() => {
+    initMcpBridge().catch((err) => console.error('[App] initMcpBridge error:', err))
+  }, [])
 
   // Prevent default browser zoom application-wide
   useEffect(() => {
@@ -79,6 +94,7 @@ export function App() {
       <TooltipProvider delayDuration={300}>
         <WorkspaceGate>
           <RouterProvider router={router} />
+          <RenderQueueRunner />
         </WorkspaceGate>
         <GlobalTooltip />
         <PwaInstallPrompt />

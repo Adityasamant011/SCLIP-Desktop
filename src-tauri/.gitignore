@@ -1,0 +1,3 @@
+# Versioned by tauri-cli (cargo)
+/target
+**/*.crab

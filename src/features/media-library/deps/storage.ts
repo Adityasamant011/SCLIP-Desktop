@@ -10,6 +10,7 @@ export {
   deleteContent,
   deleteMedia,
   deleteScenes,
+  deleteSemanticMediaMap,
   deleteThumbnailsByMediaId,
   deleteTranscript,
   getAllMedia,

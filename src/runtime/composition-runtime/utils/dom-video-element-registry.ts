@@ -51,6 +51,59 @@ export function getBestDomVideoElementForItem(itemId: string): HTMLVideoElement 
   return best
 }
 
+export function getAllConnectedDomVideoElements(): HTMLVideoElement[] {
+  const elements: HTMLVideoElement[] = []
+  for (const set of videoElementsByItemId.values()) {
+    for (const el of set) {
+      if (el.isConnected) {
+        elements.push(el)
+      }
+    }
+  }
+  return elements
+}
+
+/**
+ * D2 DIAGNOSTIC VARIANT:
+ * Wait for active video element(s) to present their first frame via requestVideoFrameCallback
+ * before establishing transport start epoch.
+ */
+export function waitForActiveVideoPresentation(timeoutMs = 1200): Promise<boolean> {
+  if (typeof window === 'undefined') return Promise.resolve(true)
+  const elements = getAllConnectedDomVideoElements()
+  if (elements.length === 0) {
+    return Promise.resolve(true)
+  }
+
+  return new Promise((resolve) => {
+    let resolved = false
+    let timer: number | null = null
+
+    const onDone = () => {
+      if (resolved) return
+      resolved = true
+      if (timer !== null) {
+        window.clearTimeout(timer)
+        timer = null
+      }
+      resolve(true)
+    }
+
+    timer = window.setTimeout(onDone, timeoutMs)
+
+    for (const el of elements) {
+      if ('requestVideoFrameCallback' in el) {
+        el.requestVideoFrameCallback(() => {
+          onDone()
+        })
+      } else {
+        el.addEventListener('timeupdate', onDone, { once: true })
+      }
+    }
+  })
+}
+
 export function clearDomVideoElementRegistry(): void {
   videoElementsByItemId.clear()
 }
+

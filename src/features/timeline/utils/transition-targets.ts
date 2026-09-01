@@ -1,6 +1,10 @@
 import { TRANSITION_CONFIGS, type Transition } from '@/types/transition'
 import type { TimelineItem } from '@/types/timeline'
-import { areFramesAligned, getMaxTransitionDurationForHandles } from './transition-utils'
+import {
+  areFramesAligned,
+  canAddTransition,
+  getMaxTransitionDurationForHandles,
+} from './transition-utils'
 
 export interface ResolvedTransitionTarget {
   leftClipId: string
@@ -13,6 +17,7 @@ export interface ResolvedTransitionTarget {
   maxDurationInFrames: number
   suggestedDurationInFrames: number
   alignment: number
+  usesEdgeHold?: boolean
   reason?: string
 }
 
@@ -69,6 +74,7 @@ function resolveTargetForPair(
     rightClip,
     alignment,
     timelineFps,
+    true,
   )
   if (maxDurationInFrames < 1) {
     return {
@@ -99,6 +105,19 @@ function resolveTargetForPair(
     }
   }
 
+  const suggestedDurationInFrames = Math.max(
+    1,
+    Math.min(preferredDurationInFrames, maxDurationInFrames),
+  )
+  const validation = canAddTransition(
+    leftClip,
+    rightClip,
+    suggestedDurationInFrames,
+    alignment,
+    timelineFps,
+    true,
+  )
+
   return {
     leftClipId: leftClip.id,
     rightClipId: rightClip.id,
@@ -107,11 +126,9 @@ function resolveTargetForPair(
     hasExisting: false,
     canApply: true,
     maxDurationInFrames,
-    suggestedDurationInFrames: Math.max(
-      1,
-      Math.min(preferredDurationInFrames, maxDurationInFrames),
-    ),
+    suggestedDurationInFrames,
     alignment,
+    usesEdgeHold: validation.usesEdgeHold,
   }
 }
 

@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
     workspace: 'edit',
     propertiesFullColumn: false,
     mediaFullColumn: false,
+    sclipChatOpen: false,
   },
   clearPreviewAudioCache: vi.fn(),
   importExportDialog: vi.fn().mockResolvedValue({
@@ -107,6 +108,10 @@ vi.mock('./interaction-lock-region', () => ({
 
 vi.mock('./audio-meter-panel', () => ({
   AudioMeterPanel: () => <div data-testid="audio-meter-panel" />,
+}))
+
+vi.mock('./sclip-terminal-panel', () => ({
+  SclipTerminalPanel: () => <div data-testid="sclip-terminal-panel" />,
 }))
 
 vi.mock('@/features/editor/deps/timeline-ui', () => ({
@@ -211,8 +216,10 @@ vi.mock('@/features/editor/deps/settings', () => ({
 }))
 
 vi.mock('@/features/editor/deps/preview', () => ({
-  useMaskEditorStore: (selector: (state: { isEditing: boolean }) => unknown) =>
-    selector({ isEditing: false }),
+  useMaskEditorStore: Object.assign(
+    (selector: (state: { isEditing: boolean }) => unknown) => selector({ isEditing: false }),
+    { getState: () => ({ stopEditing: vi.fn() }) },
+  ),
 }))
 
 vi.mock('@/shared/state/playback', () => {
@@ -234,6 +241,8 @@ vi.mock('@/shared/state/editor', () => ({
       propertiesFullColumn: boolean
       mediaFullColumn: boolean
       workspace: string
+      sclipChatOpen: boolean
+      toggleSclipChat: () => void
     }) => unknown,
   ) =>
     selector({
@@ -241,6 +250,8 @@ vi.mock('@/shared/state/editor', () => ({
       propertiesFullColumn: mocks.editorState.propertiesFullColumn,
       mediaFullColumn: mocks.editorState.mediaFullColumn,
       workspace: mocks.editorState.workspace,
+      sclipChatOpen: mocks.editorState.sclipChatOpen,
+      toggleSclipChat: vi.fn(),
     }),
 }))
 
@@ -425,6 +436,7 @@ describe('LoadedEditor migration metadata refresh', () => {
   it('mounts the compact color navigator and fixed grading dock in the color workspace', async () => {
     mocks.editorState.workspace = 'color'
     mocks.editorState.propertiesFullColumn = true
+    mocks.editorState.sclipChatOpen = true
 
     render(
       <LoadedEditor
@@ -448,6 +460,7 @@ describe('LoadedEditor migration metadata refresh', () => {
     expect(screen.getByTestId('color-timeline-navigator')).toBeInTheDocument()
     expect(screen.queryByTestId('timeline')).not.toBeInTheDocument()
     expect(screen.queryByTestId('properties-sidebar')).not.toBeInTheDocument()
+    expect(screen.getByTestId('sclip-terminal-panel')).toBeInTheDocument()
   })
 
   it('mounts Motion in the shared editor shell and swaps only the classic Timeline', async () => {

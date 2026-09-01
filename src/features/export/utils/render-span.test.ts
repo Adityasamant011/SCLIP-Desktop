@@ -9,6 +9,7 @@ import {
   resolveAATransitionRamps,
   resolveCompositionSourceFrame,
   resolveTransitionRenderTimelineSpan,
+  resolveVideoRenderSourceTimeSeconds,
 } from './render-span'
 
 function createVideoItem(overrides?: Partial<VideoItem>): VideoItem {
@@ -70,6 +71,24 @@ describe('render-span', () => {
       durationInFrames: 50,
       sourceStart: 8,
     })
+  })
+
+  it('holds the first source frame until a no-handle incoming clip naturally begins', () => {
+    const clip = createVideoItem({
+      id: 'right',
+      from: 60,
+      durationInFrames: 60,
+      sourceStart: 0,
+      sourceDuration: 60,
+      sourceFps: 30,
+    })
+    const transition = createActiveTransition({ rightClip: clip })
+    const span = resolveTransitionRenderTimelineSpan(clip, transition, 30)
+
+    expect(span.sourceStart).toBe(-10)
+    expect(resolveVideoRenderSourceTimeSeconds(clip, span, 50, 30)).toBeCloseTo(0, 4)
+    expect(resolveVideoRenderSourceTimeSeconds(clip, span, 60, 30)).toBeCloseTo(0, 4)
+    expect(resolveVideoRenderSourceTimeSeconds(clip, span, 65, 30)).toBeCloseTo(5 / 30, 4)
   })
 
   it('maps retimed mixed-FPS compounds to the same source frame as the DOM player', () => {

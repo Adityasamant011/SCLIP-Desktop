@@ -29,7 +29,7 @@ import {
   requestHandlePermission,
   saveWorkspaceHandleRecord,
 } from '@/infrastructure/storage/handles-db'
-import { onPermissionLost, setWorkspaceRoot } from '@/infrastructure/storage/workspace-fs/root'
+import { onPermissionLost, setWorkspaceRoot, ensureTauriWorkspace } from '@/infrastructure/storage/workspace-fs/root'
 import { createLogger } from '@/shared/logging/logger'
 import { WorkspaceGateSplash } from './workspace-gate-splash'
 import { usePathname } from './use-pathname'
@@ -83,6 +83,16 @@ export function WorkspaceGate({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let cancelled = false
     ;(async () => {
+      // Try Tauri workspace initialization first.
+      // This tries invoke('pick_workspace') directly — if it works,
+      // we're in the Tauri desktop app. If not, fall through to browser FSA.
+      const ok = await ensureTauriWorkspace()
+      if (ok && !cancelled) {
+        setStatus({ kind: 'ready' })
+        return
+      }
+
+      // Browser mode: check if FileSystem Access API is supported
       if (!isFileSystemAccessSupported()) {
         if (!cancelled) setStatus({ kind: 'unavailable' })
         return
@@ -170,6 +180,13 @@ export function WorkspaceGate({ children }: { children: React.ReactNode }) {
     setError(t('projects.workspaceGate.reconnectPermissionDenied'))
   }, [activate, t])
 
+  // If workspace is initializing, block ALL rendering (even non-storage
+  // routes) to ensure the workspace root is set before any navigation.
+  // In Tauri mode, this async block runs pick_workspace + bootstrap.
+  if (status.kind === 'initializing') {
+    return <div className="min-h-screen bg-background" aria-hidden="true" />
+  }
+
   // Routes that don't touch storage never wait on the gate — no splash, no
   // flash, even on first load while we're checking handles-db.
   if (!needsWorkspace) {
@@ -180,12 +197,8 @@ export function WorkspaceGate({ children }: { children: React.ReactNode }) {
     return <>{children}</>
   }
 
-  // On protected routes during initialization, render a bare background
-  // block so the transition from "checking" to "ready" or "splash" is
-  // invisible instead of a logo+spinner flash.
-  if (status.kind === 'initializing') {
-    return <div className="min-h-screen bg-background" aria-hidden="true" />
-  }
+  // On protected routes during initialization, we already blocked above.
+  // If we reached here and the status is still not 'ready', show splash.
 
   return (
     <WorkspaceGateSplash

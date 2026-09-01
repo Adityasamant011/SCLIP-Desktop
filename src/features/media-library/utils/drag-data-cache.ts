@@ -53,9 +53,24 @@ export interface TimelineTemplateDragData {
 
 export type DragData = MediaDragData | CompositionDragData | TimelineTemplateDragData
 
+/**
+ * Pointer drags in WKWebView do not always produce a usable HTML5 `drop`
+ * event. This event deliberately bypasses DataTransfer and is consumed by a
+ * concrete classic-timeline track, which still uses the normal placement
+ * planner and timeline store mutation.
+ */
+export const SCLIP_MEDIA_POINTER_DROP_EVENT = 'sclip:media-pointer-drop'
+
+export interface SclipMediaPointerDropDetail {
+  payload: DragData
+  clientX: number
+  clientY: number
+}
+
 const TIMELINE_EXTERNAL_MEDIA_DRAG_CLASS = 'timeline-external-media-drag'
 
 let cachedDragData: DragData | null = null
+let deferredClearTimer: number | null = null
 
 function shouldEnableTimelinePointerPassthrough(data: DragData | null): boolean {
   return data?.type === 'media-item' || data?.type === 'media-items' || data?.type === 'composition'
@@ -73,6 +88,10 @@ function syncTimelinePointerPassthrough(data: DragData | null): void {
 }
 
 export function setMediaDragData(data: DragData): void {
+  if (deferredClearTimer !== null) {
+    window.clearTimeout(deferredClearTimer)
+    deferredClearTimer = null
+  }
   cachedDragData = data
   syncTimelinePointerPassthrough(data)
 }
@@ -82,6 +101,28 @@ export function getMediaDragData(): DragData | null {
 }
 
 export function clearMediaDragData(): void {
+  if (deferredClearTimer !== null) {
+    window.clearTimeout(deferredClearTimer)
+    deferredClearTimer = null
+  }
   cachedDragData = null
   syncTimelinePointerPassthrough(null)
+}
+
+/**
+ * WebKit can send `dragend` before the target's React `drop` callback. Keep
+ * the in-memory payload alive for the target event, then promptly remove it
+ * so a later unrelated external-file drop cannot reuse stale media.
+ */
+export function deferMediaDragDataCleanup(delayMs = 250): void {
+  if (typeof window === 'undefined') {
+    clearMediaDragData()
+    return
+  }
+  if (deferredClearTimer !== null) window.clearTimeout(deferredClearTimer)
+  deferredClearTimer = window.setTimeout(() => {
+    deferredClearTimer = null
+    cachedDragData = null
+    syncTimelinePointerPassthrough(null)
+  }, delayMs)
 }

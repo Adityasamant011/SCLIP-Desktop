@@ -15,9 +15,9 @@ const logger = createLogger('ParakeetWorker')
 
 const ORT_WASM_PATH =
   'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0-dev.20260410-5e55544225/dist/'
-const HF_BASE = 'https://huggingface.co/Olicorne/parakeet-tdt-0.6b-v3-smoothquant-onnx/resolve/main'
+const HF_BASE = 'https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main'
 
-const ENCODER_FP16 = 'encoder-model.fp16.onnx'
+const ENCODER_FP16 = 'encoder-model.int8.onnx'
 const ENCODER_INT8 = 'encoder-model.int8.onnx'
 const DECODER_INT8 = 'decoder_joint-model.int8.onnx'
 const PREPROCESSOR = 'nemo128.onnx'

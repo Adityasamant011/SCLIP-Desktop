@@ -109,19 +109,31 @@ export function useFadeMath({
     [skipFadeComputation, clipFadeDurationFrames, displayedAudioFadeOut, fps, item.type],
   )
   const audioFadeInHoverLabel = useMemo(
-    () => (skipFadeComputation ? '' : `Fade In ${displayedAudioFadeIn.toFixed(2)}s`),
+    () =>
+      skipFadeComputation || typeof displayedAudioFadeIn !== 'number' || !Number.isFinite(displayedAudioFadeIn)
+        ? ''
+        : `Fade In ${displayedAudioFadeIn.toFixed(2)}s`,
     [skipFadeComputation, displayedAudioFadeIn],
   )
   const audioFadeOutHoverLabel = useMemo(
-    () => (skipFadeComputation ? '' : `Fade Out ${displayedAudioFadeOut.toFixed(2)}s`),
+    () =>
+      skipFadeComputation || typeof displayedAudioFadeOut !== 'number' || !Number.isFinite(displayedAudioFadeOut)
+        ? ''
+        : `Fade Out ${displayedAudioFadeOut.toFixed(2)}s`,
     [skipFadeComputation, displayedAudioFadeOut],
   )
   const videoFadeInHoverLabel = useMemo(
-    () => (skipFadeComputation ? '' : `Fade In ${displayedVideoFadeIn.toFixed(2)}s`),
+    () =>
+      skipFadeComputation || typeof displayedVideoFadeIn !== 'number' || !Number.isFinite(displayedVideoFadeIn)
+        ? ''
+        : `Fade In ${displayedVideoFadeIn.toFixed(2)}s`,
     [skipFadeComputation, displayedVideoFadeIn],
   )
   const videoFadeOutHoverLabel = useMemo(
-    () => (skipFadeComputation ? '' : `Fade Out ${displayedVideoFadeOut.toFixed(2)}s`),
+    () =>
+      skipFadeComputation || typeof displayedVideoFadeOut !== 'number' || !Number.isFinite(displayedVideoFadeOut)
+        ? ''
+        : `Fade Out ${displayedVideoFadeOut.toFixed(2)}s`,
     [skipFadeComputation, displayedVideoFadeOut],
   )
   const audioVolumeLineY = useMemo(

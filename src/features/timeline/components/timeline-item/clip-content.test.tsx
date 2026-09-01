@@ -1052,6 +1052,36 @@ describe('ClipContent', () => {
     expect(onRender.mock.calls.length).toBeGreaterThan(settledCommitCount)
   })
 
+  it('rehydrates a persisted image clip whose session-only src was stripped', async () => {
+    useZoomStore.setState({
+      level: 1,
+      pixelsPerSecond: 100,
+      contentLevel: 1,
+      contentPixelsPerSecond: 100,
+      isZoomInteracting: false,
+    })
+    useSettingsStore.setState({
+      showFilmstrips: true,
+      enableFilmstripExtraction: true,
+      showWaveforms: false,
+    })
+
+    const item: TimelineItem = {
+      id: 'restored-image',
+      type: 'image',
+      trackId: 'track-1',
+      from: 0,
+      durationInFrames: 150,
+      label: 'Restored image',
+      mediaId: 'media-1',
+      src: '',
+    } as TimelineItem
+
+    render(<ClipContent item={item} clipLeftFrames={0} clipWidthFrames={150} fps={30} />)
+
+    expect(await screen.findByTestId('image-filmstrip')).toBeInTheDocument()
+  })
+
   it('keeps detailed static text independent from timeline rendering stores', () => {
     const item: TimelineItem = {
       id: 'isolated-text',

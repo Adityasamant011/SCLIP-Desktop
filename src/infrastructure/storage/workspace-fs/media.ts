@@ -11,6 +11,7 @@ import type { MediaMetadata } from '@/types/storage'
 import { createLogger } from '@/shared/logging/logger'
 import { deleteHandle, getHandle, saveHandle } from '@/infrastructure/storage/handles-db'
 import { mapWithConcurrency } from '@/shared/utils/async-utils'
+import { TauriFileHandle } from '@/infrastructure/tauri-fs-polyfill'
 
 import { requireWorkspaceRoot } from './root'
 import {
@@ -37,6 +38,9 @@ async function stashFileHandle(media: MediaMetadata): Promise<SerializedMedia> {
       pickedAt: Date.now(),
       lastSeenSize: media.fileSize,
       lastSeenMtime: media.fileLastModified,
+      // Persist fullPath for TauriFileHandle reconstruction after IndexedDB
+      // structured-clone strips the class prototype (see restoreFileHandle).
+      lastSeenPath: (fileHandle as any).fullPath ?? undefined,
     })
   } else {
     await deleteHandle('media', media.id).catch((error) => {
@@ -49,9 +53,26 @@ async function stashFileHandle(media: MediaMetadata): Promise<SerializedMedia> {
 async function restoreFileHandle(serialized: SerializedMedia): Promise<MediaMetadata> {
   const record = await getHandle('media', serialized.id)
   if (record) {
+    // When running inside Tauri, IndexedDB structured-clone strips the
+    // TauriFileHandle class prototype so `record.handle.getFile` becomes
+    // undefined. Detect this by checking for the `fullPath` data property
+    // (only present on TauriFileHandle plain-object serializations) and
+    // reconstruct a proper TauriFileHandle instance.
+    const raw = record.handle as any
+    const isStrippedTauriHandle =
+      typeof raw.getFile !== 'function' &&
+      (typeof raw.fullPath === 'string' || typeof record.lastSeenPath === 'string')
+
+    const fileHandle: FileSystemFileHandle = isStrippedTauriHandle
+      ? (new TauriFileHandle(
+          raw.name ?? record.name,
+          raw.fullPath ?? record.lastSeenPath ?? '',
+        ) as unknown as FileSystemFileHandle)
+      : (raw as FileSystemFileHandle)
+
     return {
       ...serialized,
-      fileHandle: record.handle as FileSystemFileHandle,
+      fileHandle,
     }
   }
   return serialized as MediaMetadata
@@ -189,7 +210,8 @@ export async function getAllMediaMetadata(): Promise<MediaMetadata[]> {
 export async function getMedia(id: string): Promise<MediaMetadata | undefined> {
   const root = requireWorkspaceRoot()
   try {
-    const serialized = await readJson<SerializedMedia>(root, mediaMetadataPath(id))
+    const path = mediaMetadataPath(id)
+    const serialized = await readJson<SerializedMedia>(root, path)
     if (!serialized) return undefined
     return restoreFileHandle(serialized)
   } catch (error) {

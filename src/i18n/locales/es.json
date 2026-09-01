@@ -60,7 +60,9 @@
     "saveAria": "Guardar proyecto",
     "export": "Exportar",
     "exportVideo": "Exportar vídeo",
-    "downloadProjectZip": "Descargar proyecto (.zip)"
+    "downloadProjectZip": "Descargar proyecto (.zip)",
+    "sclipTerminal": "SCLIP Terminal",
+    "sclipTerminalAria": "Open SCLIP AI Terminal"
   },
   "unsavedChanges": {
     "title": "Cambios sin guardar",

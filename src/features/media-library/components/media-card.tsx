@@ -7,9 +7,11 @@ import {
   useCallback,
   type CSSProperties,
   type ReactNode,
+  type PointerEvent as ReactPointerEvent,
 } from 'react'
 import { useTranslation } from 'react-i18next'
 import { i18n } from '@/i18n'
+import { recordEditorDiagnostic } from '@/infrastructure/editor-diagnostics'
 import {
   Video,
   FileAudio,
@@ -25,6 +27,7 @@ import {
   Wind,
   Maximize2,
   X,
+  Plus,
 } from 'lucide-react'
 import {
   ContextMenu,
@@ -46,8 +49,18 @@ import { MediaInfoPopover } from './media-info-popover'
 import { getSharedProxyKey } from '../utils/proxy-key'
 import { useMediaLibraryStore } from '../stores/media-library-store'
 import { useMediaPreparationStore } from '../stores/media-preparation-store'
+import { useTimelineStore } from '../deps/timeline-stores'
+import { resolveMediaUrl } from '../deps/timeline-contract'
+import { useProjectStore } from '@/features/media-library/deps/projects'
+
 import { CARD_GRID_BASE, CARD_LIST_BASE, CARD_PERF_STYLE } from './card-styles'
-import { setMediaDragData, clearMediaDragData } from '../utils/drag-data-cache'
+import {
+  setMediaDragData,
+  getMediaDragData,
+  clearMediaDragData,
+  deferMediaDragDataCleanup,
+  SCLIP_MEDIA_POINTER_DROP_EVENT,
+} from '../utils/drag-data-cache'
 import { proxyService } from '../services/proxy-service'
 import { frameInterpolationService } from '../services/frame-interpolation-service'
 import {
@@ -78,6 +91,11 @@ import {
 import { TranscribeDialog, type TranscribeDialogValues } from './transcribe-dialog'
 import { useSubtitleScanProgressStore } from '../stores/subtitle-scan-progress-store'
 import { audioScrubPreview, getAudioScrubTime } from '../utils/audio-scrub-preview'
+import {
+  copySclipReference,
+  createMediaSclipReference,
+} from '@/features/editor/agent/sclip-reference'
+import { toast } from 'sonner'
 
 interface MediaCardProps {
   media: MediaMetadata
@@ -687,7 +705,8 @@ const MediaCardInternal = memo(function MediaCardInternal({
       [media.id],
     ),
   )
-  const isPreparingMedia = isImporting || hasActivePreparationTasks
+  const isPreparingMedia = isImporting
+  const hasActivePreparation = isImporting || hasActivePreparationTasks
   const preparingLabel = t('media.card.preparing')
 
   const proxyStatus = useMediaLibraryStore((s) => s.proxyStatus.get(media.id))
@@ -726,6 +745,14 @@ const MediaCardInternal = memo(function MediaCardInternal({
   const thumbnailRef = useRef<HTMLImageElement>(null)
   const thumbnailContainerRef = useRef<HTMLDivElement | null>(null)
   const dragImageRef = useRef<HTMLDivElement | null>(null)
+  const nativeDragCleanupRef = useRef<(() => void) | null>(null)
+  const lastTimelineDragPositionRef = useRef<{ clientX: number; clientY: number } | null>(null)
+  const suppressNextClickRef = useRef(false)
+  /**
+   * Set to true for the lifetime of a native HTML5 drag so thumbnail hover
+   * scrub events (onPointerEnter/Move) do not fight the drag gesture.
+   */
+  const isDraggingRef = useRef(false)
   const setMediaSkimPreview = useEditorStore((s) => s.setMediaSkimPreview)
   const clearMediaSkimPreview = useEditorStore((s) => s.clearMediaSkimPreview)
   const isTranscriptionDialogOpen = useEditorStore((s) => s.transcriptionDialogDepth > 0)
@@ -782,6 +809,69 @@ const MediaCardInternal = memo(function MediaCardInternal({
     const targets = getTargetMediaItems()
     onDelete?.(targets.map((m) => m.id))
   }
+
+  const handleCopySclipReference = useCallback(() => {
+    const projectId = useMediaLibraryStore.getState().currentProjectId
+    if (!projectId) {
+      toast.error('Open a project before copying a SCLIP reference.')
+      return
+    }
+    void copySclipReference(createMediaSclipReference(projectId, media))
+      .then(() => toast.success('SCLIP reference copied. Paste it into Hermes.'))
+      .catch(() => toast.error('Could not copy the SCLIP reference.'))
+  }, [media])
+
+  const handleAddToTimeline = useCallback(async () => {
+    try {
+      const timelineState = useTimelineStore.getState()
+      const tracks = timelineState.tracks
+      const mediaType = getMediaType(media.mimeType)
+      if (mediaType === 'unknown') {
+        toast.error('This media type cannot be placed on the timeline.')
+        return
+      }
+      const requiredTrackKind = mediaType === 'audio' ? 'audio' : 'video'
+      const targetTrack = tracks
+        .filter((track) => !track.locked && !track.isGroup)
+        .sort((left, right) => left.order - right.order)
+        .find((track) => (track.kind ?? 'video') === requiredTrackKind)
+      if (!targetTrack) {
+        toast.error(`No unlocked ${requiredTrackKind} track is available.`)
+        return
+      }
+      const fps = timelineState.fps || 30
+      const project = useProjectStore.getState().currentProject
+      const fromFrame = usePlaybackStore.getState().currentFrame ?? 0
+      const durationFrames = Math.max(1, Math.round((media.duration || 5) * fps))
+      const blobUrl = await resolveMediaUrl(media.id)
+      if (!blobUrl) {
+        toast.error('Could not read this media file.')
+        return
+      }
+
+      const { buildDroppedMediaTimelineItem } = await import('@/features/timeline/utils/dropped-media')
+      const item = buildDroppedMediaTimelineItem({
+        media,
+        mediaId: media.id,
+        mediaType,
+        label: media.fileName,
+        timelineFps: fps,
+        blobUrl,
+        canvasWidth: project?.metadata?.width ?? 1920,
+        canvasHeight: project?.metadata?.height ?? 1080,
+        placement: {
+          trackId: targetTrack.id,
+          from: fromFrame,
+          durationInFrames: durationFrames,
+        },
+      })
+      timelineState.addItem(item)
+      toast.success(`Placed ${media.fileName} on timeline`)
+    } catch (err) {
+      toast.error('Could not place media on timeline')
+    }
+  }, [media])
+
 
   const handleGenerateProxy = (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -1200,40 +1290,39 @@ const MediaCardInternal = memo(function MediaCardInternal({
     [media, getTargetMediaItems],
   )
 
-  const removeNativeDragCleanupListenersRef = useRef<(() => void) | null>(null)
+  const installNativeDragCleanupListeners = useCallback(() => {
+    nativeDragCleanupRef.current?.()
+    lastTimelineDragPositionRef.current = null
 
-  const cleanupDragArtifacts = useCallback(() => {
-    removeNativeDragCleanupListenersRef.current?.()
-    removeNativeDragCleanupListenersRef.current = null
-    clearMediaDragData()
-    if (dragImageRef.current) {
-      dragImageRef.current.remove()
-      dragImageRef.current = null
+    const rememberTimelinePosition = (event: DragEvent) => {
+      const target = document.elementFromPoint(event.clientX, event.clientY)
+      if (target?.closest('[data-timeline-drop-target="true"]')) {
+        lastTimelineDragPositionRef.current = { clientX: event.clientX, clientY: event.clientY }
+      }
+    }
+
+    document.addEventListener('dragover', rememberTimelinePosition, true)
+    nativeDragCleanupRef.current = () => {
+      document.removeEventListener('dragover', rememberTimelinePosition, true)
+      nativeDragCleanupRef.current = null
     }
   }, [])
-
-  const installNativeDragCleanupListeners = useCallback(() => {
-    cleanupDragArtifacts()
-
-    const handleNativeDragEnd = () => cleanupDragArtifacts()
-    const handleNativeDrop = () => {
-      window.setTimeout(cleanupDragArtifacts, 0)
-    }
-    const handleWindowBlur = () => cleanupDragArtifacts()
-
-    window.addEventListener('dragend', handleNativeDragEnd, true)
-    document.addEventListener('drop', handleNativeDrop, true)
-    window.addEventListener('blur', handleWindowBlur)
-
-    removeNativeDragCleanupListenersRef.current = () => {
-      window.removeEventListener('dragend', handleNativeDragEnd, true)
-      document.removeEventListener('drop', handleNativeDrop, true)
-      window.removeEventListener('blur', handleWindowBlur)
-    }
-  }, [cleanupDragArtifacts])
+  const cleanupDragArtifacts = useCallback(() => {
+    nativeDragCleanupRef.current?.()
+    clearMediaDragData()
+    dragImageRef.current?.remove()
+    dragImageRef.current = null
+  }, [])
 
   const handleDragStart = useCallback(
     (e: React.DragEvent) => {
+      isDraggingRef.current = true
+      recordEditorDiagnostic('media-drag', 'info', 'Media drag started', {
+        mediaId: media.id,
+        mediaType,
+        fileName: media.fileName,
+        dataTransferTypes: Array.from(e.dataTransfer.types),
+      })
       installNativeDragCleanupListeners()
       // Set drag data for timeline drop
       e.dataTransfer.effectAllowed = 'copy'
@@ -1263,6 +1352,7 @@ const MediaCardInternal = memo(function MediaCardInternal({
         }
 
         e.dataTransfer.setData('application/json', JSON.stringify(dragData))
+        e.dataTransfer.setData('text/plain', JSON.stringify(dragData))
         // Cache for dragover access
         setMediaDragData(dragData)
       } else {
@@ -1273,12 +1363,15 @@ const MediaCardInternal = memo(function MediaCardInternal({
           mediaType: mediaType,
           fileName: media.fileName,
           duration: media.duration,
+          media,
         }
 
         e.dataTransfer.setData('application/json', JSON.stringify(dragData))
+        e.dataTransfer.setData('text/plain', JSON.stringify(dragData))
         // Cache for dragover access
         setMediaDragData(dragData)
       }
+
 
       // Custom drag image: show just the thumbnail at natural aspect ratio.
       // thumbnailRef is on the grid-view <img>; for list view, query the card element.
@@ -1306,11 +1399,50 @@ const MediaCardInternal = memo(function MediaCardInternal({
     [installNativeDragCleanupListeners, media.id, media.fileName, media.duration, mediaType],
   )
 
-  const handleDragEnd = cleanupDragArtifacts
+  const handleDragEnd = useCallback((event: React.DragEvent) => {
+    isDraggingRef.current = false
+    const payload = getMediaDragData()
+    const fallbackPosition = lastTimelineDragPositionRef.current
+    // WebKit often reports the source-card coordinates (or 0,0) on dragend.
+    // A captured timeline dragover is the authoritative final destination.
+    const clientX = fallbackPosition?.clientX ?? event.clientX ?? 0
+    const clientY = fallbackPosition?.clientY ?? event.clientY ?? 0
+    const target = document.elementFromPoint(clientX, clientY)
+    const timelineTarget = target?.closest<HTMLElement>('[data-timeline-drop-target="true"]')
+
+    // WKWebView sometimes completes an internal native drag without sending a
+    // DOM `drop` event. A successful HTML drop clears the cache in its target
+    // before dragend; if the payload is still present and the pointer ended on
+    // a timeline target, ask that target to run its normal placement pipeline.
+    if (payload && timelineTarget) {
+      window.dispatchEvent(
+        new CustomEvent(SCLIP_MEDIA_POINTER_DROP_EVENT, {
+          detail: {
+            payload,
+            clientX,
+            clientY,
+          },
+        }),
+      )
+      suppressNextClickRef.current = true
+    }
+    recordEditorDiagnostic('media-drag', 'info', 'Media drag ended', {
+      mediaId: media.id,
+      usedDesktopFallback: Boolean(payload && timelineTarget),
+    })
+    nativeDragCleanupRef.current?.()
+    dragImageRef.current?.remove()
+    dragImageRef.current = null
+    deferMediaDragDataCleanup()
+  }, [media.id])
 
   useEffect(() => cleanupDragArtifacts, [cleanupDragArtifacts])
 
   const handleClick = (e: React.MouseEvent) => {
+    if (suppressNextClickRef.current) {
+      suppressNextClickRef.current = false
+      return
+    }
     onSelect?.(e)
   }
 
@@ -1436,7 +1568,7 @@ const MediaCardInternal = memo(function MediaCardInternal({
 
   const handleThumbnailPointerEnter = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
-      if (!canHoverPreview || event.pointerType === 'touch') return
+      if (!canHoverPreview || event.pointerType === 'touch' || isDraggingRef.current) return
       pauseTimelinePlayback()
       updateSkimPreview(event.clientX)
     },
@@ -1445,7 +1577,7 @@ const MediaCardInternal = memo(function MediaCardInternal({
 
   const handleThumbnailPointerMove = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
-      if (!canScrubPreview || event.pointerType === 'touch') return
+      if (!canScrubPreview || event.pointerType === 'touch' || isDraggingRef.current) return
       scheduleSkimPreview(event.clientX)
     },
     [canScrubPreview, scheduleSkimPreview],
@@ -1601,9 +1733,9 @@ const MediaCardInternal = memo(function MediaCardInternal({
           }
           ${isPreparingMedia ? 'opacity-80 cursor-default' : ''}
         `}
-              draggable={!isPreparingMedia}
-              onDragStart={isPreparingMedia ? undefined : handleDragStart}
-              onDragEnd={isPreparingMedia ? undefined : handleDragEnd}
+              draggable={!isPreparingMedia && !isBroken}
+              onDragStart={handleDragStart}
+              onDragEnd={handleDragEnd}
               onClick={isPreparingMedia ? undefined : handleClick}
               onDoubleClick={
                 isPreparingMedia
@@ -1626,7 +1758,8 @@ const MediaCardInternal = memo(function MediaCardInternal({
                   <img
                     src={thumbnailUrl}
                     alt={media.fileName}
-                    className="w-full h-full object-contain"
+                    draggable={false}
+                    className="w-full h-full object-contain pointer-events-none"
                   />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center">{getIcon()}</div>
@@ -1726,11 +1859,20 @@ const MediaCardInternal = memo(function MediaCardInternal({
           </ContextMenuTrigger>
           <ContextMenuContent onClick={(e) => e.stopPropagation()}>
             {actionMenuItems}
+            <ContextMenuSeparator />
+            <ContextMenuItem onClick={handleAddToTimeline}>
+              <Plus className="w-4 h-4 mr-2" />
+              Add to timeline
+            </ContextMenuItem>
+            <ContextMenuItem onClick={handleCopySclipReference}>
+              Copy SCLIP reference
+            </ContextMenuItem>
           </ContextMenuContent>
         </ContextMenu>
       </>
     )
   }
+
 
   // Grid view
   return (
@@ -1749,9 +1891,9 @@ const MediaCardInternal = memo(function MediaCardInternal({
         }
         ${isPreparingMedia ? 'cursor-default' : ''}
       `}
-            draggable={!isPreparingMedia}
-            onDragStart={isPreparingMedia ? undefined : handleDragStart}
-            onDragEnd={isPreparingMedia ? undefined : handleDragEnd}
+            draggable={!isPreparingMedia && !isBroken}
+            onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}
             onClick={isPreparingMedia ? undefined : handleClick}
             onDoubleClick={
               isPreparingMedia
@@ -1779,7 +1921,8 @@ const MediaCardInternal = memo(function MediaCardInternal({
                   ref={thumbnailRef}
                   src={thumbnailUrl}
                   alt={media.fileName}
-                  className="w-full h-full object-contain transition-transform duration-500 group-hover:scale-105"
+                  draggable={false}
+                  className="w-full h-full object-contain transition-transform duration-500 group-hover:scale-105 pointer-events-none"
                 />
               ) : (
                 <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-secondary to-panel-bg">
@@ -1905,8 +2048,17 @@ const MediaCardInternal = memo(function MediaCardInternal({
         </ContextMenuTrigger>
         <ContextMenuContent onClick={(e) => e.stopPropagation()}>
           {actionMenuItems}
+          <ContextMenuSeparator />
+          <ContextMenuItem onClick={handleAddToTimeline}>
+            <Plus className="w-4 h-4 mr-2" />
+            Add to timeline
+          </ContextMenuItem>
+          <ContextMenuItem onClick={handleCopySclipReference}>
+            Copy SCLIP reference
+          </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
+
     </>
   )
 })

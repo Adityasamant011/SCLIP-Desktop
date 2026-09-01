@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { TimelineItem } from '@/types/timeline'
-import type { MediaTranscript } from '@/types/storage'
+import type { MediaTranscript, MediaTranscriptWord } from '@/types/storage'
 import {
   buildRemovalRangesByMediaId,
   buildTranscriptTokens,
@@ -26,7 +26,8 @@ function makeItem(
 
 function makeTranscript(
   mediaId: string,
-  words: Array<{ text: string; start: number; end: number }>,
+  words: MediaTranscriptWord[],
+  speaker?: string,
 ): MediaTranscript {
   return {
     id: mediaId,
@@ -34,7 +35,7 @@ function makeTranscript(
     model: 'whisper-base',
     quantization: 'q8',
     text: words.map((w) => w.text).join(' '),
-    segments: [{ text: words.map((w) => w.text).join(' '), start: 0, end: 10, words }],
+    segments: [{ text: words.map((w) => w.text).join(' '), start: 0, end: 10, speaker, words }],
     createdAt: 0,
     updatedAt: 0,
   }
@@ -55,8 +56,22 @@ describe('buildTranscriptTokens', () => {
 
     expect(tokens.map((t) => t.text)).toEqual(['hello', 'um', 'world'])
     expect(tokens[0]).toMatchObject({ startFrame: 0, endFrame: 15, itemId: 'a', mediaId: 'm1' })
+    expect(tokens[0]?.wordId).toBe('sclip-word:m1:0:500:hello')
     expect(tokens[1]).toMatchObject({ startFrame: 15, endFrame: 30 })
     expect(tokens[2]).toMatchObject({ startFrame: 30, endFrame: 45 })
+  })
+
+  it('preserves word confidence and inherits a segment speaker', () => {
+    const item = makeItem({ id: 'a', mediaId: 'm1' })
+    const transcript = makeTranscript('m1', [
+      { text: 'hello', start: 0, end: 0.5, confidence: 0.92 },
+      { text: 'there', start: 0.5, end: 1, speaker: 'guest' },
+    ], 'host')
+
+    expect(buildTranscriptTokens([item], { m1: transcript }, FPS)).toMatchObject([
+      { text: 'hello', confidence: 0.92, speaker: 'host' },
+      { text: 'there', speaker: 'guest' },
+    ])
   })
 
   it('drops words outside a trimmed clip source span', () => {
@@ -178,6 +193,44 @@ describe('buildTranscriptTokens', () => {
     expect(tokens.map((t) => t.itemId)).toEqual(['a', 'b'])
   })
 
+  it('keeps duplicate source appearances at their separate timeline placements', () => {
+    const first = makeItem({ id: 'first', mediaId: 'm1', from: 0, durationInFrames: 60 })
+    const repeated = makeItem({ id: 'repeated', mediaId: 'm1', from: 180, durationInFrames: 60 })
+    const transcript = makeTranscript('m1', [{ text: 'again', start: 0, end: 0.5 }])
+
+    const tokens = buildTranscriptTokens([first, repeated], { m1: transcript }, FPS)
+
+    expect(tokens.map((token) => [token.itemId, token.wordId, token.startFrame])).toEqual([
+      ['first', 'sclip-word:m1:0:500:again', 0],
+      ['repeated', 'sclip-word:m1:0:500:again', 180],
+    ])
+  })
+
+  it('maps split source spans to their new clip placements', () => {
+    const left = makeItem({ id: 'left', mediaId: 'm1', from: 0, sourceStart: 0, sourceEnd: 60, durationInFrames: 60 })
+    const right = makeItem({ id: 'right', mediaId: 'm1', from: 60, sourceStart: 60, sourceEnd: 120, durationInFrames: 60 })
+    const transcript = makeTranscript('m1', [
+      { text: 'left', start: 0.5, end: 1 },
+      { text: 'right', start: 2.5, end: 3 },
+    ])
+
+    expect(buildTranscriptTokens([left, right], { m1: transcript }, FPS)).toMatchObject([
+      { text: 'left', itemId: 'left', startFrame: 15 },
+      { text: 'right', itemId: 'right', startFrame: 75 },
+    ])
+  })
+
+  it('maps words through playback speed without changing their source identity', () => {
+    const item = makeItem({ id: 'fast', mediaId: 'm1', speed: 2, durationInFrames: 60 })
+    const transcript = makeTranscript('m1', [{ text: 'fast', start: 1, end: 1.5 }])
+
+    expect(buildTranscriptTokens([item], { m1: transcript }, FPS)[0]).toMatchObject({
+      wordId: 'sclip-word:m1:1000:1500:fast',
+      startFrame: 15,
+      endFrame: 22,
+    })
+  })
+
   it('orders tokens across clips by timeline frame', () => {
     const first = makeItem({ id: 'a', mediaId: 'm1', from: 0, durationInFrames: 60 })
     const second = makeItem({ id: 'b', mediaId: 'm2', from: 120, durationInFrames: 60 })
@@ -249,6 +302,22 @@ describe('buildRemovalRangesByMediaId', () => {
       m1: [{ start: 0, end: 0.5 }],
       m2: [{ start: 0, end: 0.5 }],
     })
+  })
+
+  it('keeps distant selected filler words as separate cuts', () => {
+    const tokens = buildTranscriptTokens(
+      [makeItem({ id: 'a', mediaId: 'm1', durationInFrames: 180 })],
+      {
+        m1: makeTranscript('m1', [
+          { text: 'um', start: 0, end: 0.2 },
+          { text: 'important', start: 1.0, end: 1.5 },
+          { text: 'um', start: 3.0, end: 3.2 },
+        ]),
+      },
+      FPS,
+    )
+    const ranges = buildRemovalRangesByMediaId([tokens[0]!, tokens[2]!])
+    expect(ranges).toEqual({ m1: [{ start: 0, end: 0.2 }, { start: 3, end: 3.2 }] })
   })
 
   it('returns empty for no selection', () => {

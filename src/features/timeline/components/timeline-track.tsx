@@ -2,6 +2,7 @@ import { useState, useRef, memo, useCallback, useEffect, useLayoutEffect } from 
 import { useTranslation } from 'react-i18next'
 import { createLogger } from '@/shared/logging/logger'
 import { perfMarkRender } from '@/shared/logging/perf-marks'
+import { recordEditorDiagnostic } from '@/infrastructure/editor-diagnostics'
 
 const logger = createLogger('TimelineTrack')
 import type {
@@ -27,6 +28,9 @@ import { DEFAULT_PROJECT_HEIGHT, DEFAULT_PROJECT_WIDTH } from '@/shared/projects
 import {
   resolveMediaUrl,
   getMediaDragData,
+  clearMediaDragData,
+  SCLIP_MEDIA_POINTER_DROP_EVENT,
+  type SclipMediaPointerDropDetail,
   type CompositionDragData,
 } from '@/features/timeline/deps/media-library-resolver'
 import {
@@ -308,7 +312,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
   const getMedia = useMediaLibraryStore((s) => s.mediaItems)
   const importHandlesForPlacement = useMediaLibraryStore((s) => s.importHandlesForPlacement)
 
-  const getDropFrame = useCallback((event: React.DragEvent): number | null => {
+  const getDropFrameFromClientX = useCallback((clientX: number): number | null => {
     if (!trackRef.current) {
       return null
     }
@@ -320,9 +324,14 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
 
     const scrollLeft = timelineContainer.scrollLeft || 0
     const containerRect = timelineContainer.getBoundingClientRect()
-    const offsetX = event.clientX - containerRect.left + scrollLeft
+    const offsetX = clientX - containerRect.left + scrollLeft
     return pixelsToFrameNow(offsetX)
   }, [])
+
+  const getDropFrame = useCallback(
+    (event: React.DragEvent): number | null => getDropFrameFromClientX(event.clientX),
+    [getDropFrameFromClientX],
+  )
 
   const getCurrentCanvasSize = useCallback(() => {
     const liveProject = useProjectStore.getState().currentProject
@@ -600,13 +609,13 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
       ) {
         const media = useMediaLibraryStore.getState().mediaById[dragData.mediaId]
         nextEntries =
-          media && isDroppableMediaType(dragData.mediaType)
+          isDroppableMediaType(dragData.mediaType)
             ? [
                 {
                   label: dragData.fileName,
                   mediaType: dragData.mediaType,
-                  duration: dragData.duration,
-                  hasLinkedAudio: dragData.mediaType === 'video' && !!media.audioCodec,
+                  duration: dragData.duration ?? media?.duration ?? 0,
+                  hasLinkedAudio: dragData.mediaType === 'video' && !!media?.audioCodec,
                 },
               ]
             : null
@@ -985,9 +994,14 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
 
   const handleDragEnterCapture = useCallback(
     (e: React.DragEvent) => {
+      e.preventDefault()
+      recordEditorDiagnostic('timeline-track', 'info', 'Drag entered timeline track', {
+        trackId: track.id,
+        hasCachedMedia: Boolean(getMediaDragData()),
+      })
       claimPreviewOwnership(e)
     },
-    [claimPreviewOwnership],
+    [claimPreviewOwnership, track.id],
   )
 
   useEffect(() => {
@@ -1071,6 +1085,63 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
     [clearPendingDragPreview, previewOwnerId],
   )
 
+  const placeMediaPayload = useCallback(
+    async (payload: unknown, dropFrame: number, source: 'html-drop' | 'pointer-drop') => {
+      const entries = resolveDroppedMediaEntriesFromPayload(payload, getMedia, logger)
+      if (entries.length === 0) {
+        toast.error(t('timeline.track.noSupportedMediaInDrop'))
+        recordEditorDiagnostic('timeline-track', 'warn', 'Media placement contained no resolvable media', {
+          trackId: track.id,
+          source,
+        })
+        return
+      }
+
+      const dropResult = await resolveTimelineItemsForEntries(entries, dropFrame)
+      prewarmDroppedTimelineAudio(entries, dropResult.items)
+      applyResolvedTimelineDrop({
+        addItem,
+        addItems,
+        currentTracks: useTimelineStore.getState().tracks,
+        dropResult,
+        emptyMessage: t('timeline.track.unableToAddDroppedMediaItems'),
+        notify: toast,
+        partialFailureLabel: t('timeline.track.droppedMediaItems'),
+        requestedCount: entries.length,
+        setTracks: useTimelineStore.getState().setTracks,
+      })
+      recordEditorDiagnostic('timeline-track', 'info', 'Media payload placed on timeline', {
+        trackId: track.id,
+        source,
+        requestedCount: entries.length,
+        placedCount: dropResult.items.length,
+      })
+    },
+    [addItem, addItems, getMedia, resolveTimelineItemsForEntries, t, track.id],
+  )
+
+  useEffect(() => {
+    const handleDesktopMediaDrop = (event: Event) => {
+      if (isDropDisabled || !trackRef.current) return
+      const detail = (event as CustomEvent<SclipMediaPointerDropDetail>).detail
+      if (!detail) return
+
+      const target = document.elementFromPoint(detail.clientX, detail.clientY)
+      if (!target || !trackRef.current.contains(target)) return
+
+      const dropFrame = getDropFrameFromClientX(detail.clientX)
+      if (dropFrame === null) return
+
+      clearMediaDragData()
+      void placeMediaPayload(detail.payload, dropFrame, 'pointer-drop')
+    }
+
+    window.addEventListener(SCLIP_MEDIA_POINTER_DROP_EVENT, handleDesktopMediaDrop)
+    return () => {
+      window.removeEventListener(SCLIP_MEDIA_POINTER_DROP_EVENT, handleDesktopMediaDrop)
+    }
+  }, [getDropFrameFromClientX, isDropDisabled, placeMediaPayload])
+
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault()
     releaseTimelineDropPreviewOwner(previewOwnerId)
@@ -1086,13 +1157,29 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
 
     const dropFrame = getDropFrame(e)
     if (dropFrame === null) {
+      recordEditorDiagnostic('timeline-track', 'warn', 'Drop ignored because target frame could not be resolved', { trackId: track.id })
       return
     }
 
     const rawJson = e.dataTransfer.getData('application/json')
-    if (rawJson) {
+    // Native WebKit drops frequently retain only Files/text types. The media
+    // card writes the exact internal payload into this cache at dragstart, so
+    // prefer it when DataTransfer no longer exposes application/json.
+    const cachedPayload = getMediaDragData()
+    const payload = rawJson
+      ? (() => { try { return JSON.parse(rawJson) } catch { return null } })()
+      : cachedPayload
+    // Mark the native path as consumed before WebKit emits dragend. Otherwise
+    // the desktop fallback can place the same clip a second time.
+    if (payload) clearMediaDragData()
+    recordEditorDiagnostic('timeline-track', 'info', 'Drop received on timeline track', {
+      trackId: track.id,
+      frame: dropFrame,
+      payloadSource: rawJson ? 'DataTransfer' : cachedPayload ? 'native-cache' : 'files-or-empty',
+    })
+    if (payload) {
       try {
-        const data = JSON.parse(rawJson)
+        const data = payload
 
         if (data.type === 'composition') {
           const activeCompositionId = useCompositionNavigationStore.getState().activeCompositionId
@@ -1165,25 +1252,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
           return
         }
 
-        const entries = resolveDroppedMediaEntriesFromPayload(data, getMedia, logger)
-
-        if (entries.length === 0) {
-          return
-        }
-
-        const dropResult = await resolveTimelineItemsForEntries(entries, dropFrame)
-        prewarmDroppedTimelineAudio(entries, dropResult.items)
-        applyResolvedTimelineDrop({
-          addItem,
-          addItems,
-          currentTracks: useTimelineStore.getState().tracks,
-          dropResult,
-          emptyMessage: t('timeline.track.unableToAddDroppedMediaItems'),
-          notify: toast,
-          partialFailureLabel: t('timeline.track.droppedMediaItems'),
-          requestedCount: entries.length,
-          setTracks: useTimelineStore.getState().setTracks,
-        })
+        await placeMediaPayload(data, dropFrame, 'html-drop')
         return
       } catch (error) {
         logger.warn('Failed to parse drag payload, falling back to file-drop handling', error)

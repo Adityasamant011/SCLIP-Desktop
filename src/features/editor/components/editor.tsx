@@ -13,6 +13,7 @@ import { PreviewArea } from './preview-area'
 import { MotionPreviewArea, MotionTimelineDock } from './compose-workspace/compose-layout'
 import { InteractionLockRegion } from './interaction-lock-region'
 import { AudioMeterPanel } from './audio-meter-panel'
+import { SclipTerminalPanel } from './sclip-terminal-panel'
 import {
   importTimeline,
   importBentoLayoutDialog,
@@ -38,6 +39,7 @@ import { useMediaLibraryStore } from '@/features/editor/deps/media-library'
 import { useSettingsStore } from '@/features/editor/deps/settings'
 import { useMaskEditorStore } from '@/features/editor/deps/preview'
 import { usePlaybackStore } from '@/shared/state/playback'
+import { useSelectionStore } from '@/shared/state/selection'
 import { useEditorStore } from '@/shared/state/editor'
 import { clearPreviewAudioCache } from '@/features/editor/deps/composition-runtime'
 import { useProjectStore } from '@/features/editor/deps/projects'
@@ -65,6 +67,7 @@ import {
   useSubtitleScanProgressStore,
 } from '@/features/editor/deps/media-library'
 import { IoDragReadout } from '@/shared/timeline/io-range'
+import { recordEditorDiagnostic } from '@/infrastructure/editor-diagnostics'
 const logger = createLogger('Editor')
 const LazyTimeline = lazy(() => importTimeline().then(({ Timeline }) => ({ default: Timeline })))
 const LazyColorGradingDock = lazy(() =>
@@ -378,6 +381,79 @@ const TimelineShortcutsController = memo(function TimelineShortcutsController() 
   return null
 })
 
+/**
+ * Keeps the inspector from being left pointing at a clip that no longer
+ * exists after an undo, agent operation, or timeline reload. This is a small
+ * guard around the existing selection system, not a replacement for it.
+ */
+const SelectionIntegrityController = memo(function SelectionIntegrityController() {
+  const items = useTimelineStore((s) => s.items ?? [])
+  const selectedItemIds = useSelectionStore((s) => s.selectedItemIds ?? [])
+
+  useEffect(() => {
+    if (items.length === 0 || selectedItemIds.length === 0) return
+
+    const availableIds = new Set(items.map((item) => item.id))
+    const validIds = selectedItemIds.filter((id) => availableIds.has(id))
+    if (validIds.length === selectedItemIds.length) return
+
+    useSelectionStore.getState().selectItems(validIds)
+    recordEditorDiagnostic('selection', 'warn', 'Cleared stale timeline selection', {
+      removedItemIds: selectedItemIds.filter((id) => !availableIds.has(id)),
+    })
+  }, [items, selectedItemIds])
+
+  return null
+})
+
+/**
+ * Desktop windows can close before the normal autosave debounce has fired.
+ * Flush a best-effort save when the page is being hidden while preserving the
+ * regular debounced autosave path for normal editing.
+ */
+const ProjectLifecycleSaveController = memo(function ProjectLifecycleSaveController({
+  projectId,
+}: {
+  projectId: string
+}) {
+  const isDirty = useTimelineStore((s) => s.isDirty)
+  const saveInFlightRef = useRef(false)
+
+  useEffect(() => {
+    const flushSave = () => {
+      if (!isDirty || saveInFlightRef.current) return
+      saveInFlightRef.current = true
+      void useTimelineStore
+        .getState()
+        .saveTimeline(projectId)
+        .then(() => {
+          recordEditorDiagnostic('lifecycle-save', 'info', 'Project saved while closing or hiding')
+        })
+        .catch((error) => {
+          recordEditorDiagnostic('lifecycle-save', 'error', 'Project save failed while closing or hiding', {
+            message: error instanceof Error ? error.message : String(error),
+          })
+        })
+        .finally(() => {
+          saveInFlightRef.current = false
+        })
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') flushSave()
+    }
+
+    window.addEventListener('pagehide', flushSave)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      window.removeEventListener('pagehide', flushSave)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [isDirty, projectId])
+
+  return null
+})
+
 export const LoadedEditor = memo(function LoadedEditor({
   projectId,
   project,
@@ -400,6 +476,8 @@ export const LoadedEditor = memo(function LoadedEditor({
   const propertiesFullColumn = useEditorStore((s) => s.propertiesFullColumn)
   const mediaFullColumn = useEditorStore((s) => s.mediaFullColumn)
   const workspace = useEditorStore((s) => s.workspace)
+  const sclipChatOpen = useEditorStore((s) => s.sclipChatOpen)
+  const toggleSclipChat = useEditorStore((s) => s.toggleSclipChat)
   const isMaskEditingActive = useMaskEditorStore((s) => s.isEditing)
   const hasRefreshedMigrationStateRef = useRef(false)
   const timelinePanelRef = useRef<ImperativePanelHandle>(null)
@@ -410,6 +488,14 @@ export const LoadedEditor = memo(function LoadedEditor({
 
   useEffect(() => {
     hasRefreshedMigrationStateRef.current = false
+  }, [projectId])
+
+  // Mask editing is an intentionally exclusive canvas mode, but it is never
+  // meaningful across project opens. If a previous session closed while it was
+  // active, leaving the store set would make the whole normal editor inert.
+  // Always return to ordinary manual editing when an editor project mounts.
+  useEffect(() => {
+    useMaskEditorStore.getState().stopEditing()
   }, [projectId])
 
   useEffect(() => {
@@ -606,6 +692,19 @@ export const LoadedEditor = memo(function LoadedEditor({
     }
   }, [projectId])
 
+  // Autosaves use the same durable path as Cmd/Ctrl+S, but do not produce a
+  // success toast after every small edit.
+  const handleAutoSave = useCallback(async () => {
+    if (isSavingRef.current) return
+    isSavingRef.current = true
+    try {
+      await useTimelineStore.getState().saveTimeline(projectId)
+      logger.debug('Project auto-saved successfully')
+    } finally {
+      isSavingRef.current = false
+    }
+  }, [projectId])
+
   const handleExport = useCallback(() => {
     // Pause playback when opening export dialog
     usePlaybackStore.getState().pause()
@@ -673,7 +772,9 @@ export const LoadedEditor = memo(function LoadedEditor({
       role="application"
       aria-label={t('editor.editor.appLabel')}
     >
-      <AutoSaveController onSave={handleSave} />
+      <AutoSaveController onSave={handleAutoSave} />
+      <ProjectLifecycleSaveController projectId={projectId} />
+      <SelectionIntegrityController />
       <TimelineShortcutsController />
 
       {/* Top Toolbar */}
@@ -801,6 +902,17 @@ export const LoadedEditor = memo(function LoadedEditor({
           <InteractionLockRegion locked={isMaskEditingActive}>
             <ErrorBoundary level="feature">
               <PropertiesSidebar />
+            </ErrorBoundary>
+          </InteractionLockRegion>
+        )}
+
+        {/* SCLIP is a project-level collaborator, not an Edit-only sidebar.
+            Keep its live session mounted while Color replaces the normal
+            inspector and while Motion swaps the timeline surface. */}
+        {sclipChatOpen && (
+          <InteractionLockRegion locked={isMaskEditingActive}>
+            <ErrorBoundary level="feature">
+              <SclipTerminalPanel projectId={projectId} onClose={toggleSclipChat} />
             </ErrorBoundary>
           </InteractionLockRegion>
         )}

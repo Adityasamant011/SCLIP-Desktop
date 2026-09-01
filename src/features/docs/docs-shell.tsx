@@ -10,7 +10,7 @@ import {
   Lightbulb,
   Search,
 } from 'lucide-react'
-import { FreeCutLogo } from '@/components/brand/freecut-logo'
+import { SclipLogo } from '@/components/brand/sclip-logo'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/shared/ui/cn'
 import {
@@ -53,7 +53,7 @@ export function DocsShell({ children, currentSlug }: DocsShellProps) {
       <header className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:px-6">
           <Link to="/" className="flex items-center gap-3">
-            <FreeCutLogo size="md" />
+            <SclipLogo size="md" />
             <span className="hidden text-sm text-muted-foreground sm:inline">Docs</span>
           </Link>
           <nav className="flex items-center gap-2">

@@ -23,7 +23,7 @@ export interface ParsedPlan {
 }
 
 export function buildSystemPrompt(): string {
-  return `You are the FreeCut editing assistant, embedded in a browser-based video editor.
+  return `You are the SCLIP editing assistant, embedded in a desktop video editor.
 You help the user edit by choosing editing tools to run. You are given a snapshot
 of the timeline, including a list of clips with short refs (c1, c2, …).
 

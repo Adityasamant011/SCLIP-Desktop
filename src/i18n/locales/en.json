@@ -5,8 +5,8 @@
     "reloadWithoutSaving": "Reload without saving",
     "dockPanel": "Dock panel",
     "installPrompt": {
-      "label": "Install FreeCut",
-      "title": "Install FreeCut",
+      "label": "Install SCLIP",
+      "title": "Install SCLIP",
       "description": "Launch it from your desktop or home screen.",
       "install": "Install",
       "notNow": "Not now",
@@ -60,7 +60,9 @@
     "saveAria": "Save project",
     "export": "Export",
     "exportVideo": "Export Video",
-    "downloadProjectZip": "Download Project (.zip)"
+    "downloadProjectZip": "Download Project (.zip)",
+    "sclipTerminal": "SCLIP Terminal",
+    "sclipTerminalAria": "Open SCLIP AI Terminal"
   },
   "unsavedChanges": {
     "title": "Unsaved Changes",

@@ -37,6 +37,7 @@ export interface EditorState {
   propertiesFullColumn: boolean
   mediaFullColumn: boolean
   trackSizePreset: TrackSizePreset
+  sclipChatOpen: boolean
 }
 
 export interface EditorActions {
@@ -83,4 +84,6 @@ export interface EditorActions {
   togglePropertiesFullColumn: () => void
   toggleMediaFullColumn: () => void
   setTrackSizePreset: (preset: TrackSizePreset) => void
+  setSclipChatOpen: (open: boolean) => void
+  toggleSclipChat: () => void
 }

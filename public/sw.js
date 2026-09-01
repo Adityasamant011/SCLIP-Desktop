@@ -7,7 +7,7 @@ const CACHE_VERSION = 'freecut-app-shell-__FREECUT_BUILD_ID__'
 const APP_SHELL_URLS = [
   '/',
   '/index.html',
-  '/favicon.svg',
+  '/brand/sclip-mark.png',
   '/manifest.webmanifest',
   '/icons/icon-192.png',
   '/icons/icon-512.png',

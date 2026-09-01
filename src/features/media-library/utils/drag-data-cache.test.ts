@@ -1,5 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test'
-import { clearMediaDragData, getMediaDragData, setMediaDragData } from './drag-data-cache'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
+import {
+  clearMediaDragData,
+  deferMediaDragDataCleanup,
+  getMediaDragData,
+  setMediaDragData,
+} from './drag-data-cache'
 
 const EXTERNAL_DRAG_CLASS = 'timeline-external-media-drag'
 
@@ -67,5 +72,22 @@ describe('drag-data-cache', () => {
 
     expect(getMediaDragData()).toBeNull()
     expect(document.body.classList.contains(EXTERNAL_DRAG_CLASS)).toBe(false)
+  })
+
+  it('keeps a WebKit payload available briefly for the target drop handler', () => {
+    vi.useFakeTimers()
+    setMediaDragData({
+      type: 'media-item',
+      mediaId: 'media-1',
+      mediaType: 'video',
+      fileName: 'clip.mp4',
+      duration: 4,
+    })
+
+    deferMediaDragDataCleanup()
+    expect(getMediaDragData()).not.toBeNull()
+    vi.advanceTimersByTime(250)
+    expect(getMediaDragData()).toBeNull()
+    vi.useRealTimers()
   })
 })

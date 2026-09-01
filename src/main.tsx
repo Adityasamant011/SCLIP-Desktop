@@ -4,6 +4,21 @@ import { i18n, i18nReady } from './i18n'
 import { App } from './app'
 import { recoverDevVitePreload } from './app/vite-preload-recovery'
 import { createLogger } from '@/shared/logging/logger'
+import { recordEditorDiagnostic } from '@/infrastructure/editor-diagnostics'
+
+// Polyfill: requestIdleCallback / cancelIdleCallback
+// Tauri's webview doesn't have these APIs natively.
+if (typeof window !== 'undefined') {
+  if (typeof (window as any).requestIdleCallback !== 'function') {
+    (window as any).requestIdleCallback = (cb: () => void) => {
+      return setTimeout(() => { cb() }, 1) as any
+    }
+  }
+  if (typeof (window as any).cancelIdleCallback !== 'function') {
+    (window as any).cancelIdleCallback = (id: any) => clearTimeout(id)
+  }
+}
+
 import {
   getEditorProjectIdFromPathname,
   getEditorProjectReloadPathWithCacheBust,
@@ -233,10 +248,25 @@ function watchForServiceWorkerUpdate(registration: ServiceWorkerRegistration) {
 // Global error handlers
 window.addEventListener('unhandledrejection', (event) => {
   log.error('Unhandled promise rejection:', event.reason)
+  recordEditorDiagnostic('runtime', 'error', 'Unhandled promise rejection', {
+    reason: event.reason instanceof Error ? event.reason.message : String(event.reason),
+  })
 })
 
 window.addEventListener('error', (event) => {
-  log.error('Uncaught error:', event.error)
+  // WebKit emits this warning without an Error object when a ResizeObserver
+  // callback changes layout. It is diagnostic noise, not an application crash.
+  // Real errors retain their message and error object for diagnosis.
+  if (event.message?.includes('ResizeObserver loop')) {
+    event.preventDefault()
+    return
+  }
+  log.error('Uncaught error:', event.error ?? event.message)
+  recordEditorDiagnostic('runtime', 'error', 'Uncaught window error', {
+    message: event.message ?? 'Unknown error',
+    source: event.filename ?? '',
+    line: event.lineno ?? 0,
+  })
 })
 
 // A failed lazy-chunk load has two very different causes:
@@ -271,7 +301,16 @@ window.addEventListener('vite:preloadError', (event) => {
 // should survive refresh/reload.
 // The browser tears down workers/resources on navigation anyway.
 
-if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+// Helper to detect if we're running inside the Tauri desktop app.
+// In Tauri, the service worker and app-shell update checks (which rely on
+// fetch('/') over HTTP) don't apply — the app loads from a local webview.
+const isTauri = (): boolean => {
+  return typeof window !== 'undefined' &&
+    (typeof (window as any).__TAURI_INTERNALS__ !== 'undefined' ||
+      typeof (window as any).__TAURI__ !== 'undefined')
+}
+
+if (import.meta.env.PROD && !isTauri() && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker
       .register('/sw.js')

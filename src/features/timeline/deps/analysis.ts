@@ -10,6 +10,14 @@ import {
 
 export const importSceneDetection = () => import('@/infrastructure/analysis/scene-detection')
 
+export async function detectScenes(
+  video: HTMLVideoElement,
+  options?: import('@/infrastructure/analysis/scene-detection').DetectScenesOptions,
+) {
+  const mod = await importSceneDetection()
+  return mod.detectScenes(video, options)
+}
+
 export function getSceneVerificationModelLabel(model: SceneVerificationModelId): string {
   return SCENE_VERIFICATION_MODEL_LABELS[model]
 }
@@ -24,3 +32,4 @@ export function getSceneVerificationModelOptions(): readonly {
 export type VerificationModel = SceneVerificationModelId
 export { SCENE_DETECTOR_VERSION }
 export type { SceneDetectionMethod }
+

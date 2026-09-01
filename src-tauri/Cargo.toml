@@ -1,0 +1,38 @@
+[package]
+name = "sclip"
+version = "1.0.0"
+description = "SCLIP - agent-native desktop video editor"
+authors = ["SCLIP"]
+license = "MIT"
+repository = ""
+edition = "2024"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "sclip"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2.6", features = [] }
+
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+tauri = { version = "2", features = ["devtools"] }
+tauri-plugin-dialog = "2.7"
+rmcp = { version = "0.3", features = ["transport-io", "server"] }
+tokio = { version = "1", features = ["full", "macros"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+lazy_static = "1.4"
+anyhow = "1.0"
+libc = "0.2"
+log = "0.4"
+schemars = "1.2"
+dirs = "6.0"
+env_logger = "0.11"
+chrono = { version = "0.4", features = ["serde"] }

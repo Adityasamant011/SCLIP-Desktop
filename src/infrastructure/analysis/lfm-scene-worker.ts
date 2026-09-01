@@ -58,35 +58,67 @@ async function loadModel(): Promise<void> {
 
   try {
     post({ type: 'progress', stage: 'loading-transformers', percent: 0 })
-    post({ type: 'progress', stage: 'loading-model', percent: 5 })
+    post({ type: 'progress', stage: 'loading-processor', percent: 5 })
 
-    let lastPct = 5
     const loadedProcessor = await AutoProcessor.from_pretrained(MODEL_ID)
 
     if (disposed || thisGen !== loadGeneration) return
 
-    const loadedModel = await AutoModelForImageTextToText.from_pretrained(MODEL_ID, {
-      dtype: {
-        vision_encoder: 'fp16',
-        embed_tokens: 'fp16',
-        decoder_model_merged: 'q4',
-      },
-      device: 'webgpu',
-      progress_callback: disposed
-        ? undefined
-        : (info: { status?: string; total?: number; loaded?: number }) => {
-            if (info.status === 'progress' && info.total && info.loaded) {
-              const pct = 5 + (info.loaded / info.total) * 90
-              if (pct - lastPct > 2) {
-                lastPct = pct
-                post({ type: 'progress', stage: 'loading-model', percent: Math.round(pct) })
-              }
-            }
-          },
-    })
+    post({ type: 'progress', stage: 'loading-model', percent: 15 })
+
+    let loadedModel: any = null
+    try {
+      loadedModel = await AutoModelForImageTextToText.from_pretrained(MODEL_ID, {
+        dtype: {
+          vision_encoder: 'fp16',
+          embed_tokens: 'fp16',
+          decoder_model_merged: 'q4',
+        },
+        device: 'webgpu',
+        progress_callback: disposed
+          ? undefined
+          : (info: { status?: string; total?: number; loaded?: number; file?: string }) => {
+              post({
+                type: 'progress',
+                stage: 'loading-model',
+                status: info.status,
+                file: info.file,
+                loaded: info.loaded,
+                total: info.total,
+                percent: info.total && info.loaded ? Math.round((info.loaded / info.total) * 100) : undefined,
+              })
+            },
+      })
+    } catch (gpuErr) {
+      post({
+        type: 'debug',
+        message: `WebGPU vision load failed (${(gpuErr as Error).message}), attempting WASM fallback`,
+      })
+      loadedModel = await AutoModelForImageTextToText.from_pretrained(MODEL_ID, {
+        dtype: {
+          vision_encoder: 'fp16',
+          embed_tokens: 'fp16',
+          decoder_model_merged: 'q4',
+        },
+        device: 'wasm',
+        progress_callback: disposed
+          ? undefined
+          : (info: { status?: string; total?: number; loaded?: number; file?: string }) => {
+              post({
+                type: 'progress',
+                stage: 'loading-model-wasm',
+                status: info.status,
+                file: info.file,
+                loaded: info.loaded,
+                total: info.total,
+                percent: info.total && info.loaded ? Math.round((info.loaded / info.total) * 100) : undefined,
+              })
+            },
+      })
+    }
 
     if (disposed || thisGen !== loadGeneration) {
-      if (typeof loadedModel.dispose === 'function') loadedModel.dispose()
+      if (loadedModel && typeof loadedModel.dispose === 'function') loadedModel.dispose()
       return
     }
 

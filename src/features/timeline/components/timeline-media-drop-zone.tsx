@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import type { TimelineItem as TimelineItemType } from '@/types/timeline'
 import type { MediaMetadata } from '@/types/storage'
 import { createLogger } from '@/shared/logging/logger'
+import { recordEditorDiagnostic } from '@/infrastructure/editor-diagnostics'
 import { useTimelineCommittedZoomContext } from '../contexts/timeline-zoom-context'
 import { useTimelineStore } from '../stores/timeline-store'
 import { useCompositionsStore } from '../stores/compositions-store'
@@ -20,6 +21,9 @@ import { DEFAULT_PROJECT_HEIGHT, DEFAULT_PROJECT_WIDTH } from '@/shared/projects
 import {
   resolveMediaUrl,
   getMediaDragData,
+  clearMediaDragData,
+  SCLIP_MEDIA_POINTER_DROP_EVENT,
+  type SclipMediaPointerDropDetail,
   type CompositionDragData,
 } from '@/features/timeline/deps/media-library-resolver'
 import {
@@ -488,13 +492,13 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
       ) {
         const media = useMediaLibraryStore.getState().mediaById[dragData.mediaId]
         nextEntries =
-          media && isDroppableMediaType(dragData.mediaType)
+          isDroppableMediaType(dragData.mediaType)
             ? [
                 {
                   label: dragData.fileName,
                   mediaType: dragData.mediaType,
-                  duration: dragData.duration,
-                  hasLinkedAudio: dragData.mediaType === 'video' && !!media.audioCodec,
+                  duration: dragData.duration ?? media?.duration ?? 0,
+                  hasLinkedAudio: dragData.mediaType === 'video' && !!media?.audioCodec,
                 },
               ]
             : null
@@ -799,6 +803,7 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
 
   const handleDragEnterCapture = useCallback(
     (e: React.DragEvent) => {
+      e.preventDefault()
       claimPreviewOwnership(e.dataTransfer)
     },
     [claimPreviewOwnership],
@@ -902,6 +907,63 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
     [clearPendingDragPreview, previewOwnerId],
   )
 
+  const placeMediaPayload = useCallback(
+    async (payload: unknown, dropFrame: number, source: 'html-drop' | 'pointer-drop') => {
+      const entries = resolveDroppedMediaEntriesFromPayload(payload, getMedia, logger)
+      if (entries.length === 0) {
+        toast.error(t('timeline.track.noSupportedMediaInDrop'))
+        return
+      }
+
+      const dropResult = await resolveTimelineItemsForEntries(entries, dropFrame)
+      prewarmDroppedTimelineAudio(entries, dropResult.items)
+      applyResolvedTimelineDrop({
+        addItem,
+        addItems,
+        currentTracks: useTimelineStore.getState().tracks,
+        dropResult,
+        emptyMessage: t('timeline.track.unableToAddDroppedMediaItems'),
+        notify: toast,
+        partialFailureLabel: t('timeline.track.droppedMediaItems'),
+        requestedCount: entries.length,
+        setTracks: useTimelineStore.getState().setTracks,
+      })
+      recordEditorDiagnostic('timeline-drop', 'info', 'Media payload placed on timeline', {
+        zone,
+        source,
+        requestedCount: entries.length,
+        placedCount: dropResult.items.length,
+      })
+    },
+    [addItem, addItems, getMedia, resolveTimelineItemsForEntries, t, zone],
+  )
+
+  useEffect(() => {
+    const handleDesktopMediaDrop = (event: Event) => {
+      if (!zoneRef.current) return
+      const detail = (event as CustomEvent<SclipMediaPointerDropDetail>).detail
+      if (!detail) return
+      const target = document.elementFromPoint(detail.clientX, detail.clientY)
+      if (!target || !zoneRef.current.contains(target)) return
+      const rect = zoneRef.current.getBoundingClientRect()
+      if (detail.clientY < rect.top || detail.clientY > rect.bottom) return
+
+      const timelineContainer = zoneRef.current.closest('.timeline-container') as HTMLElement | null
+      if (!timelineContainer) return
+      const containerRect = timelineContainer.getBoundingClientRect()
+      const dropFrame = pixelsToFrameNow(
+        detail.clientX - containerRect.left + (timelineContainer.scrollLeft || 0),
+      )
+      clearMediaDragData()
+      void placeMediaPayload(detail.payload, dropFrame, 'pointer-drop')
+    }
+
+    window.addEventListener(SCLIP_MEDIA_POINTER_DROP_EVENT, handleDesktopMediaDrop)
+    return () => {
+      window.removeEventListener(SCLIP_MEDIA_POINTER_DROP_EVENT, handleDesktopMediaDrop)
+    }
+  }, [placeMediaPayload])
+
   const handleDrop = useCallback(
     async (e: React.DragEvent) => {
       e.preventDefault()
@@ -914,13 +976,30 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
 
       const dropFrame = getDropFrame(e)
       if (dropFrame === null) {
+        recordEditorDiagnostic('timeline-drop', 'warn', 'Drop ignored because no timeline frame could be resolved', { zone })
         return
       }
 
       const rawJson = e.dataTransfer.getData('application/json')
-      if (rawJson) {
+      // WebKit/Tauri can clear custom DataTransfer types between dragstart and
+      // drop. The media resolver intentionally maintains a native-safe cache
+      // for the drag preview; use the same cache for the actual mutation.
+      // Previously it was used only for hover, so a valid preview could end in
+      // a no-op drop.
+      const cachedPayload = getMediaDragData()
+      const payload = rawJson
+        ? (() => { try { return JSON.parse(rawJson) } catch { return null } })()
+        : cachedPayload
+      if (payload) clearMediaDragData()
+      recordEditorDiagnostic('timeline-drop', 'info', 'Drop received', {
+        zone,
+        frame: dropFrame,
+        payloadSource: rawJson ? 'DataTransfer' : cachedPayload ? 'native-cache' : 'files-or-empty',
+        hasFiles: e.dataTransfer.types.includes('Files'),
+      })
+      if (payload) {
         try {
-          const data = JSON.parse(rawJson)
+          const data = payload
 
           if (data.type === 'composition') {
             const activeCompositionId = useCompositionNavigationStore.getState().activeCompositionId
@@ -1017,29 +1096,13 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
             return
           }
 
-          const entries = resolveDroppedMediaEntriesFromPayload(data, getMedia, logger)
-
-          if (entries.length === 0) {
-            toast.error(t('timeline.track.noSupportedMediaInDrop'))
-            return
-          }
-
-          const dropResult = await resolveTimelineItemsForEntries(entries, dropFrame)
-          prewarmDroppedTimelineAudio(entries, dropResult.items)
-          applyResolvedTimelineDrop({
-            addItem,
-            addItems,
-            currentTracks: useTimelineStore.getState().tracks,
-            dropResult,
-            emptyMessage: t('timeline.track.unableToAddDroppedMediaItems'),
-            notify: toast,
-            partialFailureLabel: t('timeline.track.droppedMediaItems'),
-            requestedCount: entries.length,
-            setTracks: useTimelineStore.getState().setTracks,
-          })
+          await placeMediaPayload(data, dropFrame, 'html-drop')
           return
         } catch (error) {
           logger.warn('Failed to parse drag payload, falling back to file-drop handling', error)
+          recordEditorDiagnostic('timeline-drop', 'error', 'Cached or DataTransfer payload failed during placement', {
+            message: error instanceof Error ? error.message : String(error),
+          })
         }
       }
 
@@ -1082,6 +1145,7 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
       getMedia,
       importHandlesForPlacement,
       previewOwnerId,
+      placeMediaPayload,
       resetDragPreviewCache,
       resolveTimelineItemsForEntries,
       t,

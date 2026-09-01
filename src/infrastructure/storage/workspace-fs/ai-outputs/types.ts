@@ -8,6 +8,7 @@
  */
 
 import type { MediaCaption } from '@/infrastructure/analysis/media-tagger'
+import type { SemanticMediaMap } from '@/perception'
 import type {
   MediaTranscript,
   MediaTranscriptModel,
@@ -21,7 +22,7 @@ import type {
  * 3. (Optional) Add a thin wrapper in `workspace-fs/` that calls
  *    `readAiOutput/writeAiOutput` with that kind.
  */
-export type AiOutputKind = 'transcript' | 'captions' | 'scenes'
+export type AiOutputKind = 'transcript' | 'captions' | 'scenes' | 'semantic-map'
 
 /**
  * Typed payload per kind. Matches the `data` field on `AiOutput<T>`.
@@ -31,6 +32,7 @@ export interface AiOutputPayloads {
   transcript: TranscriptPayload
   captions: CaptionsPayload
   scenes: ScenesPayload
+  'semantic-map': SemanticMediaMap
 }
 
 /**

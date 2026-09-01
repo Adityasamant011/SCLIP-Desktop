@@ -159,22 +159,50 @@ export function useFadeEditors({
   )
 
   const displayedVideoFadeIn = isVisualFadeItem
-    ? (videoFadeEdit?.previewFadeIn ?? item.fadeIn ?? 0)
+    ? (typeof videoFadeEdit?.previewFadeIn === 'number'
+        ? videoFadeEdit.previewFadeIn
+        : typeof item.fadeIn === 'number'
+          ? item.fadeIn
+          : 0)
     : 0
   const displayedVideoFadeOut = isVisualFadeItem
-    ? (videoFadeEdit?.previewFadeOut ?? item.fadeOut ?? 0)
+    ? (typeof videoFadeEdit?.previewFadeOut === 'number'
+        ? videoFadeEdit.previewFadeOut
+        : typeof item.fadeOut === 'number'
+          ? item.fadeOut
+          : 0)
     : 0
   const displayedAudioFadeIn =
-    item.type === 'audio' ? (audioFadeEdit?.previewFadeIn ?? item.audioFadeIn ?? 0) : 0
+    item.type === 'audio'
+      ? (typeof audioFadeEdit?.previewFadeIn === 'number'
+          ? audioFadeEdit.previewFadeIn
+          : typeof item.audioFadeIn === 'number'
+            ? item.audioFadeIn
+            : 0)
+      : 0
   const displayedAudioFadeOut =
-    item.type === 'audio' ? (audioFadeEdit?.previewFadeOut ?? item.audioFadeOut ?? 0) : 0
+    item.type === 'audio'
+      ? (typeof audioFadeEdit?.previewFadeOut === 'number'
+          ? audioFadeEdit.previewFadeOut
+          : typeof item.audioFadeOut === 'number'
+            ? item.audioFadeOut
+            : 0)
+      : 0
   const displayedAudioFadeInCurve =
     item.type === 'audio'
-      ? (audioFadeCurveEdit?.previewFadeInCurve ?? item.audioFadeInCurve ?? 0)
+      ? (typeof audioFadeCurveEdit?.previewFadeInCurve === 'number'
+          ? audioFadeCurveEdit.previewFadeInCurve
+          : typeof item.audioFadeInCurve === 'number'
+            ? item.audioFadeInCurve
+            : 0)
       : 0
   const displayedAudioFadeOutCurve =
     item.type === 'audio'
-      ? (audioFadeCurveEdit?.previewFadeOutCurve ?? item.audioFadeOutCurve ?? 0)
+      ? (typeof audioFadeCurveEdit?.previewFadeOutCurve === 'number'
+          ? audioFadeCurveEdit.previewFadeOutCurve
+          : typeof item.audioFadeOutCurve === 'number'
+            ? item.audioFadeOutCurve
+            : 0)
       : 0
   const displayedAudioFadeInCurveX =
     item.type === 'audio'

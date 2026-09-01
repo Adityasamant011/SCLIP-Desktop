@@ -24,6 +24,7 @@ import type { AudioPlaybackProps } from './audio-playback-props'
 import { getBrowserMediaPlaybackRate } from '@/shared/state/playback/shuttle'
 import { useClockPlaybackRate } from '@/runtime/composition-runtime/deps/player'
 import { useAudioPlaybackState } from './hooks/use-audio-playback-state'
+import { recordPreviewNativePlaybackTrace } from '@/shared/logging/preview-scrub-performance'
 import {
   hasAudioPitchOverride,
   isAudioPitchShiftActive,
@@ -147,6 +148,7 @@ export const NativePitchCorrectedAudio: React.FC<PitchCorrectedAudioProps> = Rea
   ({
     src,
     itemId,
+    mediaId,
     volume = 0,
     playbackRate = 1,
     isReversed = false,
@@ -212,6 +214,77 @@ export const NativePitchCorrectedAudio: React.FC<PitchCorrectedAudioProps> = Rea
     const needsInitialSyncRef = useRef<boolean>(true)
     const lastFrameRef = useRef<number>(-1)
     const preWarmTimerRef = useRef<number | null>(null)
+    const lastSeekReasonRef = useRef<string | null>(null)
+
+    const recordNativeAudioTrace = useCallback(
+      (kind: 'sample' | 'event', event?: string) => {
+        const audio = audioRef.current
+        if (!audio) return
+        const effectiveSourceFps = sourceFps ?? fps
+        const expectedSourceTime = Math.max(
+          0,
+          getAudioTargetTimeSeconds(
+            trimBefore,
+            effectiveSourceFps,
+            frame,
+            playbackRate,
+            fps,
+            isReversed,
+            reverseSourceEnd,
+          ) - sourceStartOffsetSec,
+        )
+        const timelineFrame = usePlaybackStore.getState().currentFrame
+        const sequenceFrom = timelineFrame - frame
+        recordPreviewNativePlaybackTrace({
+          kind,
+          stream: 'audio',
+          event,
+          itemId,
+          mediaId,
+          timelineFrame,
+          timelineTime: timelineFrame / fps,
+          sequenceFrom,
+          sequenceFrame: frame,
+          sequenceFrameOffset: 0,
+          itemFromFrame: sequenceFrom,
+          durationInFrames,
+          sourceStartFrame: trimBefore,
+          sourceFps: effectiveSourceFps,
+          nominalPlaybackRate: playbackRate,
+          expectedSourceTime,
+          mediaTime: audio.currentTime,
+          mappedDriftMs: (audio.currentTime - expectedSourceTime) * 1000,
+          paused: audio.paused,
+          elementPlaybackRate: audio.playbackRate,
+          readyState: audio.readyState,
+          networkState: audio.networkState,
+          seeking: audio.seeking,
+          ended: audio.ended,
+          currentSrc: audio.currentSrc,
+          lastSeekReason: lastSeekReasonRef.current,
+          postSeekGrace: audio.seeking,
+          audioContextState: graphRef.current?.context.state ?? null,
+        })
+      },
+      [
+        durationInFrames,
+        fps,
+        frame,
+        isReversed,
+        itemId,
+        mediaId,
+        playbackRate,
+        reverseSourceEnd,
+        sourceFps,
+        sourceStartOffsetSec,
+        trimBefore,
+      ],
+    )
+    // The media element is intentionally retained across renders.  Its lifecycle
+    // listeners must therefore read the current mapping rather than the frame
+    // from the render in which the element was acquired.
+    const recordNativeAudioTraceRef = useRef(recordNativeAudioTrace)
+    recordNativeAudioTraceRef.current = recordNativeAudioTrace
 
     useEffect(() => {
       if (playing) {
@@ -232,12 +305,52 @@ export const NativePitchCorrectedAudio: React.FC<PitchCorrectedAudioProps> = Rea
       audio.volume = 1
       audio.muted = false
 
+      const handleLifecycle = (event: Event) =>
+        recordNativeAudioTraceRef.current('event', event.type)
+      for (const eventName of [
+        'loadedmetadata',
+        'canplay',
+        'canplaythrough',
+        'play',
+        'pause',
+        'playing',
+        'ratechange',
+        'seeking',
+        'seeked',
+        'waiting',
+        'stalled',
+        'emptied',
+        'ended',
+        'timeupdate',
+      ]) {
+        audio.addEventListener(eventName, handleLifecycle)
+      }
+
       try {
         const sourceNode = graph.context.createMediaElementSource(audio)
         markPreviewAudioElementUsesWebAudio(audio)
         sourceNode.connect(graph.sourceInputNode)
         sourceNodeRef.current = sourceNode
+        recordNativeAudioTraceRef.current('event', 'acquired')
       } catch {
+        for (const eventName of [
+          'loadedmetadata',
+          'canplay',
+          'canplaythrough',
+          'play',
+          'pause',
+          'playing',
+          'ratechange',
+          'seeking',
+          'seeked',
+          'waiting',
+          'stalled',
+          'emptied',
+          'ended',
+          'timeupdate',
+        ]) {
+          audio.removeEventListener(eventName, handleLifecycle)
+        }
         graph.dispose()
         graphRef.current = null
         audioRef.current = null
@@ -246,6 +359,25 @@ export const NativePitchCorrectedAudio: React.FC<PitchCorrectedAudioProps> = Rea
       }
 
       return () => {
+        recordNativeAudioTraceRef.current('event', 'released')
+        for (const eventName of [
+          'loadedmetadata',
+          'canplay',
+          'canplaythrough',
+          'play',
+          'pause',
+          'playing',
+          'ratechange',
+          'seeking',
+          'seeked',
+          'waiting',
+          'stalled',
+          'emptied',
+          'ended',
+          'timeupdate',
+        ]) {
+          audio.removeEventListener(eventName, handleLifecycle)
+        }
         audioRef.current = null
         sourceNodeRef.current?.disconnect()
         sourceNodeRef.current = null
@@ -261,7 +393,10 @@ export const NativePitchCorrectedAudio: React.FC<PitchCorrectedAudioProps> = Rea
 
     useEffect(() => {
       if (audioRef.current) {
-        audioRef.current.playbackRate = mediaPlaybackRate
+        if (Math.abs(audioRef.current.playbackRate - mediaPlaybackRate) > PLAYBACK_RATE_TOLERANCE) {
+          audioRef.current.playbackRate = mediaPlaybackRate
+          recordNativeAudioTrace('event', 'playbackrate-set')
+        }
       }
     }, [mediaPlaybackRate])
 
@@ -310,6 +445,7 @@ export const NativePitchCorrectedAudio: React.FC<PitchCorrectedAudioProps> = Rea
         }
         if (canSeek && Math.abs(audio.currentTime - clipStartTimeSeconds) > 0.05) {
           try {
+            lastSeekReasonRef.current = 'premount-sync'
             audio.currentTime = clipStartTimeSeconds
           } catch {
             // Audio is not ready to seek yet.
@@ -330,6 +466,7 @@ export const NativePitchCorrectedAudio: React.FC<PitchCorrectedAudioProps> = Rea
           }
           if (canSeek && Math.abs(audio.currentTime - targetTimeSeconds) > 0.01) {
             try {
+              lastSeekReasonRef.current = 'reverse-sync'
               audio.currentTime = targetTimeSeconds
             } catch {
               // Audio is not ready to seek yet.
@@ -344,11 +481,20 @@ export const NativePitchCorrectedAudio: React.FC<PitchCorrectedAudioProps> = Rea
         const timeSinceLastSync = now - lastSyncTimeRef.current
         const audioBehind = drift < -0.2
         const audioFarAhead = drift > 0.5
+        // D1 DIAGNOSTIC VARIANT: Suppress audio-behind-correction hard seeks during continuous playback.
+        const DISABLE_AUDIO_BEHIND_HARD_SEEK = true
         const needsSync =
-          needsInitialSyncRef.current || audioFarAhead || (audioBehind && timeSinceLastSync > 500)
+          needsInitialSyncRef.current ||
+          audioFarAhead ||
+          (audioBehind && timeSinceLastSync > 500 && !DISABLE_AUDIO_BEHIND_HARD_SEEK)
 
         if (needsSync && canSeek) {
           try {
+            lastSeekReasonRef.current = needsInitialSyncRef.current
+              ? 'playing-initial-sync'
+              : audioFarAhead
+                ? 'audio-ahead-correction'
+                : 'audio-behind-correction'
             audio.currentTime = targetTimeSeconds
             lastSyncTimeRef.current = now
             needsInitialSyncRef.current = false
@@ -393,6 +539,7 @@ export const NativePitchCorrectedAudio: React.FC<PitchCorrectedAudioProps> = Rea
 
         if (frameChanged && canSeek && !isPreviewScrubbing) {
           try {
+            lastSeekReasonRef.current = 'paused-frame-sync'
             audio.currentTime = targetTimeSeconds
           } catch {
             // Audio is not ready to seek yet.
@@ -455,6 +602,16 @@ export const NativePitchCorrectedAudio: React.FC<PitchCorrectedAudioProps> = Rea
       sourceStartOffsetSec,
       trimBefore,
     ])
+
+    // This is intentionally independent of video rVFC. It lets the installed
+    // trace show whether the dedicated linked-audio element keeps advancing
+    // while the visual element stalls (or vice versa).
+    useEffect(() => {
+      if (!playing || !audioRef.current) return
+      recordNativeAudioTrace('sample')
+      const timer = window.setInterval(() => recordNativeAudioTrace('sample'), 125)
+      return () => window.clearInterval(timer)
+    }, [playing, recordNativeAudioTrace, src])
 
     return null
   },

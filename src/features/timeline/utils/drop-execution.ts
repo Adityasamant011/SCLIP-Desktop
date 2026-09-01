@@ -5,6 +5,7 @@ import {
   formatMediaDropRejectionMessage,
   getMediaType,
 } from '@/features/timeline/deps/media-library-resolver'
+import { useMediaLibraryStore } from '@/features/timeline/deps/media-library-store'
 import type { DroppableMediaType } from './dropped-media'
 import { isDroppableMediaType, isValidDragMediaItem, type DragMediaItem } from './drag-drop-preview'
 import { preflightFirstTimelineVideoProjectMatch } from './external-file-project-match'
@@ -52,6 +53,7 @@ function isParsedMediaItemPayload(payload: unknown): payload is {
   mediaId: string
   mediaType: unknown
   fileName: string
+  media?: MediaMetadata
 } {
   if (!payload || typeof payload !== 'object') return false
   const candidate = payload as Record<string, unknown>
@@ -72,6 +74,7 @@ export function resolveDroppedMediaEntriesFromPayload(
   }
 
   const mediaById = new Map(mediaItems.map((media) => [media.id, media]))
+  const fallbackStore = useMediaLibraryStore.getState().mediaById || {}
   const candidate = payload as Record<string, unknown>
 
   if (candidate.type === 'media-items') {
@@ -84,7 +87,10 @@ export function resolveDroppedMediaEntriesFromPayload(
     }
 
     return validItems.flatMap((dragItem: DragMediaItem) => {
-      const media = mediaById.get(dragItem.mediaId)
+      const media =
+        mediaById.get(dragItem.mediaId) ??
+        fallbackStore[dragItem.mediaId] ??
+        (dragItem as any).media
       if (!media) {
         logger.error('Media not found:', dragItem.mediaId)
         return []
@@ -102,7 +108,10 @@ export function resolveDroppedMediaEntriesFromPayload(
   }
 
   if (isParsedMediaItemPayload(candidate) && isDroppableMediaType(candidate.mediaType)) {
-    const media = mediaById.get(candidate.mediaId)
+    const media =
+      mediaById.get(candidate.mediaId) ??
+      fallbackStore[candidate.mediaId] ??
+      candidate.media
     if (!media) {
       logger.error('Media not found:', candidate.mediaId)
       return []
@@ -117,6 +126,7 @@ export function resolveDroppedMediaEntriesFromPayload(
       },
     ]
   }
+
 
   return []
 }

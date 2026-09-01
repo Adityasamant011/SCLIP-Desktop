@@ -1,8 +1,9 @@
 import { Component, type ReactNode, type ErrorInfo } from 'react'
 import { Button } from '@/components/ui/button'
-import { AlertTriangle, RefreshCw } from 'lucide-react'
+import { AlertTriangle, Clipboard, RefreshCw } from 'lucide-react'
 import { createLogger } from '@/shared/logging/logger'
 import { i18n } from '@/i18n'
+import { copyEditorDiagnosticReport, recordEditorDiagnostic } from '@/infrastructure/editor-diagnostics'
 
 const logger = createLogger('ErrorBoundary')
 
@@ -29,6 +30,10 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
+    recordEditorDiagnostic('error-boundary', 'error', error.message || 'A React feature crashed', {
+      level: this.props.level ?? 'component',
+      componentStack: errorInfo.componentStack?.slice(0, 2000),
+    })
     // Log to console in development
     if (import.meta.env.DEV) {
       logger.error('ErrorBoundary caught:', error, errorInfo)
@@ -72,6 +77,19 @@ export class ErrorBoundary extends Component<Props, State> {
                 {i18n.t('app.errorBoundary.reloadPage')}
               </Button>
             )}
+            <Button
+              variant="outline"
+              onClick={() => {
+                void copyEditorDiagnosticReport().catch((error) => {
+                  recordEditorDiagnostic('diagnostics', 'error', 'Could not copy diagnostic report', {
+                    message: error instanceof Error ? error.message : String(error),
+                  })
+                })
+              }}
+              title="Copy a safe diagnostic report for support"
+            >
+              <Clipboard className="h-4 w-4 mr-2" /> Copy report
+            </Button>
           </div>
           {import.meta.env.DEV && this.state.error?.stack && (
             <pre className="mt-4 p-4 bg-muted rounded text-xs text-left overflow-auto max-w-full max-h-48">

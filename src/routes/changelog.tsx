@@ -2,7 +2,7 @@ import { createFileRoute, Link } from '@tanstack/react-router'
 import { ArrowLeft, ArrowRight, CalendarDays, Plus, Sparkles, Wrench } from 'lucide-react'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
-import { FreeCutLogo } from '@/components/brand/freecut-logo'
+import { SclipLogo } from '@/components/brand/sclip-logo'
 import { Button } from '@/components/ui/button'
 import changelogData from '@/data/changelog.json'
 import type { ChangelogEntry, ChangelogFile, ChangelogGroup } from '@/data/changelog-types'
@@ -165,7 +165,7 @@ function ChangelogPage() {
       <header className="relative border-b border-border/70 px-6 py-5">
         <div className="mx-auto flex max-w-5xl items-center justify-between gap-4">
           <Link to="/" aria-label={t('changelog.homeAria')}>
-            <FreeCutLogo size="md" />
+            <SclipLogo size="md" />
           </Link>
           <Button asChild variant="ghost" size="sm" className="gap-2">
             <Link to="/">

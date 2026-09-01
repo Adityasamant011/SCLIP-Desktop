@@ -64,6 +64,7 @@ import {
   saveCaptions,
   deleteCaptions,
   deleteScenes,
+  deleteSemanticMediaMap,
   hasMediaSource,
   readMediaSource,
   writeMediaSource,
@@ -83,6 +84,7 @@ import {
   persistGeneratedMediaAsset,
 } from './media-asset-helpers'
 import { validateMediaFileContent, getMimeType, isLottieMime } from '../utils/validation'
+import { computeContentHashFromBuffer } from '../utils/content-hash'
 import { parseLottieFileBytes } from '@/infrastructure/lottie/lottie-metadata'
 import { getSharedProxyKey } from '../utils/proxy-key'
 import { mediaProcessorService } from './media-processor-service'
@@ -414,6 +416,14 @@ class MediaLibraryService {
     }
   }
 
+  private async deleteSemanticMapSafely(mediaId: string): Promise<void> {
+    try {
+      await deleteSemanticMediaMap(mediaId)
+    } catch (error) {
+      logger.warn('Failed to delete semantic media map:', error)
+    }
+  }
+
   private async deleteThumbnailsSafely(mediaId: string): Promise<void> {
     this.clearThumbnailCache(mediaId)
     try {
@@ -535,6 +545,7 @@ class MediaLibraryService {
     await this.deleteTranscriptSafely(media.id)
     await this.deleteCaptionsSafely(media.id)
     await this.deleteScenesSafely(media.id)
+    await this.deleteSemanticMapSafely(media.id)
     await this.deleteThumbnailsSafely(media.id)
     await this.clearGifFrameCacheSafely(media.id)
     await this.clearFilmstripCacheSafely(media.id)
@@ -1902,12 +1913,22 @@ class MediaLibraryService {
     // Verify file exists and get basic info
     const file = await newHandle.getFile()
 
-    // Update metadata with new handle and file info
+    // A new handle can reference different bytes even when the filename is
+    // unchanged. Clear all source-derived evidence before publishing the new
+    // media identity so no caption/semantic map survives a relink.
+    const contentHash = await computeContentHashFromBuffer(await file.arrayBuffer()).catch(() => undefined)
+    await this.deleteCaptionsSafely(mediaId)
+    await this.deleteScenesSafely(mediaId)
+    await this.deleteSemanticMapSafely(mediaId)
+
+    // Update metadata with new handle and source identity.
     const updated = await updateMediaDB(mediaId, {
       fileHandle: newHandle,
       fileName: file.name,
       fileSize: file.size,
       fileLastModified: file.lastModified,
+      ...(contentHash ? { contentHash } : {}),
+      aiCaptions: [],
       updatedAt: Date.now(),
     })
 

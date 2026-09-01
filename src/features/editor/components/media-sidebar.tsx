@@ -35,7 +35,7 @@ import { useSelectionStore } from '@/shared/state/selection'
 import { useProjectStore } from '@/features/editor/deps/projects'
 import { DEFAULT_PROJECT_HEIGHT, DEFAULT_PROJECT_WIDTH } from '@/shared/projects/defaults'
 import {
-  clearMediaDragData,
+  deferMediaDragDataCleanup,
   MediaLibrary,
   setMediaDragData,
 } from '@/features/editor/deps/media-library'
@@ -578,7 +578,7 @@ export const MediaSidebar = memo(function MediaSidebar() {
   )
 
   const handleTemplateDragEnd = useCallback(() => {
-    clearMediaDragData()
+    deferMediaDragDataCleanup()
     window.setTimeout(() => {
       suppressGeneratedItemClickRef.current = false
     }, 0)
@@ -729,6 +729,9 @@ export const MediaSidebar = memo(function MediaSidebar() {
               className={`min-h-0 flex-1 overflow-y-auto p-3 ${activeTab === 'text' ? 'block' : 'hidden'}`}
             >
               <div className="space-y-3">
+                <p className="rounded-md border border-border bg-secondary/20 px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground">
+                  Click a text style to add it at the playhead, or drag it onto the canvas or timeline to place it manually.
+                </p>
                 <div className="space-y-3">
                   <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
                     {t('editor.mediaSidebar.templates')}
@@ -805,7 +808,11 @@ export const MediaSidebar = memo(function MediaSidebar() {
             <div
               className={`min-h-0 flex-1 overflow-y-auto p-3 ${activeTab === 'shapes' ? 'block' : 'hidden'}`}
             >
-              <div className="grid grid-cols-3 gap-1.5">
+              <div className="space-y-3">
+                <p className="rounded-md border border-border bg-secondary/20 px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground">
+                  Click a shape to add it at the playhead, or drag it onto the canvas or timeline to place it manually.
+                </p>
+                <div className="grid grid-cols-3 gap-1.5">
                 <button
                   draggable={true}
                   onDragStart={handleTemplateDragStart({
@@ -1014,6 +1021,7 @@ export const MediaSidebar = memo(function MediaSidebar() {
                     {t('editor.mediaSidebar.pen')}
                   </span>
                 </button>
+                </div>
               </div>
             </div>
 
@@ -1022,6 +1030,9 @@ export const MediaSidebar = memo(function MediaSidebar() {
               className={`min-h-0 flex-1 overflow-y-auto p-3 ${activeTab === 'effects' ? 'block' : 'hidden'}`}
             >
               <div className="space-y-3">
+                <p className="rounded-md border border-border bg-secondary/20 px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground">
+                  Select a clip, then click an effect to apply it. With no clip selected, it creates an adjustment layer at the playhead.
+                </p>
                 {/* Blank Adjustment Layer */}
                 <button
                   draggable={true}

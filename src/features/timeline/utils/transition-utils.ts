@@ -39,11 +39,21 @@ export function getMaxTransitionDurationForHandles(
   rightClip: TimelineItem,
   alignment: number | undefined,
   timelineFps: number = 30,
+  allowVideoEdgeHold = false,
 ): number {
   const maxByClipDuration = Math.floor(
     Math.min(leftClip.durationInFrames, rightClip.durationInFrames) - 1,
   )
   if (maxByClipDuration < 1) return 0
+
+  // Video transitions remain usable at media boundaries. Missing preroll or
+  // postroll is rendered as a stationary first/last source frame; see
+  // resolveTransitionRenderTimelineSpan(). Images already have infinite
+  // handles. Compositions retain strict source-handle validation because a
+  // negative/out-of-range composition frame is not guaranteed to be drawable.
+  if (allowVideoEdgeHold && leftClip.type === 'video' && rightClip.type === 'video') {
+    return maxByClipDuration
+  }
 
   const outgoingTailHandle = getAvailableHandle(leftClip, 'end', timelineFps)
   const incomingHeadHandle = getAvailableHandle(rightClip, 'start', timelineFps)
@@ -84,6 +94,7 @@ export function canAddTransition(
   durationInFrames: number,
   alignment?: number,
   timelineFps: number = 30,
+  allowVideoEdgeHold = false,
 ): CanAddTransitionResult {
   // Check same track
   if (leftClip.trackId !== rightClip.trackId) {
@@ -121,12 +132,17 @@ export function canAddTransition(
     const portions = calculateTransitionPortions(durationInFrames, alignment)
     const outgoingTailFrames = portions.rightPortion
     const incomingHeadFrames = portions.leftPortion
-    if (outgoingTailFrames > leftHandle || incomingHeadFrames > rightHandle) {
+    const missingLeftHandle = outgoingTailFrames > leftHandle
+    const missingRightHandle = incomingHeadFrames > rightHandle
+    const leftCanHold = allowVideoEdgeHold && leftClip.type === 'video'
+    const rightCanHold = allowVideoEdgeHold && rightClip.type === 'video'
+
+    if ((missingLeftHandle && !leftCanHold) || (missingRightHandle && !rightCanHold)) {
       const handleReason = [
-        outgoingTailFrames > leftHandle
+        missingLeftHandle
           ? `left clip needs ${outgoingTailFrames} tail-handle frames but only has ${leftHandle}`
           : null,
-        incomingHeadFrames > rightHandle
+        missingRightHandle
           ? `right clip needs ${incomingHeadFrames} head-handle frames but only has ${rightHandle}`
           : null,
       ]
@@ -138,6 +154,10 @@ export function canAddTransition(
         leftHandle,
         rightHandle,
       }
+    }
+
+    if (missingLeftHandle || missingRightHandle) {
+      return { canAdd: true, leftHandle, rightHandle, usesEdgeHold: true }
     }
   }
 

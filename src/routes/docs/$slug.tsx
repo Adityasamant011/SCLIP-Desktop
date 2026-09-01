@@ -17,7 +17,7 @@ function DocsSlugPage() {
         <div className="rounded-lg border border-border bg-card p-8">
           <h1 className="text-2xl font-semibold">Docs page not found</h1>
           <p className="mt-3 text-muted-foreground">
-            This docs URL does not match a published FreeCut guide.
+            This docs URL does not match a published SCLIP guide.
           </p>
           <Button asChild className="mt-6">
             <Link to="/docs">Back to docs</Link>

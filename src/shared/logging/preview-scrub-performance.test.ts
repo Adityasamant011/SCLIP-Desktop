@@ -2,8 +2,15 @@
 
 import { beforeEach, describe, expect, it } from 'vite-plus/test'
 import {
+  getPreviewPlaybackAcceptanceSummary,
+  getPreviewNativePlaybackForensicsReport,
+  recordPreviewCompositionRender,
+  recordPreviewPlaybackHardSeek,
+  recordPreviewPlaybackVideoFrame,
   recordPreviewScrubPresentationQuality,
   recordPreviewScrubRequest,
+  recordPreviewTimelineClockTrace,
+  recordPreviewVideoSource,
 } from './preview-scrub-performance'
 
 type PerformanceState = {
@@ -14,6 +21,7 @@ type PerformanceState = {
     firstVisibleMs: number
     exactReplacementMs: number | null
   }>
+  timelineClockTrace: Array<{ kind: string; atMs: number; dateMs: number }>
   reset: () => void
 }
 
@@ -62,5 +70,68 @@ describe('preview scrub fallback performance', () => {
 
     expect(getState().fallbacks).toHaveLength(1)
     expect(getState().fallbacks[0]!.exactReplacementMs).toEqual(expect.any(Number))
+  })
+
+  it('summarizes live DOM playback separately from software extraction', () => {
+    recordPreviewCompositionRender({ frame: 1, path: 'direct', ms: 10 })
+    recordPreviewCompositionRender({ frame: 2, path: 'full', ms: 20 })
+    recordPreviewVideoSource({ frame: 1, itemId: 'clip', path: 'dom-video', sourceTime: 0 })
+    recordPreviewVideoSource({ frame: 2, itemId: 'clip', path: 'dom-video', sourceTime: 1 / 30 })
+    recordPreviewVideoSource({ frame: 3, itemId: 'clip', path: 'mediabunny', sourceTime: 2 / 30 })
+    recordPreviewPlaybackVideoFrame({
+      itemId: 'clip',
+      currentTime: 0,
+      targetTime: 0,
+      presentedFrames: 10,
+    })
+    recordPreviewPlaybackVideoFrame({
+      itemId: 'clip',
+      currentTime: 0.1,
+      targetTime: 1 / 30,
+      presentedFrames: 13,
+    })
+    recordPreviewPlaybackHardSeek('clip')
+
+    expect(getPreviewPlaybackAcceptanceSummary()).toEqual({
+      renderedEffectFrames: 2,
+      domVideoSourceFrames: 2,
+      mediaBunnySourceFrames: 1,
+      effectRenderAvgMs: 15,
+      effectRenderP95Ms: 20,
+      effectRenderMaxMs: 20,
+      presentedVideoFrames: 2,
+      droppedVideoFrames: 2,
+      avDriftAvgMs: expect.any(Number),
+      avDriftMaxMs: expect.any(Number),
+      hardSeeks: 1,
+    })
+  })
+
+  it('exports bounded clock scheduler evidence alongside native media evidence', () => {
+    recordPreviewTimelineClockTrace({
+      kind: 'clock-control',
+      action: 'play',
+      timelineFrame: 64,
+      timelineTime: 64 / 30,
+      isPlaying: true,
+      atMs: 100,
+      dateMs: 1_700_000_000_000,
+    })
+    recordPreviewTimelineClockTrace({
+      kind: 'watchdog',
+      timelineFrame: 64,
+      timelineTime: 64 / 30,
+      isPlaying: true,
+      watchdogGapMs: 250,
+      latestClockAtMs: 100,
+      atMs: 350,
+      dateMs: 1_700_000_000_250,
+    })
+
+    expect(getState().timelineClockTrace).toHaveLength(2)
+    expect(getPreviewNativePlaybackForensicsReport()?.timelineClockTrace).toEqual([
+      expect.objectContaining({ kind: 'clock-control', action: 'play', atMs: 100 }),
+      expect.objectContaining({ kind: 'watchdog', watchdogGapMs: 250, latestClockAtMs: 100 }),
+    ])
   })
 })

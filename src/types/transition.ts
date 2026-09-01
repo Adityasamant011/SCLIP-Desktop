@@ -1,9 +1,10 @@
 /**
  * Transition Types
  *
- * Transitions use a cut-centered, handle-based model: clips stay adjacent on
- * the timeline and the transition consumes hidden source handles around the
- * cut. Legacy overlap-based transitions may still exist in old projects.
+ * Transitions use a cut-centered model: clips stay adjacent on the timeline
+ * and the transition consumes hidden source handles around the cut when they
+ * exist. Video clips without enough handles use a first/last-frame hold for
+ * the unavailable portion. Legacy overlap-based transitions may still exist.
  */
 
 export type TransitionType = 'crossfade'
@@ -319,4 +320,6 @@ export interface CanAddTransitionResult {
   leftHandle?: number
   /** Available handle frames on right clip's start */
   rightHandle?: number
+  /** True when unavailable video handle frames will be rendered as edge holds. */
+  usesEdgeHold?: boolean
 }

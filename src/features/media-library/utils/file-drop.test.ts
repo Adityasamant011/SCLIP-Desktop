@@ -13,6 +13,27 @@ function makeItem(handle: FileSystemHandle | null): DataTransferItem {
 }
 
 describe('extractValidMediaFileEntriesFromDataTransfer', () => {
+  it('falls back to ordinary dropped Files when File System Access handles are unavailable', async () => {
+    const file = {
+      name: 'clip.mp4',
+      size: 12,
+      type: 'video/mp4',
+      arrayBuffer: vi.fn(),
+    } as unknown as File
+    const dataTransfer = {
+      items: [{}],
+      files: [file],
+    } as unknown as DataTransfer
+
+    const result = await extractValidMediaFileEntriesFromDataTransfer(dataTransfer)
+
+    expect(result.supported).toBe(true)
+    expect(result.errors).toEqual([])
+    expect(result.entries).toHaveLength(1)
+    expect(await result.entries[0]!.handle.getFile()).toBe(file)
+    expect(await result.entries[0]!.handle.queryPermission({ mode: 'read' })).toBe('granted')
+  })
+
   it('reports dropped folders instead of silently ignoring them', async () => {
     const directoryHandle = {
       kind: 'directory',

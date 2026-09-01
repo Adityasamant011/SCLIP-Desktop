@@ -137,6 +137,13 @@ export { deleteScenes } from '@/infrastructure/storage/workspace-fs/scenes'
 // Generic AI-output envelope (use these directly for new AI services)
 export { readAiOutput } from '@/infrastructure/storage/workspace-fs/ai-outputs'
 
+// Grounded semantic map joining existing transcript and visual evidence.
+export {
+  getSemanticMediaMap,
+  saveSemanticMediaMap,
+  deleteSemanticMediaMap,
+} from '@/infrastructure/storage/workspace-fs/semantic-map'
+
 // Orphan cache sweep
 export {
   sweepWorkspaceOrphans,

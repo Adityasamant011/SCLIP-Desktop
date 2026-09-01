@@ -17,6 +17,23 @@ function supportsFileSystemDragDrop(dataTransfer: DataTransfer): boolean {
   return !!firstItem && 'getAsFileSystemHandle' in firstItem
 }
 
+/**
+ * File System Access handles are unavailable in WKWebView on some macOS
+ * builds. Copy-mode imports only need getFile() plus permission methods, so a
+ * dropped File can safely be adapted for that one import path. It is never
+ * persisted as a linked source handle.
+ */
+function createEphemeralFileHandle(file: File): FileSystemFileHandle {
+  return {
+    kind: 'file',
+    name: file.name,
+    getFile: async () => file,
+    queryPermission: async () => 'granted',
+    requestPermission: async () => 'granted',
+    isSameEntry: async () => false,
+  } as FileSystemFileHandle
+}
+
 export function formatMediaDropRejectionMessage(errors: string[]): string {
   const count = errors.length
   if (count === 0) return ''
@@ -32,10 +49,33 @@ export async function extractValidMediaFileEntriesFromDataTransfer(
   dataTransfer: DataTransfer,
 ): Promise<ExtractedMediaFileDropResult> {
   if (!supportsFileSystemDragDrop(dataTransfer)) {
+    const droppedFiles = Array.from(dataTransfer.files ?? [])
+    if (droppedFiles.length === 0) {
+      return {
+        supported: false,
+        entries: [],
+        errors: [],
+      }
+    }
+
+    const entries: ExtractedMediaFileEntry[] = []
+    const errors: string[] = []
+    for (const file of droppedFiles) {
+      const validation = await validateMediaFileContent(file)
+      if (!validation.valid) {
+        errors.push(`${file.name}: ${validation.error}`)
+        continue
+      }
+      entries.push({
+        handle: createEphemeralFileHandle(file),
+        file,
+        mediaType: getMediaType(getMimeType(file)),
+      })
+    }
     return {
-      supported: false,
-      entries: [],
-      errors: [],
+      supported: true,
+      entries,
+      errors,
     }
   }
 

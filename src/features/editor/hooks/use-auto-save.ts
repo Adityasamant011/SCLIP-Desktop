@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { useSettingsStore } from '@/features/editor/deps/settings'
 import { createLogger } from '@/shared/logging/logger'
 import { i18n } from '@/i18n'
+import { recordEditorDiagnostic } from '@/infrastructure/editor-diagnostics'
 
 const logger = createLogger('AutoSave')
 
@@ -13,6 +14,8 @@ interface UseAutoSaveOptions {
   onSave: () => Promise<void>
   /** Whether auto-save is enabled (can be used to disable during export, etc.) */
   enabled?: boolean
+  /** Delay before the first save after an edit. Keeps desktop projects safe on close. */
+  debounceMs?: number
 }
 
 /**
@@ -27,52 +30,71 @@ interface UseAutoSaveOptions {
  *   onSave: handleSave,
  * });
  */
-export function useAutoSave({ isDirty, onSave, enabled = true }: UseAutoSaveOptions) {
+export function useAutoSave({
+  isDirty,
+  onSave,
+  enabled = true,
+  debounceMs = 750,
+}: UseAutoSaveOptions) {
   const autoSaveInterval = useSettingsStore((s) => s.autoSaveInterval)
   const isSavingRef = useRef(false)
 
   useEffect(() => {
-    // Auto-save disabled if interval is 0 or hook is disabled
-    if (autoSaveInterval === 0 || !enabled) {
+    if (!enabled) {
       return
     }
 
-    const intervalMs = autoSaveInterval * 60 * 1000 // Convert minutes to ms
-
     let idleCallbackId: number | undefined
+    let debounceTimer: number | undefined
 
-    const intervalId = setInterval(() => {
-      // Only save if there are unsaved changes and not already saving
-      if (!isDirty || isSavingRef.current) {
-        return
+    const save = async (reason: 'debounced' | 'interval') => {
+      if (isSavingRef.current || !isDirty) return
+      isSavingRef.current = true
+      const event = logger.startEvent('save')
+      event.set('reason', reason)
+      event.set('interval_min', autoSaveInterval)
+
+      try {
+        await onSave()
+        event.success()
+        recordEditorDiagnostic('autosave', 'info', 'Project timeline saved', { reason })
+      } catch (error) {
+        event.failure(error)
+        recordEditorDiagnostic('autosave', 'error', 'Project timeline save failed', {
+          reason,
+          message: error instanceof Error ? error.message : String(error),
+        })
+        toast.error(i18n.t('editor.autoSave.failed'))
+      } finally {
+        isSavingRef.current = false
       }
+    }
+
+    // A five-minute recovery timer is not enough for a desktop editor: users
+    // reasonably expect an edit to survive closing the window seconds later.
+    // Save shortly after the first dirty state while retaining the configured
+    // interval as a later safety net.
+    if (isDirty) {
+      debounceTimer = window.setTimeout(() => {
+        void save('debounced')
+      }, debounceMs)
+    }
+
+    // A zero interval disables periodic saves in Settings, but the short
+    // post-edit save above still protects the current project from shutdown.
+    const intervalMs = autoSaveInterval * 60 * 1000
+    const intervalId = autoSaveInterval > 0 ? window.setInterval(() => {
+      if (!isDirty || isSavingRef.current) return
 
       // Defer save to idle time so it doesn't interrupt active editing (e.g., dragging).
       // timeout ensures save still fires within 10s even under continuous activity.
-      idleCallbackId = requestIdleCallback(
-        async () => {
-          if (isSavingRef.current) return
-          isSavingRef.current = true
-          const event = logger.startEvent('save')
-          event.set('interval_min', autoSaveInterval)
-
-          try {
-            await onSave()
-            event.success()
-          } catch (error) {
-            event.failure(error)
-            toast.error(i18n.t('editor.autoSave.failed'))
-          } finally {
-            isSavingRef.current = false
-          }
-        },
-        { timeout: 10_000 },
-      )
-    }, intervalMs)
+      idleCallbackId = requestIdleCallback(() => void save('interval'), { timeout: 10_000 })
+    }, intervalMs) : undefined
 
     return () => {
-      clearInterval(intervalId)
+      if (debounceTimer !== undefined) window.clearTimeout(debounceTimer)
+      if (intervalId !== undefined) window.clearInterval(intervalId)
       if (idleCallbackId !== undefined) cancelIdleCallback(idleCallbackId)
     }
-  }, [autoSaveInterval, isDirty, onSave, enabled])
+  }, [autoSaveInterval, debounceMs, isDirty, onSave, enabled])
 }

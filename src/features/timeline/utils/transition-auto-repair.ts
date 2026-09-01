@@ -193,6 +193,7 @@ function tryRepairTransition(
       rightClip,
       transition.alignment,
       timelineFps,
+      true,
     )
     if (maxDuration <= 0) {
       return {

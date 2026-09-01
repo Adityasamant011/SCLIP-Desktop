@@ -484,6 +484,7 @@ export function usePreviewRendererController({
             getPreviewPathVerticesOverride,
             getLiveItemSnapshot,
             getLiveKeyframes,
+            domVideoElementProvider: getBestDomVideoElementForItem,
           },
         )
         if (liveScopeCaptureInitGenerationRef.current !== initGeneration) {
@@ -562,6 +563,7 @@ export function usePreviewRendererController({
             getLiveItemSnapshot,
             getLiveKeyframes,
             renderText: !domTextScrubOverlayEnabled,
+            domVideoElementProvider: getBestDomVideoElementForItem,
           })
           if (bgTransitionInitGenerationRef.current !== initGeneration) {
             renderer.dispose()
@@ -651,6 +653,7 @@ export function usePreviewRendererController({
               getLiveItemSnapshot,
               getLiveKeyframes,
               renderText: !domTextScrubOverlayEnabled,
+              domVideoElementProvider: getBestDomVideoElementForItem,
             },
           )
           if (scrubInitGenerationRef.current !== initGeneration) {

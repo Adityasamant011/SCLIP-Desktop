@@ -19,6 +19,11 @@ export interface VideoPlayingInitialSyncPlan {
   shouldUpdateLastSyncTime: boolean
 }
 
+export interface VideoStallRecoveryPlan extends VideoSyncAction {
+  /** True only when a forward-playing native video clock has demonstrably stopped. */
+  shouldRecover: boolean
+}
+
 export type VideoFrameCallbackCorrectionPlan =
   | {
       kind: 'seek'
@@ -187,26 +192,29 @@ export function planPlayingVideoDriftCorrection(input: {
   targetTime: number
   lastSyncTimeMs: number
   nowMs: number
+  seeking?: boolean
+  isPostSeekSettling?: boolean
+  targetDiscontinuity?: boolean
 }): VideoSyncAction {
-  if (!input.canSeek) {
+  if (!input.canSeek || input.seeking || input.isPostSeekSettling) {
     return {
       shouldPause: false,
       seekTo: null,
     }
   }
 
-  const drift = input.currentTime - input.targetTime
-  const timeSinceLastSync = input.nowMs - input.lastSyncTimeMs
-  // Asymmetric thresholds: tolerate small negative drift (video can catch up
-  // naturally) but use a larger positive threshold for far-ahead cases where
-  // an immediate seek is needed. The 80ms debounce for the behind case avoids
-  // jitter from transient drift spikes.
-  const videoBehind = drift < -0.2
-  const videoFarAhead = drift > 0.5
+  if (input.targetDiscontinuity) {
+    return {
+      shouldPause: false,
+      seekTo: input.targetTime,
+    }
+  }
 
+  // Continuous playback drift is never corrected with hard seeks; rate
+  // adjustments keep the media pipeline smooth without restarting GOP decodes.
   return {
     shouldPause: false,
-    seekTo: videoFarAhead || (videoBehind && timeSinceLastSync > 80) ? input.targetTime : null,
+    seekTo: null,
   }
 }
 
@@ -228,8 +236,63 @@ export function planPausedVideoFrameSync(input: {
 // Continuous playback drift is corrected by rate. Hard seeks are reserved for
 // actual Clock target discontinuities, because every media seek can restart a
 // keyframe/GOP decode and amplify an overloaded pipeline.
-const LARGE_DRIFT_SECONDS = 0.2
+const NEGLIGIBLE_DRIFT_SECONDS = 0.02
 const MAX_LARGE_DRIFT_RATE_CORRECTION = 0.15
+const STALLED_VIDEO_OBSERVATION_MS = 350
+const STALLED_VIDEO_MIN_TARGET_ADVANCE_SECONDS = 0.25
+const STALLED_VIDEO_MAX_MEDIA_ADVANCE_SECONDS = 0.05
+const STALLED_VIDEO_MIN_DRIFT_SECONDS = 0.35
+const STALLED_VIDEO_MIN_DRIFT_GROWTH_SECONDS = 0.2
+
+/**
+ * Decides whether a continuously-playing video needs a one-off recovery seek.
+ * This is intentionally stricter than ordinary drift correction: a large drift
+ * alone is never sufficient. The mapped target must keep moving while the media
+ * clock remains effectively stationary for a bounded observation window.
+ */
+export function planStalledVideoRecovery(input: {
+  canSeek: boolean
+  isPlaying: boolean
+  seeking: boolean
+  isPostSeekSettling: boolean
+  isRecoveryCooldownActive: boolean
+  elapsedMs: number
+  previousTargetTime: number
+  targetTime: number
+  previousCurrentTime: number
+  currentTime: number
+}): VideoStallRecoveryPlan {
+  if (
+    !input.canSeek ||
+    !input.isPlaying ||
+    input.seeking ||
+    input.isPostSeekSettling ||
+    input.isRecoveryCooldownActive ||
+    input.elapsedMs < STALLED_VIDEO_OBSERVATION_MS
+  ) {
+    return { shouldPause: false, seekTo: null, shouldRecover: false }
+  }
+
+  const targetAdvance = input.targetTime - input.previousTargetTime
+  const mediaAdvance = input.currentTime - input.previousCurrentTime
+  const drift = input.currentTime - input.targetTime
+  const previousDrift = input.previousCurrentTime - input.previousTargetTime
+
+  if (
+    targetAdvance < STALLED_VIDEO_MIN_TARGET_ADVANCE_SECONDS ||
+    mediaAdvance > STALLED_VIDEO_MAX_MEDIA_ADVANCE_SECONDS ||
+    drift > -STALLED_VIDEO_MIN_DRIFT_SECONDS ||
+    drift - previousDrift > -STALLED_VIDEO_MIN_DRIFT_GROWTH_SECONDS
+  ) {
+    return { shouldPause: false, seekTo: null, shouldRecover: false }
+  }
+
+  return {
+    shouldPause: false,
+    seekTo: input.targetTime,
+    shouldRecover: true,
+  }
+}
 
 export function isVideoSyncTargetDiscontinuity(input: {
   previousTargetTime: number | null
@@ -264,40 +327,49 @@ export function planVideoFrameCallbackCorrection(input: {
   readyState: number
   /** True only when the Clock target jumped independently of elapsed playback. */
   targetDiscontinuity?: boolean
+  seeking?: boolean
+  isPostSeekSettling?: boolean
 }): VideoFrameCallbackCorrectionPlan {
-  const drift = input.currentTime - input.targetTime
-  const absDrift = Math.abs(drift)
-
-  if (absDrift > LARGE_DRIFT_SECONDS) {
-    if (input.readyState >= 1) {
-      // Decoder overload is not a transport discontinuity. Re-seeking the
-      // advancing Clock target would force another keyframe/GOP decode and keep
-      // the media pipeline behind. Only real Clock jumps should hard-seek.
-      if (input.targetDiscontinuity) {
-        return {
-          kind: 'seek',
-          seekTo: input.targetTime,
-          playbackRate: input.nominalRate,
-          shouldUpdateLastSyncTime: true,
-        }
-      }
-
-      const correction = Math.min(MAX_LARGE_DRIFT_RATE_CORRECTION, Math.max(0.05, absDrift * 0.2))
-      return {
-        kind: 'adjust_rate',
-        playbackRate:
-          drift > 0 ? input.nominalRate * (1 - correction) : input.nominalRate * (1 + correction),
-      }
-    }
-
+  if (input.seeking) {
     return {
       kind: 'nominal_rate',
       playbackRate: input.nominalRate,
     }
   }
 
-  if (absDrift > 0.016) {
-    const correction = Math.min(0.05, absDrift * 0.3)
+  // 1. Real transport discontinuity (explicit user scrub / jump):
+  if (input.targetDiscontinuity && input.readyState >= 1 && !input.isPostSeekSettling) {
+    return {
+      kind: 'seek',
+      seekTo: input.targetTime,
+      playbackRate: input.nominalRate,
+      shouldUpdateLastSyncTime: true,
+    }
+  }
+
+  // D3 DIAGNOSTIC VARIANT: Force nominal video rate (disable continuous playbackRate chasing)
+  const DISABLE_VIDEO_RATE_CHASING = true
+  if (DISABLE_VIDEO_RATE_CHASING) {
+    return {
+      kind: 'nominal_rate',
+      playbackRate: input.nominalRate,
+    }
+  }
+
+  const drift = input.currentTime - input.targetTime
+  const absDrift = Math.abs(drift)
+
+  // 2. Negligible drift (within ±20ms): stay at nominal rate
+  if (absDrift <= NEGLIGIBLE_DRIFT_SECONDS) {
+    return {
+      kind: 'nominal_rate',
+      playbackRate: input.nominalRate,
+    }
+  }
+
+  // 3. Post-seek settling grace period: decoder is moving forward
+  if (input.isPostSeekSettling) {
+    const correction = Math.min(0.08, Math.max(0.03, absDrift * 0.2))
     return {
       kind: 'adjust_rate',
       playbackRate:
@@ -305,9 +377,12 @@ export function planVideoFrameCallbackCorrection(input: {
     }
   }
 
+  // 4. Continuous playback drift: bounded rate-based convergence (up to ±15%)
+  const correction = Math.min(MAX_LARGE_DRIFT_RATE_CORRECTION, Math.max(0.03, absDrift * 0.3))
   return {
-    kind: 'nominal_rate',
-    playbackRate: input.nominalRate,
+    kind: 'adjust_rate',
+    playbackRate:
+      drift > 0 ? input.nominalRate * (1 - correction) : input.nominalRate * (1 + correction),
   }
 }
 export function shouldIssueCoalescedReverseVideoSeek(options: {

@@ -54,6 +54,10 @@ import {
   normalizeWhisperLanguage,
 } from '@/shared/utils/whisper-settings'
 import { TRANSCRIPTION_CANCELLED_MESSAGE } from '@/shared/utils/transcription-cancellation'
+import { evaluateTranscriptReliability } from '../transcription/transcript-reliability'
+import { detectSpeechInFile } from '../transcription/speech-detector'
+import type { SpeechDetection } from '../transcription/speech-detection'
+import { retainWordsInSpeechRanges } from '../transcription/speech-detection'
 
 const logger = createLogger('MediaTranscriptionService')
 const DEFAULT_MODEL: MediaTranscriptModel = DEFAULT_WHISPER_MODEL
@@ -567,18 +571,41 @@ class MediaTranscriptionService {
             lastModified: media.fileLastModified ?? Date.now(),
           })
 
-    const stream = this.transcriber.transcribe(file, {
-      model: job.model,
-      language: job.language,
-      quantization: job.quantization,
-      onProgress: (progress) => {
-        for (const listener of job.listeners) {
-          listener.onProgress?.(progress)
-        }
-      },
-    })
-    job.stream = stream
-    const segments = await stream.collect()
+    let speechDetection: SpeechDetection | undefined
+    try {
+      // VAD is a tiny local CPU model and intentionally runs before the much
+      // larger ASR runtime. A false/failed detector never blocks normal
+      // editing; a detector failure falls back to the conservative ASR guard.
+      speechDetection = await detectSpeechInFile(file)
+    } catch (error) {
+      logger.warn('Local speech detector unavailable; using ASR reliability fallback', {
+        mediaId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+
+    const rawSegments = speechDetection?.speechDetected === false
+      ? []
+      : await (async () => {
+        const stream = this.transcriber.transcribe(file, {
+          model: job.model,
+          language: job.language,
+          quantization: job.quantization,
+          onProgress: (progress) => {
+            for (const listener of job.listeners) {
+              listener.onProgress?.(progress)
+            }
+          },
+        })
+        job.stream = stream
+        return stream.collect()
+      })()
+    // The streaming ASR worker currently consumes an input file rather than a
+    // range list. Keep its non-speech output diagnostic-only until that shared
+    // PCM handoff is made range-aware; it cannot reach captions or Hermes.
+    const segments = speechDetection
+      ? retainWordsInSpeechRanges(rawSegments, speechDetection.speechRanges)
+      : rawSegments
     this.throwIfCancelled(job)
 
     const transcript: MediaTranscript = {
@@ -589,6 +616,7 @@ class MediaTranscriptionService {
       quantization: job.quantization,
       text: joinTranscriptWords(segments.map((segment) => segment.text)),
       segments: segmentTranscriptForCaptions(segments),
+      reliability: evaluateTranscriptReliability({ segments }, media.duration, speechDetection),
       createdAt: Date.now(),
       updatedAt: Date.now(),
     }

@@ -955,6 +955,16 @@ export async function saveTimeline(projectId: string): Promise<void> {
       height: project.metadata?.height,
     })
 
+    // Persist the project before doing any visual work. A timeline save is the
+    // durable operation; cover-art generation is optional and may take longer
+    // than a user keeps the window open. In particular, never make a just-made
+    // edit depend on the preview renderer being available during shutdown.
+    const updatedAt = Date.now()
+    await updateProject(projectId, {
+      timeline: sanitizedTimeline,
+      updatedAt,
+    })
+
     // Generate thumbnail — prefer capturing the existing preview canvas
     // (near-free: reuses the already-initialized scrub renderer with cached
     // media + GPU pipeline) and fall back to a full renderSingleFrame only
@@ -1039,18 +1049,16 @@ export async function saveTimeline(projectId: string): Promise<void> {
       }
     }
 
-    // Persist as a PARTIAL update: updateProject re-reads project.json right
-    // before writing and merges only these fields, so a concurrent rename /
-    // description / metadata / root-folder edit that lands during the async
-    // thumbnail work above is preserved. Writing a full record from the
-    // pre-await `project` snapshot would clobber those newer fields.
-    // Clear the deprecated inline thumbnail field when using thumbnailId.
-    const updatedAt = Date.now()
-    await updateProject(projectId, {
-      timeline: sanitizedTimeline,
-      ...(thumbnailId && { thumbnailId, thumbnail: undefined }),
-      updatedAt,
-    })
+    // Thumbnail persistence is a separate partial update. updateProject
+    // re-reads project.json and merges only these fields, so it cannot undo a
+    // concurrent rename, metadata update, or newer timeline save.
+    if (thumbnailId) {
+      await updateProject(projectId, {
+        thumbnailId,
+        thumbnail: undefined,
+        updatedAt: Date.now(),
+      })
+    }
 
     // Mark as clean after successful save
     useTimelineSettingsStore.getState().markClean()

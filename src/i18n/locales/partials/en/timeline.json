@@ -336,7 +336,7 @@
     "volumeControl": {
       "adjustClipVolume": "Adjust clip volume"
     },
-    "emptyTitle": "Drag media here to start editing",
-    "emptyDescription": "Drop clips on tracks, then press Space to preview."
+    "emptyTitle": "Right-click media to add it to the timeline",
+    "emptyDescription": "In Media, right-click a clip and choose Add to timeline. Press Space to preview."
   }
 }

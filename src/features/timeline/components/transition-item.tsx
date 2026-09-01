@@ -30,6 +30,12 @@ import {
 import { cn } from '@/shared/ui/cn'
 import { EDITOR_LAYOUT_CSS_VALUES } from '@/config/editor-layout'
 import { Trash2 } from 'lucide-react'
+import { toast } from 'sonner'
+import {
+  copySclipReference,
+  createTransitionSclipReference,
+} from '@/features/editor/agent/sclip-reference'
+import { useProjectStore } from '@/features/editor/deps/projects'
 import {
   applyPreviewGeometryToClip,
   getTransitionBridgeBounds,
@@ -572,6 +578,17 @@ export const TransitionItem = memo(function TransitionItem({
     removeTransition(transition.id)
   }, [transition.id, removeTransition])
 
+  const handleCopySclipReference = useCallback(() => {
+    const projectId = useProjectStore.getState().currentProject?.id
+    if (!projectId) {
+      toast.error('Open a project before copying a SCLIP reference.')
+      return
+    }
+    void copySclipReference(createTransitionSclipReference(projectId, transition.id))
+      .then(() => toast.success('SCLIP reference copied. Paste it into Hermes.'))
+      .catch(() => toast.error('Could not copy the SCLIP reference.'))
+  }, [transition.id])
+
   const handleDragOver = useCallback(
     (e: React.DragEvent<HTMLDivElement>) => {
       const dragDescriptor = readDraggedTransitionDescriptor(e)
@@ -768,6 +785,7 @@ export const TransitionItem = memo(function TransitionItem({
       </ContextMenuTrigger>
 
       <ContextMenuContent>
+        <ContextMenuItem onClick={handleCopySclipReference}>Copy SCLIP reference</ContextMenuItem>
         <ContextMenuItem onClick={handleDelete} className="text-destructive">
           <Trash2 className="w-4 h-4 mr-2" />
           Remove Transition

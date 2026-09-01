@@ -5,8 +5,11 @@ export {
 } from './media-library-resolver-contract'
 export {
   clearMediaDragData,
+  deferMediaDragDataCleanup,
   type CompositionDragData,
   getMediaDragData,
+  SCLIP_MEDIA_POINTER_DROP_EVENT,
+  type SclipMediaPointerDropDetail,
 } from './media-library-resolver-contract'
 export {
   extractValidMediaFileEntriesFromDataTransfer,

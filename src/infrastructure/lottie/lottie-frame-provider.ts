@@ -254,9 +254,14 @@ export class LottieRenderer {
     }
   }
 
+  private _lastRenderedFrame: number | null = null
+
   /** Render a specific Lottie frame synchronously into the bound canvas. */
   renderFrame(lottieFrame: number): void {
     if (this._destroyed || !this._loaded) return
+    const rounded = Math.round(lottieFrame)
+    if (this._lastRenderedFrame === rounded) return
+    this._lastRenderedFrame = rounded
     this.dotLottie.setFrame(lottieFrame)
   }
 

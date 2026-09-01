@@ -314,6 +314,59 @@ describe('VideoContent pooled handoff', () => {
     rendered.unmount()
     vi.useRealTimers()
   })
+
+  it('performs exactly one seek on cut transition and suppresses repeated seek cascade while settling', async () => {
+    playbackState.isPlaying = true
+    playbackState.currentFrame = 0
+    const pooledElement = createMockVideoElement()
+    let seekCount = 0
+    let currentTimeVal = 0.0
+    Object.defineProperty(pooledElement, 'currentTime', {
+      configurable: true,
+      get: () => currentTimeVal,
+      set: (val: number) => {
+        seekCount++
+        currentTimeVal = val
+      },
+    })
+    acquireForClipMock.mockReturnValue(pooledElement)
+
+    const rendered = render(
+      <VideoContent
+        item={{
+          id: 'clip-cut-target',
+          type: 'video',
+          trackId: 'track-1',
+          from: 90,
+          durationInFrames: 90,
+          label: 'Clip Cut Target',
+          src: 'blob:test',
+          _poolClipId: 'group-cut-2',
+        }}
+        muted={false}
+        safeTrimBefore={900} // 30s in 30fps
+        playbackRate={1}
+        sourceFps={30}
+        audioEqStages={[]}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(acquireForClipMock).toHaveBeenCalled()
+    })
+
+    // Initial seek should have been executed exactly once on mount
+    expect(seekCount).toBe(1)
+
+    // Simulate subsequent frame ticks during settling: seekCount should NOT increase
+    for (let f = 91; f <= 100; f++) {
+      playbackState.currentFrame = f
+      pooledElement.dispatchEvent(new Event('timeupdate'))
+    }
+
+    expect(seekCount).toBe(1)
+    rendered.unmount()
+  })
 })
 
 describe('coalesced reverse video seeking', () => {

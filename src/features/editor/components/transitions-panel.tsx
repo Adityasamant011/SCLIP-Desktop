@@ -260,7 +260,11 @@ export const TransitionsPanel = memo(function TransitionsPanel() {
           <Info className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0 mt-0.5" />
           <div className="text-muted-foreground leading-relaxed">
             {hasValidClickTarget ? (
-              <span className="text-primary">{t('editor.transitions.hintClickToApply')}</span>
+              <span className="text-primary">
+                {adjacentInfo?.usesEdgeHold
+                  ? 'Ready to apply. Missing source handles will use a short first/last-frame hold.'
+                  : t('editor.transitions.hintClickToApply')}
+              </span>
             ) : adjacentInfo?.reason ? (
               <span>
                 {t('editor.transitions.hintUnavailable', { reason: adjacentInfo.reason })}
@@ -274,6 +278,9 @@ export const TransitionsPanel = memo(function TransitionsPanel() {
             )}
           </div>
         </div>
+        <p className="mt-2 pl-[22px] text-[11px] leading-relaxed text-muted-foreground">
+          Select a clip beside a cut, then click a transition to add it. You can also drag a transition directly onto a cut in the timeline.
+        </p>
       </div>
 
       {/* Transitions grid by category */}

@@ -58,6 +58,11 @@ Trace-*.json
 CLAUDE.md
 crates/*/target/
 crates/*/Cargo.lock
+# Tauri build output and the locally bundled macOS-only Hermes runtime.
+# Build these on the target platform instead of committing multi-gigabyte binaries.
+/src-tauri/target/
+/src-tauri/resources/hermes-runtime/
+/src-tauri/resources/.DS_Store
 .knip-report.json
 
 tmp

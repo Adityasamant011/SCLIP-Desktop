@@ -12,15 +12,22 @@
 
 import type { TimelineItem } from '@/types/timeline'
 import type { MediaTranscript, MediaTranscriptWord } from '@/types/storage'
+import { buildTranscriptWordId } from '@/shared/utils/transcript-word-id'
 import { getItemSourceSpanSeconds, sourceSecondsToTimelineFrame } from './media-item-frames'
 import type { RemoveSilenceRange } from '../stores/actions/edit/range-removal-actions'
 
 export interface TranscriptToken {
   /** Stable identity for React keys and selection — `${itemId}:${wordIndex}`. */
   key: string
+  /** Stable source identity; pair with itemId for an exact timeline placement. */
+  wordId: string
   itemId: string
   mediaId: string
   text: string
+  /** Provider confidence in [0, 1], when the source transcript includes it. */
+  confidence?: number
+  /** Optional diarization label inherited from the transcript segment when needed. */
+  speaker?: string
   /** Word start in source-native seconds. */
   sourceStart: number
   /** Word end in source-native seconds. */
@@ -46,7 +53,9 @@ export function isTranscriptableItem(item: TimelineItem | undefined): item is Tr
 
 function collectWords(transcript: MediaTranscript): MediaTranscriptWord[] {
   return transcript.segments
-    .flatMap((segment) => segment.words ?? [])
+    .flatMap((segment) => (segment.words ?? []).map((word) =>
+      word.speaker || !segment.speaker ? word : { ...word, speaker: segment.speaker },
+    ))
     .filter((word) => word.end > word.start && word.text.trim().length > 0)
     .toSorted((left, right) => left.start - right.start)
 }
@@ -87,17 +96,21 @@ export function buildTranscriptTokens(
     acceptedRangesByMedia.set(item.mediaId, accepted)
 
     const words = collectWords(transcript)
-    words.forEach((word, index) => {
+    words.forEach((word) => {
       // Keep any word that overlaps the trimmed clip, even partially.
       if (word.end <= span.start || word.start >= span.end) return
 
       const clampedStart = Math.max(word.start, span.start)
       const clampedEnd = Math.min(word.end, span.end)
+      const wordId = buildTranscriptWordId(item.mediaId, word)
       tokens.push({
-        key: `${item.id}:${index}`,
+        key: `${item.id}:${wordId}`,
+        wordId,
         itemId: item.id,
         mediaId: item.mediaId,
         text: word.text.trim(),
+        ...(Number.isFinite(word.confidence) ? { confidence: word.confidence } : {}),
+        ...(word.speaker?.trim() ? { speaker: word.speaker.trim() } : {}),
         sourceStart: clampedStart,
         sourceEnd: clampedEnd,
         startFrame: sourceSecondsToTimelineFrame(item, clampedStart, timelineFps),
@@ -159,7 +172,11 @@ export function buildRemovalRangesByMediaId(
   }
 
   for (const token of selectedTokens) {
-    if (token.itemId === runItemId) {
+    // A plan may contain isolated filler words as well as a contiguous phrase.
+    // Never turn two distant selections on the same clip into one giant cut.
+    // Adjacent transcript words commonly have a tiny timestamp gap, so retain
+    // the original phrase behaviour for gaps up to 150 ms.
+    if (token.itemId === runItemId && token.sourceStart <= runEnd + 0.15) {
       runEnd = Math.max(runEnd, token.sourceEnd)
       continue
     }

@@ -149,7 +149,12 @@ function getTransitionParticipantSourceStart<TItem extends TimelineItem>(
   const speed = clip.speed ?? 1
   const sourceFps = clip.sourceFps ?? fps
   const prerollSourceFrames = timelineToSourceFrames(beforeFrames, speed, fps, sourceFps)
-  return Math.max(0, sourceStart - prerollSourceFrames)
+  // Keep the negative logical start when the clip has no real preroll. Video
+  // source-time resolution clamps those early frames to zero, producing an
+  // intentional first-frame hold until the natural clip start. Clamping here
+  // would advance the incoming clip too early and cause a visible jump when
+  // the transition ends.
+  return sourceStart - prerollSourceFrames
 }
 
 export function resolveTransitionRenderTimelineSpan<TItem extends TimelineItem>(

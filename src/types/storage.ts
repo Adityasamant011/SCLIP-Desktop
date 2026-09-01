@@ -183,6 +183,8 @@ export interface MediaTranscriptSegment {
   text: string
   start: number
   end: number
+  /** Optional diarization label supplied by a transcription provider. */
+  speaker?: string
   words?: MediaTranscriptWord[]
 }
 
@@ -191,6 +193,28 @@ export interface MediaTranscriptWord {
   start: number
   end: number
   confidence?: number
+  /** Optional diarization label; segment-level labels are inherited when absent. */
+  speaker?: string
+}
+
+export interface MediaTranscriptReliability {
+  version: 1
+  detectionMethod: 'silero_vad_v5.1' | 'asr_sanity_v1'
+  speechDetected: boolean
+  speechConfidence: number
+  speechCoverage: number
+  speechRanges: Array<{ start: number; end: number }>
+  transcriptReliable: boolean
+  reliabilityScore: number
+  reliabilityReasons: Array<
+    | 'NO_STABLE_WORD_TIMINGS'
+    | 'NO_RELIABLE_SPEECH'
+    | 'INSUFFICIENT_LEXICAL_WORDS'
+    | 'INSUFFICIENT_SPEECH_COVERAGE'
+    | 'HIGH_UNKNOWN_TOKEN_RATIO'
+    | 'HIGH_MALFORMED_TOKEN_RATIO'
+    | 'LOW_ASR_CONFIDENCE'
+  >
 }
 
 export interface MediaTranscript {
@@ -201,6 +225,8 @@ export interface MediaTranscript {
   quantization: MediaTranscriptQuantization
   text: string
   segments: MediaTranscriptSegment[]
+  /** Local ASR trust decision. Raw segments may remain stored for diagnostics. */
+  reliability?: MediaTranscriptReliability
   createdAt: number
   updatedAt: number
 }

@@ -141,6 +141,7 @@ import {
   removeItems,
   ROW_HEIGHT,
   resolveDroppedMediaEntriesFromPayload,
+  resolveDroppedMediaEntriesFromExternalFiles,
   setTransformParents,
   setPropertyExpression,
   removePropertyExpression,
@@ -189,6 +190,8 @@ import {
   clearMediaDragData,
   getMediaDragData,
   resolveMediaUrl,
+  SCLIP_MEDIA_POINTER_DROP_EVENT,
+  type SclipMediaPointerDropDetail,
   useMediaLibraryStore,
 } from '@/features/editor/deps/media-library-contract'
 import { useComposeUiStore } from './compose-ui-store'
@@ -3644,6 +3647,7 @@ const CompositingTimelineCore = memo(function CompositingTimelineCore({
   const [inlineCurve, setInlineCurve] = useState<InlineCurveState | null>(null)
   const [renameTarget, setRenameTarget] = useState<RenameTarget | null>(null)
   const [renameDraft, setRenameDraft] = useState('')
+  const mediaDropSurfaceRef = useRef<HTMLElement | null>(null)
   const spanDragRef = useRef<SpanDragState | null>(null)
   const spanDragAnimationFrameRef = useRef<number | null>(null)
   const spanDragVisualsRef = useRef<HTMLElement[]>([])
@@ -3770,7 +3774,7 @@ const CompositingTimelineCore = memo(function CompositingTimelineCore({
   const toggleLayerExpanded = useComposeUiStore((state) => state.toggleLayerExpanded)
   const setAllLayersExpanded = useComposeUiStore((state) => state.setAllLayersExpanded)
   const pruneCompositionLayers = useComposeUiStore((state) => state.pruneCompositionLayers)
-  const mediaItems = useMediaLibraryStore((state) => state.mediaItems)
+  const importHandlesForPlacement = useMediaLibraryStore((state) => state.importHandlesForPlacement)
   const canPasteLayers = useClipboardStore((state) => (state.itemsClipboard?.items.length ?? 0) > 0)
 
   const isComposite = composition?.editorKind === 'composite-2d'
@@ -5283,7 +5287,6 @@ const CompositingTimelineCore = memo(function CompositingTimelineCore({
         }
       }
       clearMediaDragData()
-      if (!payload || typeof payload !== 'object') return
 
       const dropFrame = Math.max(
         0,
@@ -5292,6 +5295,24 @@ const CompositingTimelineCore = memo(function CompositingTimelineCore({
           usePlaybackStore.getState().currentFrame,
         ),
       )
+      if (!payload || typeof payload !== 'object') {
+        if (!event.dataTransfer.types.includes('Files')) return
+        const entries = await resolveDroppedMediaEntriesFromExternalFiles({
+          dataTransfer: event.dataTransfer,
+          importHandlesForPlacement,
+          notify: toast,
+        })
+        if (!entries || entries.length === 0) return
+        payload = {
+          type: 'media-items',
+          items: entries.map((entry) => ({
+            mediaId: entry.mediaId,
+            mediaType: entry.mediaType,
+            fileName: entry.label,
+            duration: entry.media.duration,
+          })),
+        }
+      }
       const candidate = payload as { type?: unknown; compositionId?: unknown }
       if (candidate.type === 'composition' && typeof candidate.compositionId === 'string') {
         insertCompositionLayer(candidate.compositionId, dropFrame)
@@ -5324,7 +5345,14 @@ const CompositingTimelineCore = memo(function CompositingTimelineCore({
         return
       }
 
-      const entries = resolveDroppedMediaEntriesFromPayload(payload, mediaItems, logger)
+      // External-file placement updates the library asynchronously. Read the
+      // store at the moment of resolution rather than the render snapshot so
+      // newly imported files can immediately become Motion layers.
+      const entries = resolveDroppedMediaEntriesFromPayload(
+        payload,
+        useMediaLibraryStore.getState().mediaItems,
+        logger,
+      )
       if (entries.length === 0) {
         toast.error(t('editor.compose.unsupportedDrop'))
         return
@@ -5387,16 +5415,44 @@ const CompositingTimelineCore = memo(function CompositingTimelineCore({
       durationInFrames,
       fps,
       insertCompositionLayer,
-      mediaItems,
+      importHandlesForPlacement,
       selectItems,
       t,
     ],
   )
 
+  useEffect(() => {
+    const handleDesktopMediaDrop = (event: Event) => {
+      const surface = mediaDropSurfaceRef.current
+      const detail = (event as CustomEvent<SclipMediaPointerDropDetail>).detail
+      if (!surface || !detail) return
+      const target = document.elementFromPoint(detail.clientX, detail.clientY)
+      if (!target || !surface.contains(target)) return
+
+      // Re-enter the same Motion-layer placement path with the cached payload.
+      // Only the DataTransfer reads used by handleDrop need to be represented;
+      // external files continue to use the real native drop event.
+      const dataTransfer = {
+        getData: () => '',
+        types: [] as string[],
+      } as unknown as DataTransfer
+      void handleDrop({
+        preventDefault: () => undefined,
+        dataTransfer,
+      } as React.DragEvent<HTMLElement>)
+    }
+
+    window.addEventListener(SCLIP_MEDIA_POINTER_DROP_EVENT, handleDesktopMediaDrop)
+    return () => {
+      window.removeEventListener(SCLIP_MEDIA_POINTER_DROP_EVENT, handleDesktopMediaDrop)
+    }
+  }, [handleDrop])
+
   const handleDragOver = useCallback((event: React.DragEvent<HTMLElement>) => {
     const hasLayerPayload =
       getMediaDragData() !== null ||
-      Array.from(event.dataTransfer.types).includes('application/json')
+      Array.from(event.dataTransfer.types).includes('application/json') ||
+      Array.from(event.dataTransfer.types).includes('Files')
     if (!hasLayerPayload) return
     event.preventDefault()
     event.dataTransfer.dropEffect = 'copy'
@@ -5736,12 +5792,14 @@ const CompositingTimelineCore = memo(function CompositingTimelineCore({
     return (
       <>
         <section
+          ref={mediaDropSurfaceRef}
           className={cn(
             'flex min-h-0 flex-1 flex-col border-t border-border bg-timeline-bg transition-shadow',
             dropActive && 'ring-1 ring-inset ring-primary/60',
             className,
           )}
           data-testid="compositing-timeline-empty"
+          data-timeline-drop-target="true"
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
@@ -6979,12 +7037,14 @@ const CompositingTimelineCore = memo(function CompositingTimelineCore({
   return (
     <>
       <section
+        ref={mediaDropSurfaceRef}
         className={cn(
           'flex min-h-0 flex-1 overflow-hidden border-t border-border transition-shadow',
           dropActive && 'ring-1 ring-inset ring-primary/60',
           className,
         )}
         data-testid="compositing-timeline"
+        data-timeline-drop-target="true"
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}

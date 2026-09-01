@@ -133,7 +133,11 @@ export const ImageFilmstrip = memo(function ImageFilmstrip({
   const { blobUrl, setBlobUrl, hasStartedLoadingRef, blobUrlVersion } = useMediaBlobUrl(mediaId)
 
   useEffect(() => {
-    if (!isVisible || !mediaId || hasStartedLoadingRef.current) return
+    // Static image clips are inexpensive to hydrate and, unlike video
+    // filmstrips, have no decode worker to defer. On a restored project the
+    // viewport starts at width 0 for a frame; gating this read on visibility
+    // left an otherwise visible image clip painted as its solid blue shell.
+    if (!mediaId || hasStartedLoadingRef.current) return
     hasStartedLoadingRef.current = true
 
     let mounted = true
@@ -145,7 +149,7 @@ export const ImageFilmstrip = memo(function ImageFilmstrip({
     return () => {
       mounted = false
     }
-  }, [mediaId, isVisible, blobUrlVersion, hasStartedLoadingRef, setBlobUrl])
+  }, [mediaId, blobUrlVersion, hasStartedLoadingRef, setBlobUrl])
 
   const { frames, durations, totalDuration } = useGifFrames({
     mediaId,

@@ -164,7 +164,7 @@ describe('transition actions with linked audio companions', () => {
     ])
   })
 
-  it('clamps the default applied duration to the valid handle at the cut', () => {
+  it('uses the default duration with edge holds when source handles are short', () => {
     useItemsStore.getState().setItems([
       makeVideoItem({ id: 'video-1', sourceEnd: 68, sourceDuration: 180 }),
       makeVideoItem({
@@ -182,7 +182,7 @@ describe('transition actions with linked audio companions', () => {
 
     expect(added).toBe(true)
     expect(useTransitionsStore.getState().transitions).toEqual([
-      expect.objectContaining({ durationInFrames: 13 }),
+      expect.objectContaining({ durationInFrames: 30 }),
     ])
   })
 

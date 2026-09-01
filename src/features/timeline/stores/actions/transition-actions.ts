@@ -68,6 +68,7 @@ export function addTransition(
           rightClip,
           alignment,
           timelineFps,
+          true,
         )
         if (maxHandleDuration < 1) {
           getLogger().warn(
@@ -79,7 +80,14 @@ export function addTransition(
       }
 
       // Validate that transition can be added (includes handle check)
-      const validation = canAddTransition(leftClip, rightClip, duration, alignment, timelineFps)
+      const validation = canAddTransition(
+        leftClip,
+        rightClip,
+        duration,
+        alignment,
+        timelineFps,
+        true,
+      )
       if (!validation.canAdd) {
         getLogger().warn('[addTransition] Cannot add transition:', validation.reason)
         return false
@@ -146,6 +154,7 @@ function _validateAndUpdateTransition(id: string, updates: TransitionUpdates): b
       nextTransition.durationInFrames,
       nextTransition.alignment,
       useTimelineSettingsStore.getState().fps,
+      true,
     )
     if (!validation.canAdd) {
       getLogger().warn('[updateTransition] Cannot update transition:', validation.reason)

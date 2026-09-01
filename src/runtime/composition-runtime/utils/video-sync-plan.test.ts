@@ -9,6 +9,7 @@ import {
   planPlayingVideoDriftCorrection,
   planPlayingVideoInitialSync,
   planPremountedVideoSync,
+  planStalledVideoRecovery,
   planVideoFrameCallbackCorrection,
   shouldUpdateVideoPlaybackRate,
   shouldReactOwnPlaybackRate,
@@ -134,18 +135,126 @@ describe('planPlayingVideoInitialSync', () => {
 })
 
 describe('planPlayingVideoDriftCorrection', () => {
-  it('seeks when the playing video drifts too far behind for too long', () => {
+  it('suppresses hard seek while seeking is in flight', () => {
     expect(
       planPlayingVideoDriftCorrection({
         canSeek: true,
         currentTime: 1,
-        targetTime: 1.3,
+        targetTime: 1.8,
         lastSyncTimeMs: 0,
-        nowMs: 100,
+        nowMs: 1000,
+        seeking: true,
       }),
     ).toEqual({
       shouldPause: false,
-      seekTo: 1.3,
+      seekTo: null,
+    })
+  })
+
+  it('suppresses hard seek during post-seek settling grace window', () => {
+    expect(
+      planPlayingVideoDriftCorrection({
+        canSeek: true,
+        currentTime: 1,
+        targetTime: 1.8,
+        lastSyncTimeMs: 0,
+        nowMs: 1000,
+        isPostSeekSettling: true,
+      }),
+    ).toEqual({
+      shouldPause: false,
+      seekTo: null,
+    })
+  })
+
+  it('hard seeks immediately on real transport discontinuity', () => {
+    expect(
+      planPlayingVideoDriftCorrection({
+        canSeek: true,
+        currentTime: 1,
+        targetTime: 30,
+        lastSyncTimeMs: 0,
+        nowMs: 100,
+        targetDiscontinuity: true,
+      }),
+    ).toEqual({
+      shouldPause: false,
+      seekTo: 30,
+    })
+  })
+
+  it('suppresses hard seek for continuous playback drift', () => {
+    expect(
+      planPlayingVideoDriftCorrection({
+        canSeek: true,
+        currentTime: 1,
+        targetTime: 1.8,
+        lastSyncTimeMs: 0,
+        nowMs: 1000,
+      }),
+    ).toEqual({
+      shouldPause: false,
+      seekTo: null,
+    })
+  })
+})
+
+describe('planStalledVideoRecovery', () => {
+  const stableInput = {
+    canSeek: true,
+    isPlaying: true,
+    seeking: false,
+    isPostSeekSettling: false,
+    isRecoveryCooldownActive: false,
+    elapsedMs: 500,
+    previousTargetTime: 10,
+    targetTime: 10.5,
+    previousCurrentTime: 9.9,
+    currentTime: 9.9,
+  }
+
+  it('keeps small drift on the normal rate-correction path', () => {
+    expect(
+      planStalledVideoRecovery({
+        ...stableInput,
+        previousCurrentTime: 10.45,
+        currentTime: 10.48,
+      }),
+    ).toEqual({ shouldPause: false, seekTo: null, shouldRecover: false })
+  })
+
+  it('does not seek large drift while the video clock is still progressing', () => {
+    expect(
+      planStalledVideoRecovery({
+        ...stableInput,
+        previousCurrentTime: 9,
+        currentTime: 9.45,
+      }),
+    ).toEqual({ shouldPause: false, seekTo: null, shouldRecover: false })
+  })
+
+  it('recovers a stalled clock to the mapped source target exactly once', () => {
+    expect(planStalledVideoRecovery(stableInput)).toEqual({
+      shouldPause: false,
+      seekTo: 10.5,
+      shouldRecover: true,
+    })
+  })
+
+  it('suppresses a follow-up recovery during post-seek grace or cooldown', () => {
+    expect(
+      planStalledVideoRecovery({ ...stableInput, isPostSeekSettling: true }),
+    ).toEqual({ shouldPause: false, seekTo: null, shouldRecover: false })
+    expect(
+      planStalledVideoRecovery({ ...stableInput, isRecoveryCooldownActive: true }),
+    ).toEqual({ shouldPause: false, seekTo: null, shouldRecover: false })
+  })
+
+  it('does not treat an isolated short sample as a video stall', () => {
+    expect(planStalledVideoRecovery({ ...stableInput, elapsedMs: 125 })).toEqual({
+      shouldPause: false,
+      seekTo: null,
+      shouldRecover: false,
     })
   })
 })
@@ -167,9 +276,38 @@ describe('planPausedVideoFrameSync', () => {
 })
 
 describe('planVideoFrameCallbackCorrection', () => {
-  it('rate-corrects moderate drift instead of repeatedly re-decoding a GOP', () => {
+  it('returns nominal_rate while seeking is in flight', () => {
     const plan = planVideoFrameCallbackCorrection({
       currentTime: 1.5,
+      targetTime: 1,
+      nominalRate: 1,
+      readyState: 4,
+      seeking: true,
+    })
+    expect(plan).toEqual({
+      kind: 'nominal_rate',
+      playbackRate: 1,
+    })
+  })
+
+  it('applies gentle rate adjustment during post-seek settling without hard seek', () => {
+    const plan = planVideoFrameCallbackCorrection({
+      currentTime: 1.2,
+      targetTime: 1,
+      nominalRate: 1,
+      readyState: 4,
+      isPostSeekSettling: true,
+    })
+    expect(plan.kind).toBe('adjust_rate')
+    if (plan.kind === 'adjust_rate') {
+      expect(plan.playbackRate).toBeLessThan(1)
+      expect(plan.playbackRate).toBeGreaterThanOrEqual(0.92)
+    }
+  })
+
+  it('rate-corrects moderate drift instead of repeatedly re-decoding a GOP', () => {
+    const plan = planVideoFrameCallbackCorrection({
+      currentTime: 1.2,
       targetTime: 1,
       nominalRate: 1,
       readyState: 4,
@@ -197,7 +335,7 @@ describe('planVideoFrameCallbackCorrection', () => {
     expect(plan.playbackRate).toBeLessThan(1)
   })
 
-  it('returns nominal_rate when drift is negligible', () => {
+  it('returns nominal_rate when drift is negligible (<= 20ms)', () => {
     const plan = planVideoFrameCallbackCorrection({
       currentTime: 1.008,
       targetTime: 1,
@@ -214,7 +352,7 @@ describe('planVideoFrameCallbackCorrection', () => {
 
   it('rate-corrects instead of re-seeking continuous-playback decoder drift', () => {
     const plan = planVideoFrameCallbackCorrection({
-      currentTime: 1.5,
+      currentTime: 1.3,
       targetTime: 1,
       nominalRate: 1,
       readyState: 4,
@@ -244,6 +382,20 @@ describe('planVideoFrameCallbackCorrection', () => {
       playbackRate: 1,
       shouldUpdateLastSyncTime: true,
     })
+  })
+
+  it('rate-corrects large drift during continuous playback rather than restarting GOP decode', () => {
+    const plan = planVideoFrameCallbackCorrection({
+      currentTime: 0,
+      targetTime: 1.5,
+      nominalRate: 1,
+      readyState: 4,
+    })
+    expect(plan.kind).toBe('adjust_rate')
+    if (plan.kind === 'adjust_rate') {
+      expect(plan.playbackRate).toBeGreaterThan(1)
+      expect(plan.playbackRate).toBeLessThanOrEqual(1.15)
+    }
   })
 })
 

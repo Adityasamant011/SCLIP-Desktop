@@ -154,6 +154,60 @@ describe('TrashSection', () => {
     })
   })
 
+  it('recovers from a stalled permanent delete instead of remaining emptying forever', async () => {
+    listTrashedProjectsMock.mockResolvedValue([entry('a', 'Alpha')])
+    permanentlyDeleteProjectMock.mockImplementation(() => new Promise(() => undefined))
+
+    render(<TrashSection />)
+    await screen.findByTestId('trash-toggle')
+    await expandTrash()
+
+    vi.useFakeTimers()
+    try {
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('trash-empty-all'))
+      })
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('trash-confirm-action'))
+        await vi.advanceTimersByTimeAsync(60_000)
+      })
+
+      expect(toastError).toHaveBeenCalledWith('Emptied trash with 1 failure', {
+        description: 'Could not delete: Alpha',
+      })
+      expect(screen.getByTestId('trash-empty-all')).not.toBeDisabled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('recovers from a stalled single-project permanent delete', async () => {
+    listTrashedProjectsMock.mockResolvedValue([entry('a', 'Alpha')])
+    permanentlyDeleteProjectMock.mockImplementation(() => new Promise(() => undefined))
+
+    render(<TrashSection />)
+    await screen.findByTestId('trash-toggle')
+    await expandTrash()
+
+    fireEvent.click(screen.getByTestId('trash-delete-a'))
+    await screen.findByTestId('trash-confirm-action')
+
+    vi.useFakeTimers()
+    try {
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('trash-confirm-action'))
+        await vi.advanceTimersByTimeAsync(60_000)
+      })
+
+      expect(toastError).toHaveBeenCalledWith('Failed to delete project', {
+        description: 'Deleting "Alpha" timed out after 60s',
+      })
+      expect(screen.getByTestId('trash-delete-a')).not.toBeDisabled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('surfaces a failure toast when restore fails', async () => {
     listTrashedProjectsMock.mockResolvedValue([entry('a', 'Alpha')])
     restoreProjectMock.mockResolvedValue({

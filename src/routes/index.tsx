@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from '@tanstack/react-router'
+import { createFileRoute, Link, redirect } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { Trans, useTranslation } from 'react-i18next'
 import {
@@ -16,7 +16,7 @@ import {
   Palette,
   WandSparkles,
 } from 'lucide-react'
-import { FreeCutLogo } from '@/components/brand/freecut-logo'
+import { SclipLogo } from '@/components/brand/sclip-logo'
 import { DiscordIcon } from '@/components/brand/discord-icon'
 import { Button } from '@/components/ui/button'
 import { DISCORD_INVITE_URL } from '@/config/community'
@@ -33,6 +33,9 @@ import {
 } from '@/components/ui/accordion'
 
 export const Route = createFileRoute('/')({
+  beforeLoad: () => {
+    throw redirect({ to: '/projects' })
+  },
   component: LandingPage,
 })
 
@@ -208,7 +211,7 @@ function LandingPage() {
 
         <div className="relative z-10 flex flex-col items-center text-center animate-fade-in">
           <div className="mb-6 flex items-center gap-3">
-            <FreeCutLogo size="lg" />
+            <SclipLogo size="lg" />
             <span className="rounded-full bg-primary/15 px-3 py-1 text-xs font-medium text-primary">
               {t('projects.landing.beta')}
             </span>

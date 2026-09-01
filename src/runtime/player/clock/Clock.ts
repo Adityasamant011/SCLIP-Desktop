@@ -1,4 +1,9 @@
 import { createLogger } from '@/shared/logging/logger'
+import { recordPreviewTimelineClockTrace } from '@/shared/logging/preview-scrub-performance'
+import {
+  getAllConnectedDomVideoElements,
+  waitForActiveVideoPresentation,
+} from '@/runtime/composition-runtime/utils/dom-video-element-registry'
 
 const logger = createLogger('Clock')
 
@@ -73,6 +78,8 @@ export class Clock {
   private _animationFrameId: number | null = null
   private _playbackStartTime: number = 0
   private _playbackStartFrame: number = 0
+  // D2 DIAGNOSTIC VARIANT: Gated transport start / video preroll
+  private _isPrerolling: boolean = false
 
   // Audio-as-ground-truth: when set, playback timing derives from the
   // hardware audio clock (AudioContext.currentTime) instead of
@@ -81,6 +88,13 @@ export class Clock {
   private _activeTimeSource: AudioContext | null | undefined
   private _timeSourceOffsetMs = 0
   private _lastNowMs: number | null = null
+  private _lastRawNowMs: number | null = null
+  private _lastClockSource: 'audio-context' | 'performance' = 'performance'
+
+  // Diagnostic-only scheduler evidence. These counters are never read by the
+  // transport itself and therefore cannot alter playback behavior.
+  private _rafCallbackCount = 0
+  private _lastRafCallbackAtMs: number | null = null
 
   // In/out points for range playback
   private _inFrame: number | null = null
@@ -95,13 +109,16 @@ export class Clock {
   private readonly _handleVisibilityChange = (): void => {
     if (typeof document !== 'undefined' && !document.hidden) {
       this._catchUpToCurrentTime()
+      this._recordTimelineClock('clock-control', { action: 'visibility-catch-up' })
     }
   }
   private readonly _handleWindowFocus = (): void => {
     this._catchUpToCurrentTime()
+    this._recordTimelineClock('clock-control', { action: 'focus-catch-up' })
   }
   private readonly _handlePageShow = (): void => {
     this._catchUpToCurrentTime()
+    this._recordTimelineClock('clock-control', { action: 'pageshow-catch-up' })
   }
 
   constructor(config: ClockConfig) {
@@ -132,6 +149,7 @@ export class Clock {
       window.addEventListener('focus', this._handleWindowFocus)
       window.addEventListener('pageshow', this._handlePageShow)
     }
+    this._recordTimelineClock('clock-control', { action: 'created' })
   }
 
   // ============================================
@@ -224,6 +242,7 @@ export class Clock {
       this._playbackStartTime = this._now()
       this._playbackStartFrame = this._currentFrame
     }
+    this._recordTimelineClock('clock-control', { action: 'set-audio-context' })
   }
 
   set playbackRate(value: number) {
@@ -241,6 +260,7 @@ export class Clock {
 
     if (oldRate !== value) {
       this._emit('ratechange')
+      this._recordTimelineClock('clock-control', { action: 'set-playback-rate' })
     }
   }
 
@@ -289,8 +309,8 @@ export class Clock {
     }
 
     this._isPlaying = true
-    this._playbackStartTime = this._now()
     this._playbackStartFrame = this._currentFrame
+    this._playbackStartTime = this._now()
 
     if (import.meta.env.DEV) {
       void import('@/shared/logging/frame-jitter-monitor').then((m) => {
@@ -301,7 +321,39 @@ export class Clock {
     }
 
     this._emit('play')
-    this._startAnimationLoop()
+    this._recordTimelineClock('clock-control', { action: 'play' })
+
+    // D2 DIAGNOSTIC VARIANT: Gated transport start / video preroll (Disabled for D3 rate-isolation)
+    const ENABLE_D2_VIDEO_PREROLL_GATING = false
+    const activeVideos = ENABLE_D2_VIDEO_PREROLL_GATING ? getAllConnectedDomVideoElements() : []
+
+    if (ENABLE_D2_VIDEO_PREROLL_GATING && activeVideos.length > 0) {
+      this._isPrerolling = true
+      const playRequestedAt = performance.now()
+      this._recordTimelineClock('clock-control', {
+        action: 'preroll-start',
+        startFrame: this._playbackStartFrame,
+        activeVideoCount: activeVideos.length,
+      })
+
+      this._startAnimationLoop()
+
+      void waitForActiveVideoPresentation().then(() => {
+        if (!this._isPlaying || !this._isPrerolling) return
+        // Establish transport start epoch at the exact presentation moment!
+        this._playbackStartTime = this._now()
+        this._isPrerolling = false
+        const prerollDurationMs = performance.now() - playRequestedAt
+        this._recordTimelineClock('clock-control', {
+          action: 'preroll-ready',
+          prerollDurationMs,
+          epochEstablishedAt: this._playbackStartTime,
+        })
+      })
+    } else {
+      this._isPrerolling = false
+      this._startAnimationLoop()
+    }
   }
 
   pause(): void {
@@ -310,8 +362,10 @@ export class Clock {
     }
 
     this._isPlaying = false
+    this._isPrerolling = false
     this._stopAnimationLoop()
     this._emit('pause')
+    this._recordTimelineClock('clock-control', { action: 'pause' })
   }
 
   toggle(): void {
@@ -330,6 +384,7 @@ export class Clock {
     const frameChanged = clampedFrame !== this._currentFrame
 
     this._currentFrame = clampedFrame
+    this._isPrerolling = false
 
     // Reset playback reference point if playing
     if (this._isPlaying) {
@@ -340,6 +395,7 @@ export class Clock {
     if (frameChanged) {
       this._emit('seek')
       this._emit('framechange')
+      this._recordTimelineClock('clock-control', { action: 'seek' })
     }
   }
 
@@ -477,6 +533,7 @@ export class Clock {
       window.removeEventListener('focus', this._handleWindowFocus)
       window.removeEventListener('pageshow', this._handlePageShow)
     }
+    this._recordTimelineClock('clock-control', { action: 'dispose' })
   }
 
   // ============================================
@@ -492,6 +549,8 @@ export class Clock {
     const ctx = this._audioContext
     const nextTimeSource = ctx?.state === 'running' ? ctx : null
     const rawNow = nextTimeSource ? nextTimeSource.currentTime * 1000 : performance.now()
+    this._lastClockSource = nextTimeSource ? 'audio-context' : 'performance'
+    this._lastRawNowMs = rawNow
 
     if (nextTimeSource !== this._activeTimeSource) {
       // AudioContext.currentTime and performance.now() have unrelated epochs.
@@ -504,6 +563,33 @@ export class Clock {
     const normalizedNow = rawNow + this._timeSourceOffsetMs
     this._lastNowMs = Math.max(this._lastNowMs ?? normalizedNow, normalizedNow)
     return this._lastNowMs
+  }
+
+  private _recordTimelineClock(
+    kind: 'clock-raf' | 'clock-control',
+    details: {
+      action?: string
+      rafTimestampMs?: number
+      rafGapMs?: number | null
+      frameDelta?: number
+      wallDeltaMs?: number | null
+    } = {},
+  ): void {
+    recordPreviewTimelineClockTrace({
+      kind,
+      timelineFrame: this._currentFrame,
+      timelineTime: this.currentTime,
+      isPlaying: this._isPlaying,
+      paused: !this._isPlaying,
+      playbackRate: this._playbackRate,
+      animationLoopRunning: this._animationFrameId !== null,
+      clockSource: this._lastClockSource,
+      clockNowMs: this._lastNowMs,
+      sourceNowMs: this._lastRawNowMs,
+      audioContextState: this._audioContext?.state ?? null,
+      rafCallbackCount: this._rafCallbackCount,
+      ...details,
+    })
   }
 
   private _clampFrame(frame: number): number {
@@ -534,6 +620,9 @@ export class Clock {
   }
 
   private _computeFrameAtTime(now: number): number {
+    if (this._isPrerolling) {
+      return this._playbackStartFrame
+    }
     const elapsedMs = now - this._playbackStartTime
     const elapsedSeconds = elapsedMs / 1000
     const framesElapsed = elapsedSeconds * this._fps * this._playbackRate
@@ -563,6 +652,7 @@ export class Clock {
         this._isPlaying = false
         this._emit('framechange')
         this._emit('ended')
+        this._recordTimelineClock('clock-control', { action: 'ended' })
         this._onEnded?.()
         this._stopAnimationLoop()
         return true
@@ -605,12 +695,18 @@ export class Clock {
       return
     }
 
-    const tick = (): void => {
+    const tick = (rafTimestampMs: number): void => {
       if (!this._isPlaying) {
         this._animationFrameId = null
         return
       }
 
+      const callbackAtMs = performance.now()
+      const rafGapMs =
+        this._lastRafCallbackAtMs === null ? null : callbackAtMs - this._lastRafCallbackAtMs
+      const previousFrame = this._currentFrame
+      this._lastRafCallbackAtMs = callbackAtMs
+      this._rafCallbackCount += 1
       const now = this._now()
 
       if (this._advancePlaybackTo(now)) {
@@ -620,6 +716,12 @@ export class Clock {
 
       // Continue the loop
       this._animationFrameId = requestAnimationFrame(tick)
+      this._recordTimelineClock('clock-raf', {
+        rafTimestampMs,
+        rafGapMs,
+        frameDelta: this._currentFrame - previousFrame,
+        wallDeltaMs: rafGapMs,
+      })
     }
 
     this._animationFrameId = requestAnimationFrame(tick)

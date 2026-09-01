@@ -1,5 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { ProjectNotFoundError } from '@/app/route-error-cause'
+import { initializeWorkspace } from '@/infrastructure/storage/workspace-fs/root'
 
 export const Route = createFileRoute('/editor/$projectId')({
   // Editor loader data is tiny and migration state must be fresh on reopen.
@@ -11,6 +12,13 @@ export const Route = createFileRoute('/editor/$projectId')({
       import('@/shared/projects/migrations'),
       import('@/infrastructure/storage'),
     ])
+    
+    // Initialize workspace first
+    const ok = await initializeWorkspace()
+    if (!ok) {
+      throw new Error('Failed to initialize workspace')
+    }
+    
     // Validate project exists - actual loading happens in Editor via loadTimeline
     const project = await getProject(params.projectId)
 

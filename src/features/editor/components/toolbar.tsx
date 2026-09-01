@@ -1,24 +1,20 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
-import {
+import { 
   ArrowLeft,
-  BookOpen,
   Bug,
   ChevronDown,
   Download,
   FolderArchive,
-  Github,
   Keyboard,
   ListVideo,
   Save,
   Settings,
-  Sparkles,
+  Terminal,
   Video,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { DiscordIcon } from '@/components/brand/discord-icon'
-import { DISCORD_INVITE_URL } from '@/config/community'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -33,14 +29,13 @@ import { SettingsDialog } from './settings-dialog'
 import { ShortcutsDialog } from './shortcuts-dialog'
 import { UnsavedChangesDialog } from './unsaved-changes-dialog'
 import { WorkspaceSwitcher } from './workspace-switcher'
-import { WhatsNewDialog } from './whats-new-dialog'
-import { hasUnseenChangelog } from './whats-new-seen'
 import { EDITOR_LAYOUT_CSS_VALUES } from '@/config/editor-layout'
 import { cn } from '@/shared/ui/cn'
 import { LanguageSwitcher } from '@/shared/ui/language-switcher'
 import { useDebugStore } from '@/features/editor/stores/debug-store'
 import { useItemsStore, useTimelineStore } from '@/features/editor/deps/timeline-store'
 import { useMediaLibraryStore } from '@/features/editor/deps/media-library'
+import { useEditorStore } from '@/shared/state/editor'
 
 const SAVE_ANIMATION_MIN_MS = 1800
 
@@ -86,11 +81,10 @@ export const Toolbar = memo(function Toolbar({
 }: ToolbarProps) {
   const navigate = useNavigate()
   const { t } = useTranslation()
+  const toggleSclipChat = useEditorStore((s) => s.toggleSclipChat)
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false)
   const [showShortcutsDialog, setShowShortcutsDialog] = useState(false)
   const [showSettingsDialog, setShowSettingsDialog] = useState(false)
-  const [showWhatsNewDialog, setShowWhatsNewDialog] = useState(false)
-  const [hasUnseenWhatsNew, setHasUnseenWhatsNew] = useState(false)
   const [isSaveAnimating, setIsSaveAnimating] = useState(false)
   const [saveAnimationKey, setSaveAnimationKey] = useState(0)
   const saveAnimationTimeoutRef = useRef<number | undefined>(undefined)
@@ -112,21 +106,12 @@ export const Toolbar = memo(function Toolbar({
   )
 
   useEffect(() => {
-    setHasUnseenWhatsNew(hasUnseenChangelog())
-  }, [])
-
-  useEffect(() => {
     return () => {
       if (saveAnimationTimeoutRef.current !== undefined) {
         window.clearTimeout(saveAnimationTimeoutRef.current)
       }
     }
   }, [])
-
-  const openWhatsNew = () => {
-    setHasUnseenWhatsNew(false)
-    setShowWhatsNewDialog(true)
-  }
 
   const handleBackClick = () => {
     if (useTimelineStore.getState().isDirty) {
@@ -220,73 +205,13 @@ export const Toolbar = memo(function Toolbar({
 
       <ShortcutsDialog open={showShortcutsDialog} onOpenChange={setShowShortcutsDialog} />
 
-      <SettingsDialog open={showSettingsDialog} onOpenChange={setShowSettingsDialog} />
-
-      <WhatsNewDialog open={showWhatsNewDialog} onOpenChange={setShowWhatsNewDialog} />
+      <SettingsDialog projectId={projectId} open={showSettingsDialog} onOpenChange={setShowSettingsDialog} />
 
       <div className="flex items-center gap-1.5">
         {import.meta.env.DEV && import.meta.env.VITE_SHOW_DEBUG_PANEL !== 'false' && (
           <DebugPopover projectId={projectId} />
         )}
 
-        {/* Socials */}
-        <Button variant="outline" size="icon" className="h-7 w-7" asChild>
-          <a
-            href="https://github.com/walterlow/freecut"
-            target="_blank"
-            rel="noopener noreferrer"
-            data-tooltip={t('toolbar.viewOnGitHub')}
-            data-tooltip-side="bottom"
-            aria-label={t('toolbar.viewOnGitHub')}
-          >
-            <Github className="h-4 w-4" />
-          </a>
-        </Button>
-        <Button variant="outline" size="icon" className="h-7 w-7" asChild>
-          <a
-            href={DISCORD_INVITE_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            data-tooltip={t('toolbar.joinDiscord')}
-            data-tooltip-side="bottom"
-            aria-label={t('toolbar.joinDiscord')}
-          >
-            <DiscordIcon className="h-4 w-4" />
-          </a>
-        </Button>
-
-        <Separator orientation="vertical" className="h-5" />
-
-        {/* Utility */}
-        <Button variant="outline" size="icon" className="h-7 w-7" asChild>
-          <a
-            href="/docs"
-            target="_blank"
-            rel="noopener noreferrer"
-            data-tooltip="User Guide"
-            data-tooltip-side="bottom"
-            aria-label="User Guide"
-          >
-            <BookOpen className="h-4 w-4" />
-          </a>
-        </Button>
-        <Button
-          variant="outline"
-          size="icon"
-          className="h-7 w-7 relative"
-          onClick={openWhatsNew}
-          data-tooltip={t('toolbar.whatsNew')}
-          data-tooltip-side="bottom"
-          aria-label={t('toolbar.whatsNewAria')}
-        >
-          <Sparkles className="h-4 w-4" />
-          {hasUnseenWhatsNew && (
-            <span
-              className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-primary"
-              aria-hidden="true"
-            />
-          )}
-        </Button>
         <Button
           variant="outline"
           size="icon"
@@ -370,6 +295,19 @@ export const Toolbar = memo(function Toolbar({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+
+        {/* Sclip AI Terminal toggle */}
+        <Button
+          variant="outline"
+          size="icon"
+          className="h-7 w-7"
+          onClick={toggleSclipChat}
+          data-tooltip={t('toolbar.sclipTerminal')}
+          data-tooltip-side="bottom"
+          aria-label={t('toolbar.sclipTerminalAria')}
+        >
+          <Terminal className="h-4 w-4" />
+        </Button>
       </div>
     </div>
   )

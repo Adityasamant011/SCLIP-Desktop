@@ -40,6 +40,7 @@ export class GpuPipelineManager {
   readonly bitmapMaskTextureCache = new Map<string, GpuBitmapMaskTextureCacheEntry>()
 
   private effectsInitPromise: Promise<EffectsPipeline | null> | null = null
+  private effectsInitFailed = false
   private compositeCanvas: OffscreenCanvas | null = null
   private compositeCtx: GPUCanvasContext | null = null
   private compositeW = 0
@@ -49,9 +50,13 @@ export class GpuPipelineManager {
   // === GPU Effects Pipeline === (owns the GPU device; lazily created)
   async ensureEffects(): Promise<EffectsPipeline | null> {
     if (this.effects) return this.effects
+    if (this.effectsInitFailed) return null
     if (this.effectsInitPromise) return this.effectsInitPromise
     this.effectsInitPromise = EffectsPipeline.create().then((p) => {
       this.effects = p
+      if (!p) {
+        this.effectsInitFailed = true
+      }
       this.effectsInitPromise = null
       return p
     })
@@ -189,5 +194,6 @@ export class GpuPipelineManager {
     this.bitmapMaskTextureCache.clear()
     this.effects?.destroy()
     this.effects = null
+    this.effectsInitFailed = false
   }
 }

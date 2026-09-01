@@ -110,6 +110,12 @@ export { setInOutPointsWithoutHistory } from '../stores/actions/marker-actions'
 export { timelineToSourceFrames, sourceToTimelineFrames } from '../utils/source-calculations'
 export { searchTimelineTranscript } from '../utils/transcript-search'
 export type { TranscriptSearchMatch } from '../utils/transcript-search'
+export {
+  buildTranscriptTokens,
+  buildRemovalRangesByMediaId,
+  isTranscriptableItem,
+} from '../utils/transcript-edit-model'
+export type { TranscriptToken } from '../utils/transcript-edit-model'
 export { createScrubThrottleState, shouldCommitScrubFrame } from '../utils/scrub-throttle'
 export { initTransitionChainSubscription } from '../stores/transition-chain-store'
 

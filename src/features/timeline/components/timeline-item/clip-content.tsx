@@ -855,7 +855,11 @@ function hasBasicMediaVisuals(item: TimelineItem): boolean {
   if (item.type === 'audio') {
     return !!item.mediaId && !item.compositionId
   }
-  return item.type === 'image' && !!item.src && !!item.mediaId
+  // `src` is deliberately stripped when a project is saved because blob URLs
+  // die with the browser session. A restored image is therefore identified by
+  // its durable mediaId and ImageFilmstrip resolves a fresh URL on mount.
+  // Requiring both fields made dropped images work until the first restart.
+  return item.type === 'image' && !!item.mediaId
 }
 
 function getMediaVisualMinWidthPx(item: TimelineItem): number {

@@ -43,7 +43,10 @@ import {
   getBottomAnchoredSectionScrollTop,
   getTrackSectionLayout,
 } from '../utils/track-resize'
-import { clearMediaDragData } from '@/features/timeline/deps/media-library-resolver'
+import {
+  clearMediaDragData,
+  deferMediaDragDataCleanup,
+} from '@/features/timeline/deps/media-library-resolver'
 import { useNewTrackZonePreviewStore } from '../stores/new-track-zone-preview-store'
 import { useTrackDropPreviewStore } from '../stores/track-drop-preview-store'
 import { clearAllTimelineDropPreviewOwners } from '../utils/drop-preview-owner'
@@ -175,7 +178,7 @@ export const Timeline = memo(function Timeline({ duration }: TimelineProps) {
 
     const handleDragEnd = () => {
       clearExternalDropPreviews()
-      clearMediaDragData()
+      deferMediaDragDataCleanup()
     }
     const handleDragOver = (event: DragEvent) => {
       if (!isExternalTimelineDragEvent(event) || isDragEventOverTimelineDropTarget(event)) {

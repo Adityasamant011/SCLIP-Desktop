@@ -79,6 +79,9 @@ export {
   resolveEffectiveTrackStates,
   resolveTransitionTargetFromSelection,
   searchTimelineTranscript,
+  buildTranscriptTokens,
+  buildRemovalRangesByMediaId,
+  isTranscriptableItem,
   setTracks,
   sourceToTimelineFrames,
   Timeline,
@@ -105,3 +108,4 @@ export {
   wouldCreateCompositionCycle,
   isTimelineTemplateDragData,
 } from '@/features/timeline/contracts/editor'
+export type { TranscriptToken } from '@/features/timeline/contracts/editor'

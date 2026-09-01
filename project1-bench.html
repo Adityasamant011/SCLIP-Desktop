@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Project 1 Playback Profiler</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 20px;
+      background: #09090b;
+      color: #f4f4f5;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+    #root {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    .preview-container {
+      width: 960px;
+      height: 540px;
+      position: relative;
+      background: #000;
+      border: 1px solid #27272a;
+      overflow: hidden;
+    }
+    .metrics-log {
+      width: 960px;
+      background: #18181b;
+      border: 1px solid #27272a;
+      padding: 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/bench/project1-bench.tsx"></script>
+</body>
+</html>

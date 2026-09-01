@@ -41,6 +41,12 @@ import { useDragVisualState } from './use-drag-visual-state'
 import { useTimelineItemActions } from './use-timeline-item-actions'
 import { useTimelineItemDropHandlers } from './use-timeline-item-drop-handlers'
 import { ItemContextMenu } from './item-context-menu'
+import {
+  copySclipReference,
+  createTimelineItemSclipReference,
+} from '@/features/editor/agent/sclip-reference'
+import { useProjectStore } from '@/features/editor/deps/projects'
+import { toast } from 'sonner'
 import { useAutoTranscriptCaptions } from './use-auto-transcript-captions'
 import { useSmartTrimHover } from './use-smart-trim-hover'
 import { useContextMenuState } from './use-context-menu-state'
@@ -836,6 +842,16 @@ export const TimelineItem = memo(function TimelineItem({
     isDragging,
     dragOffsetX: dragOffset.x,
   })
+  const handleCopySclipReference = useCallback(() => {
+    const projectId = useProjectStore.getState().currentProject?.id
+    if (!projectId) {
+      toast.error('Open a project before copying a SCLIP reference.')
+      return
+    }
+    void copySclipReference(createTimelineItemSclipReference(projectId, item))
+      .then(() => toast.success('SCLIP reference copied. Paste it into Hermes.'))
+      .catch(() => toast.error('Could not copy the SCLIP reference.'))
+  }, [item])
 
   if (isHiddenByLinkedEditPreview) {
     return null
@@ -867,6 +883,9 @@ export const TimelineItem = memo(function TimelineItem({
         }}
         layoutActions={{
           onBentoLayout: handleBentoLayout,
+        }}
+        sclipReferenceActions={{
+          onCopySclipReference: handleCopySclipReference,
         }}
         mediaActions={{
           canReverse: item.type === 'video' || item.type === 'audio',
@@ -919,6 +938,9 @@ export const TimelineItem = memo(function TimelineItem({
       >
         <div
           ref={transformRef}
+          role="button"
+          tabIndex={trackLocked ? -1 : 0}
+          aria-label={`Timeline clip ${item.label || item.type}`}
           data-timeline-item
           data-item-id={item.id}
           data-timeline-start-frame={visualLeftFrame}
@@ -971,6 +993,11 @@ export const TimelineItem = memo(function TimelineItem({
             } as React.CSSProperties
           }
           onClick={handleClick}
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return
+            event.preventDefault()
+            event.currentTarget.click()
+          }}
           onDoubleClick={handleDoubleClick}
           onMouseDown={handleMouseDown}
           onMouseEnter={() => onHoverChange?.(item.id, true)}

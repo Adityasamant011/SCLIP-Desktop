@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
+import { invoke } from '@tauri-apps/api/core'
 import { useTranslation } from 'react-i18next'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import type { TFunction } from 'i18next'
@@ -101,6 +102,7 @@ function formatCaptionEstimate(t: TFunction, unit: CaptioningIntervalUnit, value
 type SettingsSectionId = (typeof SETTINGS_SECTIONS)[number]['id']
 
 interface SettingsDialogProps {
+  projectId: string
   open: boolean
   onOpenChange: (open: boolean) => void
 }
@@ -115,6 +117,32 @@ interface BatchActionResult {
 interface ActionFeedback {
   tone: 'success' | 'error'
   message: string
+}
+
+interface HermesProviderOption {
+  slug: string
+  name?: string
+  models?: Array<string | { id?: string; name?: string }>
+  authenticated?: boolean
+  configured?: boolean
+  auth_type?: 'api_key' | 'oauth' | string
+  api_key_env?: string
+}
+
+interface HermesGatewayConnection {
+  url: string
+}
+
+interface AgentPendingRequest {
+  resolve: (value: any) => void
+  reject: (error: Error) => void
+  timeoutId: number
+}
+
+function modelIds(provider: HermesProviderOption | undefined): string[] {
+  return (provider?.models ?? [])
+    .map((model) => (typeof model === 'string' ? model : model.id ?? model.name ?? ''))
+    .filter(Boolean)
 }
 
 type BatchActionId = 'clearCache' | 'regenerateThumbnails' | 'deleteProxies'
@@ -365,7 +393,7 @@ async function regenerateProjectThumbnails(
   return result
 }
 
-export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
+export function SettingsDialog({ projectId, open, onOpenChange }: SettingsDialogProps) {
   const { t } = useTranslation()
   const snapEnabled = useSettingsStore((s) => s.snapEnabled)
   const showWaveforms = useSettingsStore((s) => s.showWaveforms)
@@ -428,6 +456,197 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const [clearFeedback, setClearFeedback] = useState<ActionFeedback | null>(null)
   const [regenFeedback, setRegenFeedback] = useState<ActionFeedback | null>(null)
   const [proxyFeedback, setProxyFeedback] = useState<ActionFeedback | null>(null)
+  const agentSocketRef = useRef<WebSocket | null>(null)
+  const agentRpcIdRef = useRef(0)
+  const agentRequestsRef = useRef(new Map<string, AgentPendingRequest>())
+  const [agentProviders, setAgentProviders] = useState<HermesProviderOption[]>([])
+  const [agentProvider, setAgentProvider] = useState('')
+  const [agentModel, setAgentModel] = useState('')
+  const [agentActiveProvider, setAgentActiveProvider] = useState('')
+  const [agentActiveModel, setAgentActiveModel] = useState('')
+  const [agentApiKey, setAgentApiKey] = useState('')
+  const [agentSettingsLoading, setAgentSettingsLoading] = useState(false)
+  const [agentSettingsSaving, setAgentSettingsSaving] = useState(false)
+
+  const agentRpc = useCallback((
+    method: string,
+    params: Record<string, unknown> = {},
+    timeoutMs = 30_000,
+  ) => {
+    const socket = agentSocketRef.current
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      return Promise.reject(new Error('Hermes agent settings are not connected'))
+    }
+    const id = String(++agentRpcIdRef.current)
+    socket.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }))
+    return new Promise<any>((resolve, reject) => {
+      const timeoutId = window.setTimeout(() => {
+        agentRequestsRef.current.delete(id)
+        reject(new Error(`Hermes did not finish ${method} within ${Math.round(timeoutMs / 1000)} seconds`))
+      }, timeoutMs)
+      agentRequestsRef.current.set(id, { resolve, reject, timeoutId })
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!open || activeSection !== 'ai') return
+    let disposed = false
+    setAgentSettingsLoading(true)
+    const connect = async () => {
+      const gateway = await invoke<HermesGatewayConnection>('get_sclip_agent_gateway', { projectId })
+      await new Promise<void>((resolve, reject) => {
+        const socket = new WebSocket(gateway.url)
+        agentSocketRef.current = socket
+        const timeout = window.setTimeout(() => reject(new Error('Hermes agent settings timed out')), 15_000)
+        socket.onopen = () => { window.clearTimeout(timeout); resolve() }
+        socket.onerror = () => { window.clearTimeout(timeout); reject(new Error('Could not connect to Hermes agent settings')) }
+        socket.onmessage = (event) => {
+          try {
+            const frame = JSON.parse(String(event.data)) as { id?: string | number; result?: unknown; error?: { message?: string } }
+            if (frame.id === undefined) return
+            const request = agentRequestsRef.current.get(String(frame.id))
+            if (!request) return
+            agentRequestsRef.current.delete(String(frame.id))
+            window.clearTimeout(request.timeoutId)
+            if (frame.error) request.reject(new Error(frame.error.message || 'Hermes request failed'))
+            else request.resolve(frame.result)
+          } catch { /* Ignore non-RPC diagnostics. */ }
+        }
+      })
+      const options = await agentRpc('model.options', {
+        include_unconfigured: true,
+      })
+      const providers = (options.providers ?? []) as HermesProviderOption[]
+      if (disposed) return
+      setAgentProviders(providers)
+      const current = providers.find((provider) => provider.slug === options.provider)
+        ?? providers.find((provider) => provider.configured || provider.authenticated)
+        ?? providers[0]
+      if (current) {
+        setAgentProvider(current.slug)
+        setAgentModel(typeof options.model === 'string' && options.model ? options.model : modelIds(current)[0] ?? '')
+      }
+      setAgentActiveProvider(typeof options.provider === 'string' ? options.provider : '')
+      setAgentActiveModel(typeof options.model === 'string' ? options.model : '')
+    }
+    const connectWithRetry = async () => {
+      let lastError: unknown
+      for (let attempt = 0; attempt < 40 && !disposed; attempt++) {
+        try {
+          return await connect()
+        } catch (error) {
+          lastError = error
+          agentSocketRef.current?.close()
+          agentSocketRef.current = null
+          await new Promise((resolve) => window.setTimeout(resolve, 250))
+        }
+      }
+      throw lastError instanceof Error ? lastError : new Error('Could not connect to Hermes agent settings')
+    }
+    void connectWithRetry()
+      .catch((error) => {
+        if (!disposed) {
+          log.error('Failed to read Hermes model settings', error)
+          toast.error('Could not load Hermes model settings')
+        }
+      })
+      .finally(() => { if (!disposed) setAgentSettingsLoading(false) })
+    return () => {
+      disposed = true
+      agentSocketRef.current?.close()
+      agentSocketRef.current = null
+      for (const request of agentRequestsRef.current.values()) {
+        window.clearTimeout(request.timeoutId)
+        request.reject(new Error('Hermes settings closed'))
+      }
+      agentRequestsRef.current.clear()
+    }
+  }, [activeSection, agentRpc, open, projectId])
+
+  const handleRefreshAgentModels = useCallback(async () => {
+    if (!agentSocketRef.current || agentSocketRef.current.readyState !== WebSocket.OPEN) return
+    setAgentSettingsLoading(true)
+    try {
+      const options = await agentRpc('model.options', {
+        include_unconfigured: true,
+        refresh: true,
+      }, 45_000)
+      const providers = (options.providers ?? []) as HermesProviderOption[]
+      setAgentProviders(providers)
+      const current = providers.find((provider) => provider.slug === agentProvider) ?? providers[0]
+      if (current && !modelIds(current).includes(agentModel)) {
+        setAgentModel(modelIds(current)[0] ?? '')
+      }
+      setAgentActiveProvider(typeof options.provider === 'string' ? options.provider : '')
+      setAgentActiveModel(typeof options.model === 'string' ? options.model : '')
+      toast.success('Model catalog refreshed')
+    } catch (error) {
+      log.error('Failed to refresh Hermes model catalog', error)
+      toast.error(error instanceof Error ? error.message : 'Could not refresh the model catalog')
+    } finally {
+      setAgentSettingsLoading(false)
+    }
+  }, [agentModel, agentProvider, agentRpc])
+
+  const handleSaveAgentSettings = useCallback(async () => {
+    const model = agentModel.trim()
+    if (!agentProvider || !model) {
+      toast.error('Choose a Hermes provider and model')
+      return
+    }
+    setAgentSettingsSaving(true)
+    try {
+      if (agentApiKey.trim()) {
+        await agentRpc('model.save_key', {
+          slug: agentProvider,
+          api_key: agentApiKey.trim(),
+        }, 45_000)
+      }
+      await agentRpc('config.set', {
+        key: 'model',
+        value: `${model} --provider ${agentProvider} --global`,
+        confirm_expensive_model: true,
+      }, 45_000)
+
+      const verified = await agentRpc('model.options', { include_unconfigured: true })
+      const verifiedProvider = typeof verified.provider === 'string' ? verified.provider : ''
+      const verifiedModel = typeof verified.model === 'string' ? verified.model : ''
+      if (verifiedProvider !== agentProvider || verifiedModel !== model) {
+        throw new Error(`Hermes kept ${verifiedProvider || 'an unknown provider'} / ${verifiedModel || 'an unknown model'} instead of the selected model`)
+      }
+
+      // The global Hermes configuration controls new chats. Move the existing
+      // project chat too, so the very next message uses the model the user just
+      // selected. A persisted conversation id is not necessarily Hermes' live
+      // runtime id, so resume/reuse it first and switch the returned runtime.
+      // Hermes safely defers this switch when a turn is already in flight.
+      const latestSession = await agentRpc('session.most_recent', {}, 15_000)
+      if (latestSession?.session_id) {
+        const resumedSession = await agentRpc('session.resume', {
+          session_id: String(latestSession.session_id),
+          source: 'desktop',
+          cols: 80,
+        }, 90_000)
+        await agentRpc('config.set', {
+          key: 'model',
+          session_id: String(resumedSession.session_id),
+          value: `${model} --provider ${agentProvider}`,
+          confirm_expensive_model: true,
+        }, 45_000)
+      }
+
+      await invoke('sync_sclip_hermes_agent_settings', { projectId })
+      setAgentActiveProvider(verifiedProvider)
+      setAgentActiveModel(verifiedModel)
+      setAgentApiKey('')
+      toast.success('LLM connected and verified', { description: `${verifiedProvider} · ${verifiedModel}` })
+    } catch (error) {
+      log.error('Failed to save Hermes model settings', error)
+      toast.error(error instanceof Error ? error.message : 'Could not save Hermes model settings')
+    } finally {
+      setAgentSettingsSaving(false)
+    }
+  }, [agentApiKey, agentModel, agentProvider, agentRpc, projectId])
 
   const handleClearCache = useCallback(async () => {
     setClearState('clearing')
@@ -770,6 +989,112 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
                     {activeSection === 'ai' && (
                       <div className="space-y-3">
+                        <div className="space-y-3 rounded-lg border border-border bg-secondary/25 p-3">
+                          <div className="space-y-0.5">
+                            <Label className="text-sm">LLM</Label>
+                            <p className="text-xs text-muted-foreground">
+                              Uses Hermes’ provider catalog, saved credentials, and model configuration. SCLIP only adds its editor tools and keeps chats private to this project.
+                            </p>
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label htmlFor="sclip-agent-provider" className="text-xs text-muted-foreground">
+                              Provider
+                            </Label>
+                            <Select
+                              value={agentProvider}
+                              onValueChange={(provider) => {
+                                setAgentProvider(provider)
+                                setAgentModel(modelIds(agentProviders.find((item) => item.slug === provider))[0] ?? '')
+                              }}
+                              disabled={agentSettingsLoading || agentSettingsSaving}
+                            >
+                              <SelectTrigger id="sclip-agent-provider"><SelectValue placeholder="Choose a Hermes provider" /></SelectTrigger>
+                              <SelectContent>
+                                {agentProviders.map((provider) => (
+                                  <SelectPrimitive.Item key={provider.slug} value={provider.slug} className="relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-2 pr-2 text-sm outline-none focus:bg-accent focus:text-accent-foreground">
+                                    <SelectPrimitive.ItemText>{provider.name || provider.slug}{provider.authenticated || provider.configured ? '' : ' — connect required'}</SelectPrimitive.ItemText>
+                                  </SelectPrimitive.Item>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between gap-2">
+                              <Label htmlFor="sclip-agent-model" className="text-xs text-muted-foreground">
+                                Search or enter model ID
+                              </Label>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 px-1.5 text-xs"
+                                onClick={() => void handleRefreshAgentModels()}
+                                disabled={agentSettingsLoading || agentSettingsSaving || !agentProvider}
+                              >
+                                <RotateCcw className="mr-1 h-3 w-3" /> Refresh catalog
+                              </Button>
+                            </div>
+                            <Input
+                              id="sclip-agent-model"
+                              list="sclip-agent-model-options"
+                              value={agentModel}
+                              onChange={(event) => setAgentModel(event.target.value)}
+                              placeholder="Type to search every available model"
+                              disabled={agentSettingsLoading || agentSettingsSaving || !agentProvider}
+                              autoComplete="off"
+                            />
+                            <datalist id="sclip-agent-model-options">
+                              {modelIds(agentProviders.find((provider) => provider.slug === agentProvider)).map((model) => (
+                                <option key={model} value={model} />
+                              ))}
+                            </datalist>
+                            <p className="text-[11px] text-muted-foreground">
+                              {modelIds(agentProviders.find((provider) => provider.slug === agentProvider)).length
+                                ? `Search ${modelIds(agentProviders.find((provider) => provider.slug === agentProvider)).length} models, or paste any valid model ID.`
+                                : 'Refresh after connecting this provider to load its model catalog.'}
+                            </p>
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label htmlFor="sclip-agent-key" className="text-xs text-muted-foreground">
+                              API key (only when the provider uses one)
+                            </Label>
+                            <Input
+                              id="sclip-agent-key"
+                              type="password"
+                              autoComplete="off"
+                              value={agentApiKey}
+                              onChange={(event) => setAgentApiKey(event.target.value)}
+                              placeholder="Paste a provider key to connect or replace it"
+                              disabled={agentSettingsLoading || agentSettingsSaving || !agentProvider}
+                            />
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            API-key providers connect here using Hermes’ credential store. OAuth or local providers remain available in the Hermes catalog; use their normal Hermes connection flow when required.
+                          </p>
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="min-w-0 space-y-1 text-xs text-muted-foreground">
+                              <p>
+                                {agentSettingsLoading ? 'Loading Hermes providers…' : agentProviders.length ? `${agentProviders.length} Hermes providers available` : 'No Hermes providers found'}
+                              </p>
+                              {agentActiveProvider && agentActiveModel && (
+                                <p className="flex items-center gap-1 text-emerald-400">
+                                  <Check className="h-3.5 w-3.5 shrink-0" />
+                                  <span className="truncate">Active: {agentActiveProvider} · {agentActiveModel}</span>
+                                </p>
+                              )}
+                            </div>
+                            <Button
+                              type="button"
+                              size="sm"
+                              onClick={() => void handleSaveAgentSettings()}
+                              disabled={agentSettingsLoading || agentSettingsSaving || !agentProvider || !agentModel}
+                            >
+                              {agentSettingsSaving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+                              {agentSettingsSaving ? 'Verifying…' : agentActiveModel ? 'Change LLM' : 'Connect LLM'}
+                            </Button>
+                          </div>
+                        </div>
+
                         <div className="space-y-2">
                           <div className="flex items-center justify-between">
                             <div className="space-y-0.5">

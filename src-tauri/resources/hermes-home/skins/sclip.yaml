@@ -1,0 +1,35 @@
+name: sclip
+description: SCLIP's built-in editor agent identity.
+colors:
+  background: "#0d1117"
+  banner_border: "#7c3aed"
+  banner_title: "#c4b5fd"
+  banner_accent: "#a78bfa"
+  banner_dim: "#8b7bb8"
+  banner_text: "#e9e7ff"
+  ui_accent: "#a78bfa"
+  ui_label: "#c4b5fd"
+  prompt: "#f5f3ff"
+  input_rule: "#7c3aed"
+  response_border: "#a78bfa"
+  status_bar_bg: "#171225"
+  status_bar_text: "#e9e7ff"
+  status_bar_strong: "#c4b5fd"
+  status_bar_dim: "#9a91b6"
+  session_label: "#c4b5fd"
+  session_border: "#5f5680"
+branding:
+  agent_name: "SCLIP"
+  welcome: "Welcome to SCLIP. Describe the video edit you want to make."
+  goodbye: "SCLIP session closed."
+  response_label: " ✦ SCLIP "
+  prompt_symbol: "✦"
+  help_header: "✦ SCLIP Commands"
+tool_prefix: "┊"
+banner_logo: |
+  [bold #c4b5fd]███████╗ ██████╗██╗     ██╗██████╗[/]
+  [bold #a78bfa]██╔════╝██╔════╝██║     ██║██╔══██╗[/]
+  [bold #a78bfa]███████╗██║     ██║     ██║██████╔╝[/]
+  [bold #8b5cf6]╚════██║██║     ██║     ██║██╔═══╝[/]
+  [bold #7c3aed]███████║╚██████╗███████╗██║██║[/]
+  [bold #6d28d9]╚══════╝ ╚═════╝╚══════╝╚═╝╚═╝[/]

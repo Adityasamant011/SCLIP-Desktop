@@ -164,6 +164,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set) => ({
     }
   })(),
   trackSizePreset: loadTrackSizePreset(),
+  sclipChatOpen: false,
 
   // Actions
   setActivePanel: (panel) => set({ activePanel: panel }),
@@ -397,4 +398,6 @@ export const useEditorStore = create<EditorState & EditorActions>((set) => ({
     }
     set({ trackSizePreset: preset })
   },
+  setSclipChatOpen: (open) => set({ sclipChatOpen: open }),
+  toggleSclipChat: () => set((state) => ({ sclipChatOpen: !state.sclipChatOpen })),
 }))

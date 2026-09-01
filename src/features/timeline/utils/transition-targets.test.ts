@@ -69,7 +69,7 @@ function createCompoundClip(
 }
 
 describe('transition-targets', () => {
-  it('returns a valid edge target with duration clamped to available handle', () => {
+  it('returns a valid edge target with edge holds when handles are short', () => {
     const items = [
       createVideoClip('left', 0, 60, 0, 72, 120),
       createVideoClip('right', 60, 60, 8, 68, 120),
@@ -88,12 +88,13 @@ describe('transition-targets', () => {
       rightClipId: 'right',
       canApply: true,
       hasExisting: false,
-      maxDurationInFrames: 17,
-      suggestedDurationInFrames: 17,
+      maxDurationInFrames: 59,
+      suggestedDurationInFrames: 30,
+      usesEdgeHold: true,
     })
   })
 
-  it('returns an invalid target when there is not enough handle at the cut', () => {
+  it('keeps a full-source video cut usable with edge holds', () => {
     const items = [
       createVideoClip('left', 0, 60, 0, 60, 60),
       createVideoClip('right', 60, 60, 0, 60, 60),
@@ -109,13 +110,15 @@ describe('transition-targets', () => {
     expect(target).toMatchObject({
       leftClipId: 'left',
       rightClipId: 'right',
-      canApply: false,
+      canApply: true,
       hasExisting: false,
+      maxDurationInFrames: 59,
+      suggestedDurationInFrames: 30,
+      usesEdgeHold: true,
     })
-    expect(target?.reason).toContain('Not enough source handle')
   })
 
-  it('rejects drop targets when the chosen alignment cannot keep the requested duration', () => {
+  it('allows a side-aligned video drop with an edge hold when needed', () => {
     const items = [
       createVideoClip('left', 0, 60, 0, 72, 84),
       createVideoClip('right', 60, 60, 30, 90, 120),
@@ -134,13 +137,13 @@ describe('transition-targets', () => {
     expect(target).toMatchObject({
       leftClipId: 'left',
       rightClipId: 'right',
-      canApply: false,
+      canApply: true,
       hasExisting: false,
-      maxDurationInFrames: 12,
+      maxDurationInFrames: 59,
       suggestedDurationInFrames: 30,
       alignment: 0,
+      usesEdgeHold: true,
     })
-    expect(target?.reason).toContain('placement and duration')
   })
 
   it('allows the same cut to accept a side-aligned drop when that placement has enough handle', () => {
@@ -164,7 +167,7 @@ describe('transition-targets', () => {
       rightClipId: 'right',
       canApply: true,
       hasExisting: false,
-      maxDurationInFrames: 30,
+      maxDurationInFrames: 59,
       suggestedDurationInFrames: 30,
       alignment: 1,
     })

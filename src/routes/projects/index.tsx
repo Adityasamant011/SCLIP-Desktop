@@ -3,14 +3,12 @@ import { useEffect, useState, useRef } from 'react'
 import { Trans, useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { createLogger } from '@/shared/logging/logger'
+import { initializeWorkspace } from '@/infrastructure/storage/workspace-fs/root'
 
 const logger = createLogger('ProjectsIndex')
 import { Button } from '@/components/ui/button'
-import { Separator } from '@/components/ui/separator'
-import { Plus, Upload, FolderOpen, File, Github, BookOpen } from 'lucide-react'
-import { FreeCutLogo } from '@/components/brand/freecut-logo'
-import { DiscordIcon } from '@/components/brand/discord-icon'
-import { DISCORD_INVITE_URL } from '@/config/community'
+import { Plus, Upload, FolderOpen, File } from 'lucide-react'
+import { SclipLogo } from '@/components/brand/sclip-logo'
 import { ProjectList } from '@/features/projects/components/project-list'
 import { EditProjectForm } from '@/features/projects/components/project-form'
 import {
@@ -38,13 +36,17 @@ import { LegacyMigrationBanner } from '@/features/projects/components/legacy-mig
 import { LegacyMigrationErrors } from '@/features/projects/components/legacy-migration-errors'
 import { TrashSection } from '@/features/projects/components/trash-section'
 import { WorkspaceIndicator } from '@/features/workspace-gate'
-import { LanguageSwitcher } from '@/shared/ui/language-switcher'
 
 export const Route = createFileRoute('/projects/')({
   component: ProjectsIndex,
   // Clean up any media blob URLs when returning to projects page
   beforeLoad: async () => {
     cleanupBlobUrls()
+    // Initialize workspace first - this must complete before loadProjects
+    const ok = await initializeWorkspace()
+    if (!ok) {
+      throw new Error('Failed to initialize workspace')
+    }
     // Always reload projects from storage to get fresh data (thumbnails may have changed)
     const { loadProjects } = useProjectStore.getState()
     await loadProjects()
@@ -63,13 +65,13 @@ function ProjectsIndex() {
   const [projectNameFromFile, setProjectNameFromFile] = useState<string | null>(null)
   const [destinationDir, setDestinationDir] = useState<FileSystemDirectoryHandle | null>(null)
   const [destinationName, setDestinationName] = useState<string | null>(null)
-  const [useProjectsFolder, setUseProjectsFolder] = useState(true) // Create FreeCutProjects subfolder
+  const [useProjectsFolder, setUseProjectsFolder] = useState(true) // Create SCLIPProjects subfolder
   const [importDialogOpen, setImportDialogOpen] = useState(false)
   const [importProgress, setImportProgress] = useState<ImportProgress | null>(null)
   const [importError, setImportError] = useState<string | null>(null)
   const [isImporting, setIsImporting] = useState(false)
 
-  const PROJECTS_FOLDER_NAME = 'FreeCutProjects'
+  const PROJECTS_FOLDER_NAME = 'SCLIPProjects'
 
   // Extract project name from bundle filename
   // Handles both "myproject.freecut.zip" and browser-renamed "myproject.freecut (1).zip"
@@ -171,7 +173,7 @@ function ProjectsIndex() {
     setImportProgress({ percent: 0, stage: 'validating' })
 
     try {
-      // If useProjectsFolder is enabled, create/get the FreeCutProjects subfolder first
+      // If useProjectsFolder is enabled, create/get the SCLIPProjects subfolder first
       let finalDestination = destinationDir
       if (useProjectsFolder) {
         try {
@@ -179,7 +181,7 @@ function ProjectsIndex() {
             create: true,
           })
         } catch (err) {
-          logger.error('Failed to create FreeCutProjects folder:', err)
+          logger.error('Failed to create SCLIPProjects folder:', err)
           throw new Error(t('projects.import.createFolderFailed', { folder: PROJECTS_FOLDER_NAME }))
         }
       }
@@ -265,43 +267,13 @@ function ProjectsIndex() {
         <div className="panel-header border-b border-border" data-no-marquee>
           <div className="max-w-[1920px] mx-auto px-6 py-5 flex items-center justify-between">
             <Link to="/">
-              <FreeCutLogo
+              <SclipLogo
                 variant="full"
                 size="md"
                 className="hover:opacity-80 transition-opacity"
               />
             </Link>
             <div className="flex items-center gap-3">
-              <LanguageSwitcher size="md" align="end" side="bottom" />
-
-              <Separator orientation="vertical" className="h-6" />
-
-              <Button variant="outline" size="lg" className="gap-2 px-4" asChild>
-                <Link to="/docs">
-                  <BookOpen className="w-4 h-4" />
-                  Docs
-                </Link>
-              </Button>
-              <Button variant="outline" size="lg" className="gap-2 px-4" asChild>
-                <a href={DISCORD_INVITE_URL} target="_blank" rel="noopener noreferrer">
-                  <DiscordIcon className="w-4 h-4" />
-                  Discord
-                </a>
-              </Button>
-              <Button variant="outline" size="lg" className="gap-2 px-4" asChild>
-                <a
-                  href="https://github.com/walterlow/freecut"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  aria-label={t('projects.viewOnGitHub')}
-                >
-                  <Github className="w-4 h-4" />
-                  GitHub
-                </a>
-              </Button>
-
-              <Separator orientation="vertical" className="h-6" />
-
               <WorkspaceIndicator />
               <Button
                 variant="outline"
@@ -482,7 +454,7 @@ function ProjectsIndex() {
                   )}
                 </Button>
 
-                {/* FreeCutProjects subfolder option */}
+                {/* SCLIPProjects subfolder option */}
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="checkbox"

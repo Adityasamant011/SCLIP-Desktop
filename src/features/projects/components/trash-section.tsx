@@ -46,6 +46,28 @@ import { formatRelativeTime } from '../utils/project-helpers'
 
 const logger = createLogger('TrashSection')
 
+// Filesystem deletes normally complete quickly. Do not let an unavailable
+// drive or a stalled native filesystem command leave the whole Trash UI
+// disabled indefinitely.
+const PERMANENT_DELETE_TIMEOUT_MS = 60_000
+
+async function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null
+
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error(`${label} timed out after ${PERMANENT_DELETE_TIMEOUT_MS / 1000}s`))
+        }, PERMANENT_DELETE_TIMEOUT_MS)
+      }),
+    ])
+  } finally {
+    if (timeoutId !== null) clearTimeout(timeoutId)
+  }
+}
+
 type ConfirmTarget =
   | { kind: 'single'; id: string; name: string }
   | { kind: 'empty'; count: number }
@@ -105,15 +127,26 @@ export function TrashSection() {
   const handleDeleteForever = useCallback(
     async (entry: TrashedProjectEntry) => {
       setBusyId(entry.id)
-      const result = await permanentlyDeleteProject(entry.id)
-      setBusyId(null)
-      if (result.success) {
-        toast.success(t('projects.trash.deletedForever', { name: entry.marker.originalName }))
-        // Permanent delete doesn't touch the live projects list, so we
-        // refresh the trash list by hand.
-        await refresh()
-      } else {
-        toast.error(t('projects.toasts.deleteFailed'), { description: result.error })
+      try {
+        const result = await withTimeout(
+          permanentlyDeleteProject(entry.id),
+          `Deleting "${entry.marker.originalName}"`,
+        )
+        if (result.success) {
+          toast.success(t('projects.trash.deletedForever', { name: entry.marker.originalName }))
+          // Permanent delete doesn't touch the live projects list, so we
+          // refresh the trash list by hand.
+          await refresh()
+        } else {
+          toast.error(t('projects.toasts.deleteFailed'), { description: result.error })
+        }
+      } catch (error) {
+        logger.warn(`Failed to permanently delete ${entry.id}`, error)
+        toast.error(t('projects.toasts.deleteFailed'), {
+          description: error instanceof Error ? error.message : 'Failed to delete project',
+        })
+      } finally {
+        setBusyId(null)
       }
     },
     [permanentlyDeleteProject, refresh, t],
@@ -125,22 +158,36 @@ export function TrashSection() {
     setIsEmptying(true)
     let succeeded = 0
     const failures: string[] = []
-    for (const entry of snapshot) {
-      const result = await permanentlyDeleteProject(entry.id)
-      if (result.success) succeeded++
-      else failures.push(entry.marker.originalName)
-    }
-    setIsEmptying(false)
-    await refresh()
+    try {
+      for (const entry of snapshot) {
+        try {
+          const result = await withTimeout(
+            permanentlyDeleteProject(entry.id),
+            `Deleting "${entry.marker.originalName}"`,
+          )
+          if (result.success) succeeded++
+          else failures.push(entry.marker.originalName)
+        } catch (error) {
+          logger.warn(`Failed to permanently delete ${entry.id} while emptying trash`, error)
+          failures.push(entry.marker.originalName)
+        }
+      }
 
-    if (failures.length === 0) {
-      toast.success(t('projects.trash.emptiedTrash', { count: succeeded }))
-    } else {
-      toast.error(t('projects.trash.emptiedTrashWithFailures', { count: failures.length }), {
-        description: t('projects.trash.couldNotDelete', {
-          names: `${failures.slice(0, 3).join(', ')}${failures.length > 3 ? '…' : ''}`,
-        }),
-      })
+      await refresh()
+
+      if (failures.length === 0) {
+        toast.success(t('projects.trash.emptiedTrash', { count: succeeded }))
+      } else {
+        toast.error(t('projects.trash.emptiedTrashWithFailures', { count: failures.length }), {
+          description: t('projects.trash.couldNotDelete', {
+            names: `${failures.slice(0, 3).join(', ')}${failures.length > 3 ? '…' : ''}`,
+          }),
+        })
+      }
+    } finally {
+      // This must run even if a storage adapter throws unexpectedly. Without
+      // it, the UI can remain in the "Emptying…" state forever.
+      setIsEmptying(false)
     }
   }, [entries, permanentlyDeleteProject, refresh, t])
 

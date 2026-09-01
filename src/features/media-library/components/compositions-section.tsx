@@ -33,7 +33,7 @@ import {
   wouldCreateCompositionCycle,
 } from '@/features/media-library/deps/timeline-stores'
 import { useMediaLibraryStore } from '../stores/media-library-store'
-import { setMediaDragData, clearMediaDragData } from '../utils/drag-data-cache'
+import { setMediaDragData, deferMediaDragDataCleanup } from '../utils/drag-data-cache'
 import { GRID_MIN_SIZE_PX, GRID_GAP_BY_SIZE } from './media-grid-constants'
 import { CARD_GRID_BASE, CARD_LIST_BASE, CARD_PERF_STYLE } from './card-styles'
 import { compoundClipThumbnailService } from '../services/compound-clip-thumbnail-service'
@@ -514,7 +514,7 @@ const CompositionCardInternal = memo(function CompositionCardInternal({
   )
 
   const handleDragEnd = useCallback(() => {
-    clearMediaDragData()
+    deferMediaDragDataCleanup()
   }, [])
 
   const handleDoubleClick = useCallback(() => {

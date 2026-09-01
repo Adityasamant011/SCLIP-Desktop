@@ -7,7 +7,10 @@ export {
 export {
   getMediaDragData,
   clearMediaDragData,
+  deferMediaDragDataCleanup,
+  SCLIP_MEDIA_POINTER_DROP_EVENT,
   type CompositionDragData,
+  type SclipMediaPointerDropDetail,
 } from '@/features/media-library/utils/drag-data-cache'
 export {
   extractValidMediaFileEntriesFromDataTransfer,

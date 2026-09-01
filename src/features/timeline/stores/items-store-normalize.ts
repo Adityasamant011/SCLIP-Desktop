@@ -114,6 +114,27 @@ export function normalizeItemUpdates(updates: Partial<TimelineItem>): Partial<Ti
     normalized.strokeWidth = MIN_ENABLED_STROKE_WIDTH
   }
 
+  if (normalized.fadeIn !== undefined) {
+    if (typeof normalized.fadeIn === 'boolean') normalized.fadeIn = normalized.fadeIn ? 0.5 : 0
+    else if (typeof normalized.fadeIn === 'string') normalized.fadeIn = Number(normalized.fadeIn) || 0
+    else if (typeof normalized.fadeIn !== 'number' || !Number.isFinite(normalized.fadeIn)) normalized.fadeIn = 0
+  }
+  if (normalized.fadeOut !== undefined) {
+    if (typeof normalized.fadeOut === 'boolean') normalized.fadeOut = normalized.fadeOut ? 0.5 : 0
+    else if (typeof normalized.fadeOut === 'string') normalized.fadeOut = Number(normalized.fadeOut) || 0
+    else if (typeof normalized.fadeOut !== 'number' || !Number.isFinite(normalized.fadeOut)) normalized.fadeOut = 0
+  }
+  if (normalized.audioFadeIn !== undefined) {
+    if (typeof normalized.audioFadeIn === 'boolean') normalized.audioFadeIn = normalized.audioFadeIn ? 0.5 : 0
+    else if (typeof normalized.audioFadeIn === 'string') normalized.audioFadeIn = Number(normalized.audioFadeIn) || 0
+    else if (typeof normalized.audioFadeIn !== 'number' || !Number.isFinite(normalized.audioFadeIn)) normalized.audioFadeIn = 0
+  }
+  if (normalized.audioFadeOut !== undefined) {
+    if (typeof normalized.audioFadeOut === 'boolean') normalized.audioFadeOut = normalized.audioFadeOut ? 0.5 : 0
+    else if (typeof normalized.audioFadeOut === 'string') normalized.audioFadeOut = Number(normalized.audioFadeOut) || 0
+    else if (typeof normalized.audioFadeOut !== 'number' || !Number.isFinite(normalized.audioFadeOut)) normalized.audioFadeOut = 0
+  }
+
   // Keep legacy end-only bounds explicit and stable.
   if (normalized.sourceEnd !== undefined && normalized.sourceStart === undefined) {
     normalized.sourceStart = 0

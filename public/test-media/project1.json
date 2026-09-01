@@ -1,0 +1,2546 @@
+{
+  "id": "eFcUVTlq",
+  "name": "1",
+  "description": "",
+  "metadata": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30
+  },
+  "createdAt": 1787670926238,
+  "updatedAt": 1787768231609,
+  "duration": 0,
+  "schemaVersion": 15,
+  "timeline": {
+    "tracks": [
+      {
+        "id": "track-b841c487-3443-45f3-9e69-ba5bc49830f6",
+        "name": "Audit V2 renamed",
+        "kind": "video",
+        "height": 100,
+        "locked": true,
+        "syncLock": true,
+        "visible": true,
+        "muted": false,
+        "solo": false,
+        "volume": 0,
+        "order": -1,
+        "items": []
+      },
+      {
+        "id": "track-1",
+        "name": "V1",
+        "kind": "video",
+        "height": 100,
+        "locked": false,
+        "syncLock": true,
+        "visible": true,
+        "muted": false,
+        "solo": false,
+        "volume": 0,
+        "order": 0,
+        "items": []
+      },
+      {
+        "id": "track-2",
+        "name": "A1",
+        "kind": "audio",
+        "height": 100,
+        "locked": false,
+        "syncLock": true,
+        "visible": true,
+        "muted": false,
+        "solo": false,
+        "volume": 0,
+        "order": 1,
+        "items": []
+      }
+    ],
+    "items": [
+      {
+        "id": "9806e34d-e747-4e7f-a471-dab086a0de2b",
+        "trackId": "track-1",
+        "from": 0,
+        "durationInFrames": 150,
+        "label": "Screen Recording 2026-08-23 at 19.12.41.mov",
+        "mediaId": "b235adc3-9b0e-4d3e-b96d-eaa2ed83917c",
+        "originId": "21be6571-74d7-48de-9be0-2f5539eb0b4f",
+        "sourceStart": 0,
+        "sourceEnd": 150,
+        "sourceDuration": 150,
+        "sourceFps": 30,
+        "trimStart": 0,
+        "trimEnd": 0,
+        "type": "video",
+        "src": "",
+        "sourceWidth": 2940,
+        "sourceHeight": 1912,
+        "transform": {
+          "x": 41,
+          "y": 0,
+          "width": 1661,
+          "height": 1080,
+          "rotation": 0,
+          "scaleX": 0.95
+        },
+        "effects": [
+          {
+            "id": "83bba72f-680e-4dc4-b6d8-720dc676cd40",
+            "effect": {
+              "type": "gpu-effect",
+              "gpuEffectType": "gpu-brightness",
+              "params": {
+                "amount": 0.25
+              }
+            },
+            "enabled": true
+          }
+        ]
+      },
+      {
+        "id": "7700e015-9136-4ed8-8b68-c83829f23249",
+        "trackId": "track-1",
+        "from": 270,
+        "durationInFrames": 30,
+        "label": "Screen Recording 2026-08-23 at 19.12.41.mov",
+        "mediaId": "b235adc3-9b0e-4d3e-b96d-eaa2ed83917c",
+        "originId": "f73904bd-d884-4131-8a14-ae8b60149661",
+        "sourceStart": 0,
+        "sourceEnd": 30,
+        "sourceDuration": 150,
+        "sourceFps": 30,
+        "trimStart": 0,
+        "trimEnd": 0,
+        "type": "video",
+        "src": "",
+        "sourceWidth": 2940,
+        "sourceHeight": 1912,
+        "transform": {
+          "x": 0,
+          "y": 0,
+          "width": 1661,
+          "height": 1080,
+          "rotation": 0
+        }
+      },
+      {
+        "id": "cc797e10-fdd1-489a-bf5b-785ab5f393f0",
+        "type": "text",
+        "trackId": "track-1",
+        "from": 150,
+        "durationInFrames": 90,
+        "label": "Text",
+        "text": "SCLIP MCP acceptance updated",
+        "fontSize": 72,
+        "fontFamily": "Inter",
+        "fontWeight": "normal",
+        "fontStyle": "normal",
+        "underline": false,
+        "color": "#ffffff",
+        "textAlign": "center",
+        "lineHeight": 1.2,
+        "letterSpacing": 0,
+        "transform": {
+          "x": 0,
+          "y": 0,
+          "width": 1536,
+          "height": 324,
+          "rotation": 0,
+          "opacity": 1
+        }
+      },
+      {
+        "id": "e305a446-037a-4519-84f9-2af8fe652a5e",
+        "trackId": "track-1",
+        "from": 300,
+        "durationInFrames": 30,
+        "label": "Screen Recording 2026-08-23 at 19.12.41.mov",
+        "mediaId": "b235adc3-9b0e-4d3e-b96d-eaa2ed83917c",
+        "originId": "898a0a67-66a5-47f5-931f-dbd4faec9912",
+        "sourceStart": 0,
+        "sourceEnd": 30,
+        "sourceDuration": 150,
+        "sourceFps": 30,
+        "trimStart": 0,
+        "trimEnd": 0,
+        "type": "video",
+        "src": "",
+        "sourceWidth": 2940,
+        "sourceHeight": 1912,
+        "transform": {
+          "x": 0,
+          "y": 0,
+          "width": 1661,
+          "height": 1080,
+          "rotation": 0
+        }
+      },
+      {
+        "id": "18b9b98b-95dc-49f4-b553-c51f8c417ddc",
+        "type": "text",
+        "trackId": "track-1",
+        "from": 330,
+        "durationInFrames": 1800,
+        "label": "Text",
+        "text": "REVISION B AUDIT TEST TEXT",
+        "fontSize": 60,
+        "fontFamily": "Inter",
+        "fontWeight": "normal",
+        "fontStyle": "normal",
+        "underline": false,
+        "color": "#ffffff",
+        "textAlign": "center",
+        "lineHeight": 1.2,
+        "letterSpacing": 0,
+        "transform": {
+          "x": 0,
+          "y": 0,
+          "width": 1536,
+          "height": 324,
+          "rotation": 0,
+          "opacity": 1
+        }
+      },
+      {
+        "id": "5f062d24-5f3c-4eb0-9376-c6e4dce29e90",
+        "trackId": "track-1",
+        "from": 2130,
+        "durationInFrames": 300,
+        "label": "0406.mov",
+        "mediaId": "fe3a5597-09e7-4c17-b454-6b98820bc1c9",
+        "originId": "6dd5dd42-1cd6-4eeb-a285-4d0a4664f716",
+        "sourceStart": 0,
+        "sourceEnd": 300,
+        "sourceDuration": 1338,
+        "sourceFps": 30,
+        "trimStart": 0,
+        "trimEnd": 0,
+        "type": "video",
+        "src": "",
+        "sourceWidth": 1080,
+        "sourceHeight": 1920,
+        "transform": {
+          "x": 0,
+          "y": 0,
+          "width": 608,
+          "height": 1080,
+          "rotation": 0
+        },
+        "linkedGroupId": "97546eb0-e4ae-40d4-9f45-1190bf833b54"
+      },
+      {
+        "id": "1eea4a22-6ea3-4c25-a5a0-0070da848e5f",
+        "type": "audio",
+        "trackId": "track-2",
+        "from": 2130,
+        "durationInFrames": 300,
+        "label": "0406.mov",
+        "mediaId": "fe3a5597-09e7-4c17-b454-6b98820bc1c9",
+        "originId": "6dd5dd42-1cd6-4eeb-a285-4d0a4664f716",
+        "linkedGroupId": "97546eb0-e4ae-40d4-9f45-1190bf833b54",
+        "src": "",
+        "trimStart": 0,
+        "trimEnd": 0,
+        "sourceStart": 0,
+        "sourceEnd": 300,
+        "sourceDuration": 1338,
+        "sourceFps": 30
+      },
+      {
+        "id": "ee190dae-3f0e-43c2-a9d6-976e85bb48e8",
+        "type": "text",
+        "trackId": "track-1",
+        "from": 2430,
+        "durationInFrames": 1800,
+        "label": "SCLIP failure-path first operation",
+        "text": "SCLIP acceptance text 2",
+        "fontSize": 62,
+        "fontFamily": "Inter",
+        "fontWeight": "normal",
+        "fontStyle": "normal",
+        "underline": false,
+        "color": "#ffffff",
+        "textAlign": "center",
+        "lineHeight": 1.2,
+        "letterSpacing": 0,
+        "transform": {
+          "x": 0,
+          "y": 0,
+          "width": 1536,
+          "height": 324,
+          "rotation": 0,
+          "opacity": 1
+        }
+      },
+      {
+        "id": "6b894312-e941-4ef2-ab8a-dab0aa4ed0cb",
+        "trackId": "track-1",
+        "from": 5370,
+        "durationInFrames": 415,
+        "label": "raw_speech_lecture.mp4",
+        "mediaId": "a1371402-6588-443e-81a7-3cb3230db440",
+        "originId": "8bd82a78-4f1a-4ab1-a0c4-b5a20ae46ba2",
+        "sourceStart": 2130,
+        "sourceEnd": 2545,
+        "sourceDuration": 3600,
+        "sourceFps": 30,
+        "trimStart": 0,
+        "trimEnd": 0,
+        "type": "video",
+        "src": "",
+        "sourceWidth": 1920,
+        "sourceHeight": 1080,
+        "transform": {
+          "x": 0,
+          "y": 0,
+          "width": 1920,
+          "height": 1080,
+          "rotation": 0
+        },
+        "linkedGroupId": "d6006b28-3304-417c-a7b4-63e752f11c84",
+        "transcriptCaptions": {
+          "type": "transcript",
+          "mediaId": "a1371402-6588-443e-81a7-3cb3230db440",
+          "enabled": true,
+          "updatedAt": 1787760223845,
+          "sourceTranscriptUpdatedAt": 1787760170115,
+          "timingVersion": 4,
+          "cues": [
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-0",
+              "startSeconds": 0,
+              "endSeconds": 2.1,
+              "text": "Alright guys,"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-1",
+              "startSeconds": 2.3,
+              "endSeconds": 3.8,
+              "text": "welcome to the"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-2",
+              "startSeconds": 3.8,
+              "endSeconds": 5.1,
+              "text": "discussion on"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-3",
+              "startSeconds": 5.1,
+              "endSeconds": 7.2,
+              "text": "economics paper"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-4",
+              "startSeconds": 7.2,
+              "endSeconds": 8.64,
+              "text": "two."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-5",
+              "startSeconds": 8.64,
+              "endSeconds": 10.6,
+              "text": "So paper two is"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-6",
+              "startSeconds": 10.6,
+              "endSeconds": 12.1,
+              "text": "unique in your"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-7",
+              "startSeconds": 12.1,
+              "endSeconds": 14,
+              "text": "economics in that it"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-8",
+              "startSeconds": 14,
+              "endSeconds": 16.2,
+              "text": "is the exact same for"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-9",
+              "startSeconds": 16.2,
+              "endSeconds": 18.2,
+              "text": "higher level standard"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-10",
+              "startSeconds": 18.2,
+              "endSeconds": 20.4,
+              "text": "level. If you are at"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-11",
+              "startSeconds": 20.4,
+              "endSeconds": 22.3,
+              "text": "higher level, you do not"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-12",
+              "startSeconds": 22.3,
+              "endSeconds": 24.5,
+              "text": "need to know anything that is higher"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-13",
+              "startSeconds": 24.5,
+              "endSeconds": 26.2,
+              "text": "level only for So that's work."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-14",
+              "startSeconds": 26.5,
+              "endSeconds": 27.8,
+              "text": "Just read the"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-15",
+              "startSeconds": 27.8,
+              "endSeconds": 30,
+              "text": "instructions one hour"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-16",
+              "startSeconds": 30,
+              "endSeconds": 31.5,
+              "text": "forty five."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-17",
+              "startSeconds": 31.8,
+              "endSeconds": 34,
+              "text": "It is a longer paper"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-18",
+              "startSeconds": 34,
+              "endSeconds": 35.8,
+              "text": "than paper one."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-19",
+              "startSeconds": 36,
+              "endSeconds": 37.8,
+              "text": "I would say it has"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-20",
+              "startSeconds": 37.8,
+              "endSeconds": 39.5,
+              "text": "relatively easier"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-21",
+              "startSeconds": 39.5,
+              "endSeconds": 41.5,
+              "text": "questions, especially"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-22",
+              "startSeconds": 41.5,
+              "endSeconds": 43.6,
+              "text": "for the mock you guys"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-23",
+              "startSeconds": 43.6,
+              "endSeconds": 45.5,
+              "text": "should be able to nail"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-24",
+              "startSeconds": 45.5,
+              "endSeconds": 47.6,
+              "text": "lots of these questions"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-25",
+              "startSeconds": 47.6,
+              "endSeconds": 49.5,
+              "text": "and talk it through."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-26",
+              "startSeconds": 49.6,
+              "endSeconds": 51.6,
+              "text": "Read the numbers here."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-27",
+              "startSeconds": 51.6,
+              "endSeconds": 53.12,
+              "text": "don't open paper..."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-28",
+              "startSeconds": 53.12,
+              "endSeconds": 54.6,
+              "text": "And there is some"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-29",
+              "startSeconds": 54.6,
+              "endSeconds": 56.7,
+              "text": "numerical questions, two"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-30",
+              "startSeconds": 56.7,
+              "endSeconds": 58.6,
+              "text": "decimal places guys,"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-31",
+              "startSeconds": 58.6,
+              "endSeconds": 60.8,
+              "text": "don't lose points because you"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-32",
+              "startSeconds": 60.8,
+              "endSeconds": 62.07,
+              "text": "don't put two numerical places, make sure"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-33",
+              "startSeconds": 62.07,
+              "endSeconds": 63.3,
+              "text": "to use the unit I will be sure"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-34",
+              "startSeconds": 63.3,
+              "endSeconds": 65.2,
+              "text": "on your work, you are"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-35",
+              "startSeconds": 65.2,
+              "endSeconds": 67,
+              "text": "answering one entire"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-36",
+              "startSeconds": 67,
+              "endSeconds": 69,
+              "text": "question, fully labeled"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-37",
+              "startSeconds": 69,
+              "endSeconds": 71,
+              "text": "diagrams as per usual,"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-38",
+              "startSeconds": 71,
+              "endSeconds": 72.8,
+              "text": "and then guys you are"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-39",
+              "startSeconds": 72.8,
+              "endSeconds": 74.8,
+              "text": "going to have an essay"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-40",
+              "startSeconds": 74.8,
+              "endSeconds": 76.8,
+              "text": "question, which is a big"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-41",
+              "startSeconds": 76.8,
+              "endSeconds": 78.8,
+              "text": "difference in the essay"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-42",
+              "startSeconds": 78.8,
+              "endSeconds": 80.7,
+              "text": "question here and paper"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-43",
+              "startSeconds": 80.7,
+              "endSeconds": 82.8,
+              "text": "one, is that you have"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-44",
+              "startSeconds": 82.8,
+              "endSeconds": 84.84,
+              "text": "a text and diagram to use,"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-45",
+              "startSeconds": 84.84,
+              "endSeconds": 87,
+              "text": "So skip true paper,"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-46",
+              "startSeconds": 87,
+              "endSeconds": 88.5,
+              "text": "if you don't share"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-47",
+              "startSeconds": 88.5,
+              "endSeconds": 120,
+              "text": "it..."
+            }
+          ],
+          "style": {
+            "fontFamily": "Inter",
+            "fontWeight": "semibold",
+            "fontStyle": "normal",
+            "underline": false,
+            "color": "#ffffff",
+            "backgroundColor": "rgba(0, 0, 0, 0.55)",
+            "backgroundRadius": 4,
+            "textAlign": "center",
+            "verticalAlign": "middle",
+            "lineHeight": 1.15,
+            "letterSpacing": 0,
+            "textPadding": 12,
+            "textShadow": {
+              "offsetX": 0,
+              "offsetY": 2,
+              "blur": 6,
+              "color": "rgba(0, 0, 0, 0.6)"
+            },
+            "fontSize": 43,
+            "transform": {
+              "x": 0,
+              "y": 389,
+              "width": 1344,
+              "height": 173,
+              "rotation": 0,
+              "opacity": 1
+            }
+          }
+        }
+      },
+      {
+        "id": "f24d3d74-468c-4197-a179-7c9445c2d161",
+        "type": "audio",
+        "trackId": "track-2",
+        "from": 5370,
+        "durationInFrames": 415,
+        "label": "raw_speech_lecture.mp4",
+        "mediaId": "a1371402-6588-443e-81a7-3cb3230db440",
+        "originId": "8bd82a78-4f1a-4ab1-a0c4-b5a20ae46ba2",
+        "linkedGroupId": "d6006b28-3304-417c-a7b4-63e752f11c84",
+        "src": "",
+        "trimStart": 0,
+        "trimEnd": 0,
+        "sourceStart": 2130,
+        "sourceEnd": 2545,
+        "sourceDuration": 3600,
+        "sourceFps": 30
+      },
+      {
+        "id": "0fd79d7f-7c03-4f86-8290-a57dad3789f4",
+        "trackId": "track-1",
+        "from": 5102,
+        "durationInFrames": 268,
+        "label": "raw_speech_lecture.mp4",
+        "mediaId": "a1371402-6588-443e-81a7-3cb3230db440",
+        "originId": "8bd82a78-4f1a-4ab1-a0c4-b5a20ae46ba2",
+        "sourceStart": 1594,
+        "sourceEnd": 1862,
+        "sourceDuration": 3600,
+        "sourceFps": 30,
+        "trimStart": 0,
+        "trimEnd": 0,
+        "type": "video",
+        "src": "",
+        "sourceWidth": 1920,
+        "sourceHeight": 1080,
+        "transform": {
+          "x": 0,
+          "y": 0,
+          "width": 1920,
+          "height": 1080,
+          "rotation": 0
+        },
+        "linkedGroupId": "23a6259c-be1e-4873-b9ab-0aab0495e434",
+        "transcriptCaptions": {
+          "type": "transcript",
+          "mediaId": "a1371402-6588-443e-81a7-3cb3230db440",
+          "enabled": true,
+          "updatedAt": 1787760223845,
+          "sourceTranscriptUpdatedAt": 1787760170115,
+          "timingVersion": 4,
+          "cues": [
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-0",
+              "startSeconds": 0,
+              "endSeconds": 2.1,
+              "text": "Alright guys,"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-1",
+              "startSeconds": 2.3,
+              "endSeconds": 3.8,
+              "text": "welcome to the"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-2",
+              "startSeconds": 3.8,
+              "endSeconds": 5.1,
+              "text": "discussion on"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-3",
+              "startSeconds": 5.1,
+              "endSeconds": 7.2,
+              "text": "economics paper"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-4",
+              "startSeconds": 7.2,
+              "endSeconds": 8.64,
+              "text": "two."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-5",
+              "startSeconds": 8.64,
+              "endSeconds": 10.6,
+              "text": "So paper two is"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-6",
+              "startSeconds": 10.6,
+              "endSeconds": 12.1,
+              "text": "unique in your"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-7",
+              "startSeconds": 12.1,
+              "endSeconds": 14,
+              "text": "economics in that it"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-8",
+              "startSeconds": 14,
+              "endSeconds": 16.2,
+              "text": "is the exact same for"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-9",
+              "startSeconds": 16.2,
+              "endSeconds": 18.2,
+              "text": "higher level standard"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-10",
+              "startSeconds": 18.2,
+              "endSeconds": 20.4,
+              "text": "level. If you are at"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-11",
+              "startSeconds": 20.4,
+              "endSeconds": 22.3,
+              "text": "higher level, you do not"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-12",
+              "startSeconds": 22.3,
+              "endSeconds": 24.5,
+              "text": "need to know anything that is higher"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-13",
+              "startSeconds": 24.5,
+              "endSeconds": 26.2,
+              "text": "level only for So that's work."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-14",
+              "startSeconds": 26.5,
+              "endSeconds": 27.8,
+              "text": "Just read the"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-15",
+              "startSeconds": 27.8,
+              "endSeconds": 30,
+              "text": "instructions one hour"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-16",
+              "startSeconds": 30,
+              "endSeconds": 31.5,
+              "text": "forty five."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-17",
+              "startSeconds": 31.8,
+              "endSeconds": 34,
+              "text": "It is a longer paper"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-18",
+              "startSeconds": 34,
+              "endSeconds": 35.8,
+              "text": "than paper one."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-19",
+              "startSeconds": 36,
+              "endSeconds": 37.8,
+              "text": "I would say it has"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-20",
+              "startSeconds": 37.8,
+              "endSeconds": 39.5,
+              "text": "relatively easier"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-21",
+              "startSeconds": 39.5,
+              "endSeconds": 41.5,
+              "text": "questions, especially"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-22",
+              "startSeconds": 41.5,
+              "endSeconds": 43.6,
+              "text": "for the mock you guys"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-23",
+              "startSeconds": 43.6,
+              "endSeconds": 45.5,
+              "text": "should be able to nail"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-24",
+              "startSeconds": 45.5,
+              "endSeconds": 47.6,
+              "text": "lots of these questions"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-25",
+              "startSeconds": 47.6,
+              "endSeconds": 49.5,
+              "text": "and talk it through."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-26",
+              "startSeconds": 49.6,
+              "endSeconds": 51.6,
+              "text": "Read the numbers here."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-27",
+              "startSeconds": 51.6,
+              "endSeconds": 53.12,
+              "text": "don't open paper..."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-28",
+              "startSeconds": 53.12,
+              "endSeconds": 54.6,
+              "text": "And there is some"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-29",
+              "startSeconds": 54.6,
+              "endSeconds": 56.7,
+              "text": "numerical questions, two"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-30",
+              "startSeconds": 56.7,
+              "endSeconds": 58.6,
+              "text": "decimal places guys,"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-31",
+              "startSeconds": 58.6,
+              "endSeconds": 60.8,
+              "text": "don't lose points because you"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-32",
+              "startSeconds": 60.8,
+              "endSeconds": 62.07,
+              "text": "don't put two numerical places, make sure"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-33",
+              "startSeconds": 62.07,
+              "endSeconds": 63.3,
+              "text": "to use the unit I will be sure"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-34",
+              "startSeconds": 63.3,
+              "endSeconds": 65.2,
+              "text": "on your work, you are"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-35",
+              "startSeconds": 65.2,
+              "endSeconds": 67,
+              "text": "answering one entire"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-36",
+              "startSeconds": 67,
+              "endSeconds": 69,
+              "text": "question, fully labeled"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-37",
+              "startSeconds": 69,
+              "endSeconds": 71,
+              "text": "diagrams as per usual,"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-38",
+              "startSeconds": 71,
+              "endSeconds": 72.8,
+              "text": "and then guys you are"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-39",
+              "startSeconds": 72.8,
+              "endSeconds": 74.8,
+              "text": "going to have an essay"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-40",
+              "startSeconds": 74.8,
+              "endSeconds": 76.8,
+              "text": "question, which is a big"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-41",
+              "startSeconds": 76.8,
+              "endSeconds": 78.8,
+              "text": "difference in the essay"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-42",
+              "startSeconds": 78.8,
+              "endSeconds": 80.7,
+              "text": "question here and paper"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-43",
+              "startSeconds": 80.7,
+              "endSeconds": 82.8,
+              "text": "one, is that you have"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-44",
+              "startSeconds": 82.8,
+              "endSeconds": 84.84,
+              "text": "a text and diagram to use,"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-45",
+              "startSeconds": 84.84,
+              "endSeconds": 87,
+              "text": "So skip true paper,"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-46",
+              "startSeconds": 87,
+              "endSeconds": 88.5,
+              "text": "if you don't share"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-47",
+              "startSeconds": 88.5,
+              "endSeconds": 120,
+              "text": "it..."
+            }
+          ],
+          "style": {
+            "fontFamily": "Inter",
+            "fontWeight": "semibold",
+            "fontStyle": "normal",
+            "underline": false,
+            "color": "#ffffff",
+            "backgroundColor": "rgba(0, 0, 0, 0.55)",
+            "backgroundRadius": 4,
+            "textAlign": "center",
+            "verticalAlign": "middle",
+            "lineHeight": 1.15,
+            "letterSpacing": 0,
+            "textPadding": 12,
+            "textShadow": {
+              "offsetX": 0,
+              "offsetY": 2,
+              "blur": 6,
+              "color": "rgba(0, 0, 0, 0.6)"
+            },
+            "fontSize": 43,
+            "transform": {
+              "x": 0,
+              "y": 389,
+              "width": 1344,
+              "height": 173,
+              "rotation": 0,
+              "opacity": 1
+            }
+          }
+        }
+      },
+      {
+        "id": "87bf73e6-2419-4aa1-a4fd-ee4e7aa36e9e",
+        "type": "audio",
+        "trackId": "track-2",
+        "from": 5102,
+        "durationInFrames": 268,
+        "label": "raw_speech_lecture.mp4",
+        "mediaId": "a1371402-6588-443e-81a7-3cb3230db440",
+        "originId": "8bd82a78-4f1a-4ab1-a0c4-b5a20ae46ba2",
+        "linkedGroupId": "23a6259c-be1e-4873-b9ab-0aab0495e434",
+        "src": "",
+        "trimStart": 0,
+        "trimEnd": 0,
+        "sourceStart": 1594,
+        "sourceEnd": 1862,
+        "sourceDuration": 3600,
+        "sourceFps": 30
+      },
+      {
+        "id": "09a04e3f-aa9d-4d3d-a817-d9fd044a761d",
+        "trackId": "track-1",
+        "from": 4559,
+        "durationInFrames": 543,
+        "label": "raw_speech_lecture.mp4",
+        "mediaId": "a1371402-6588-443e-81a7-3cb3230db440",
+        "originId": "8bd82a78-4f1a-4ab1-a0c4-b5a20ae46ba2",
+        "sourceStart": 945,
+        "sourceEnd": 1488,
+        "sourceDuration": 3600,
+        "sourceFps": 30,
+        "trimStart": 0,
+        "trimEnd": 0,
+        "type": "video",
+        "src": "",
+        "sourceWidth": 1920,
+        "sourceHeight": 1080,
+        "transform": {
+          "x": 0,
+          "y": 0,
+          "width": 1920,
+          "height": 1080,
+          "rotation": 0
+        },
+        "linkedGroupId": "84c68809-cb6b-44f8-9aed-12d72237d1e1",
+        "transcriptCaptions": {
+          "type": "transcript",
+          "mediaId": "a1371402-6588-443e-81a7-3cb3230db440",
+          "enabled": true,
+          "updatedAt": 1787760223845,
+          "sourceTranscriptUpdatedAt": 1787760170115,
+          "timingVersion": 4,
+          "cues": [
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-0",
+              "startSeconds": 0,
+              "endSeconds": 2.1,
+              "text": "Alright guys,"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-1",
+              "startSeconds": 2.3,
+              "endSeconds": 3.8,
+              "text": "welcome to the"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-2",
+              "startSeconds": 3.8,
+              "endSeconds": 5.1,
+              "text": "discussion on"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-3",
+              "startSeconds": 5.1,
+              "endSeconds": 7.2,
+              "text": "economics paper"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-4",
+              "startSeconds": 7.2,
+              "endSeconds": 8.64,
+              "text": "two."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-5",
+              "startSeconds": 8.64,
+              "endSeconds": 10.6,
+              "text": "So paper two is"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-6",
+              "startSeconds": 10.6,
+              "endSeconds": 12.1,
+              "text": "unique in your"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-7",
+              "startSeconds": 12.1,
+              "endSeconds": 14,
+              "text": "economics in that it"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-8",
+              "startSeconds": 14,
+              "endSeconds": 16.2,
+              "text": "is the exact same for"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-9",
+              "startSeconds": 16.2,
+              "endSeconds": 18.2,
+              "text": "higher level standard"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-10",
+              "startSeconds": 18.2,
+              "endSeconds": 20.4,
+              "text": "level. If you are at"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-11",
+              "startSeconds": 20.4,
+              "endSeconds": 22.3,
+              "text": "higher level, you do not"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-12",
+              "startSeconds": 22.3,
+              "endSeconds": 24.5,
+              "text": "need to know anything that is higher"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-13",
+              "startSeconds": 24.5,
+              "endSeconds": 26.2,
+              "text": "level only for So that's work."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-14",
+              "startSeconds": 26.5,
+              "endSeconds": 27.8,
+              "text": "Just read the"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-15",
+              "startSeconds": 27.8,
+              "endSeconds": 30,
+              "text": "instructions one hour"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-16",
+              "startSeconds": 30,
+              "endSeconds": 31.5,
+              "text": "forty five."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-17",
+              "startSeconds": 31.8,
+              "endSeconds": 34,
+              "text": "It is a longer paper"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-18",
+              "startSeconds": 34,
+              "endSeconds": 35.8,
+              "text": "than paper one."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-19",
+              "startSeconds": 36,
+              "endSeconds": 37.8,
+              "text": "I would say it has"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-20",
+              "startSeconds": 37.8,
+              "endSeconds": 39.5,
+              "text": "relatively easier"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-21",
+              "startSeconds": 39.5,
+              "endSeconds": 41.5,
+              "text": "questions, especially"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-22",
+              "startSeconds": 41.5,
+              "endSeconds": 43.6,
+              "text": "for the mock you guys"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-23",
+              "startSeconds": 43.6,
+              "endSeconds": 45.5,
+              "text": "should be able to nail"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-24",
+              "startSeconds": 45.5,
+              "endSeconds": 47.6,
+              "text": "lots of these questions"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-25",
+              "startSeconds": 47.6,
+              "endSeconds": 49.5,
+              "text": "and talk it through."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-26",
+              "startSeconds": 49.6,
+              "endSeconds": 51.6,
+              "text": "Read the numbers here."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-27",
+              "startSeconds": 51.6,
+              "endSeconds": 53.12,
+              "text": "don't open paper..."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-28",
+              "startSeconds": 53.12,
+              "endSeconds": 54.6,
+              "text": "And there is some"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-29",
+              "startSeconds": 54.6,
+              "endSeconds": 56.7,
+              "text": "numerical questions, two"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-30",
+              "startSeconds": 56.7,
+              "endSeconds": 58.6,
+              "text": "decimal places guys,"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-31",
+              "startSeconds": 58.6,
+              "endSeconds": 60.8,
+              "text": "don't lose points because you"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-32",
+              "startSeconds": 60.8,
+              "endSeconds": 62.07,
+              "text": "don't put two numerical places, make sure"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-33",
+              "startSeconds": 62.07,
+              "endSeconds": 63.3,
+              "text": "to use the unit I will be sure"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-34",
+              "startSeconds": 63.3,
+              "endSeconds": 65.2,
+              "text": "on your work, you are"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-35",
+              "startSeconds": 65.2,
+              "endSeconds": 67,
+              "text": "answering one entire"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-36",
+              "startSeconds": 67,
+              "endSeconds": 69,
+              "text": "question, fully labeled"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-37",
+              "startSeconds": 69,
+              "endSeconds": 71,
+              "text": "diagrams as per usual,"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-38",
+              "startSeconds": 71,
+              "endSeconds": 72.8,
+              "text": "and then guys you are"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-39",
+              "startSeconds": 72.8,
+              "endSeconds": 74.8,
+              "text": "going to have an essay"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-40",
+              "startSeconds": 74.8,
+              "endSeconds": 76.8,
+              "text": "question, which is a big"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-41",
+              "startSeconds": 76.8,
+              "endSeconds": 78.8,
+              "text": "difference in the essay"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-42",
+              "startSeconds": 78.8,
+              "endSeconds": 80.7,
+              "text": "question here and paper"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-43",
+              "startSeconds": 80.7,
+              "endSeconds": 82.8,
+              "text": "one, is that you have"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-44",
+              "startSeconds": 82.8,
+              "endSeconds": 84.84,
+              "text": "a text and diagram to use,"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-45",
+              "startSeconds": 84.84,
+              "endSeconds": 87,
+              "text": "So skip true paper,"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-46",
+              "startSeconds": 87,
+              "endSeconds": 88.5,
+              "text": "if you don't share"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-47",
+              "startSeconds": 88.5,
+              "endSeconds": 120,
+              "text": "it..."
+            }
+          ],
+          "style": {
+            "fontFamily": "Inter",
+            "fontWeight": "semibold",
+            "fontStyle": "normal",
+            "underline": false,
+            "color": "#ffffff",
+            "backgroundColor": "rgba(0, 0, 0, 0.55)",
+            "backgroundRadius": 4,
+            "textAlign": "center",
+            "verticalAlign": "middle",
+            "lineHeight": 1.15,
+            "letterSpacing": 0,
+            "textPadding": 12,
+            "textShadow": {
+              "offsetX": 0,
+              "offsetY": 2,
+              "blur": 6,
+              "color": "rgba(0, 0, 0, 0.6)"
+            },
+            "fontSize": 43,
+            "transform": {
+              "x": 0,
+              "y": 389,
+              "width": 1344,
+              "height": 173,
+              "rotation": 0,
+              "opacity": 1
+            }
+          }
+        }
+      },
+      {
+        "id": "1b355221-be13-4740-bb40-8fa2f3845d87",
+        "type": "audio",
+        "trackId": "track-2",
+        "from": 4559,
+        "durationInFrames": 543,
+        "label": "raw_speech_lecture.mp4",
+        "mediaId": "a1371402-6588-443e-81a7-3cb3230db440",
+        "originId": "8bd82a78-4f1a-4ab1-a0c4-b5a20ae46ba2",
+        "linkedGroupId": "84c68809-cb6b-44f8-9aed-12d72237d1e1",
+        "src": "",
+        "trimStart": 0,
+        "trimEnd": 0,
+        "sourceStart": 945,
+        "sourceEnd": 1488,
+        "sourceDuration": 3600,
+        "sourceFps": 30
+      },
+      {
+        "id": "d73251bf-1f58-475a-818b-82c984837002",
+        "trackId": "track-1",
+        "from": 4550,
+        "durationInFrames": 9,
+        "label": "raw_speech_lecture.mp4",
+        "mediaId": "a1371402-6588-443e-81a7-3cb3230db440",
+        "originId": "8bd82a78-4f1a-4ab1-a0c4-b5a20ae46ba2",
+        "sourceStart": 786,
+        "sourceEnd": 795,
+        "sourceDuration": 3600,
+        "sourceFps": 30,
+        "trimStart": 0,
+        "trimEnd": 0,
+        "type": "video",
+        "src": "",
+        "sourceWidth": 1920,
+        "sourceHeight": 1080,
+        "transform": {
+          "x": 0,
+          "y": 0,
+          "width": 1920,
+          "height": 1080,
+          "rotation": 0
+        },
+        "linkedGroupId": "0394326a-49cf-474f-b20e-9ab427bbac90",
+        "transcriptCaptions": {
+          "type": "transcript",
+          "mediaId": "a1371402-6588-443e-81a7-3cb3230db440",
+          "enabled": true,
+          "updatedAt": 1787760223845,
+          "sourceTranscriptUpdatedAt": 1787760170115,
+          "timingVersion": 4,
+          "cues": [
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-0",
+              "startSeconds": 0,
+              "endSeconds": 2.1,
+              "text": "Alright guys,"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-1",
+              "startSeconds": 2.3,
+              "endSeconds": 3.8,
+              "text": "welcome to the"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-2",
+              "startSeconds": 3.8,
+              "endSeconds": 5.1,
+              "text": "discussion on"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-3",
+              "startSeconds": 5.1,
+              "endSeconds": 7.2,
+              "text": "economics paper"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-4",
+              "startSeconds": 7.2,
+              "endSeconds": 8.64,
+              "text": "two."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-5",
+              "startSeconds": 8.64,
+              "endSeconds": 10.6,
+              "text": "So paper two is"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-6",
+              "startSeconds": 10.6,
+              "endSeconds": 12.1,
+              "text": "unique in your"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-7",
+              "startSeconds": 12.1,
+              "endSeconds": 14,
+              "text": "economics in that it"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-8",
+              "startSeconds": 14,
+              "endSeconds": 16.2,
+              "text": "is the exact same for"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-9",
+              "startSeconds": 16.2,
+              "endSeconds": 18.2,
+              "text": "higher level standard"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-10",
+              "startSeconds": 18.2,
+              "endSeconds": 20.4,
+              "text": "level. If you are at"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-11",
+              "startSeconds": 20.4,
+              "endSeconds": 22.3,
+              "text": "higher level, you do not"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-12",
+              "startSeconds": 22.3,
+              "endSeconds": 24.5,
+              "text": "need to know anything that is higher"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-13",
+              "startSeconds": 24.5,
+              "endSeconds": 26.2,
+              "text": "level only for So that's work."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-14",
+              "startSeconds": 26.5,
+              "endSeconds": 27.8,
+              "text": "Just read the"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-15",
+              "startSeconds": 27.8,
+              "endSeconds": 30,
+              "text": "instructions one hour"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-16",
+              "startSeconds": 30,
+              "endSeconds": 31.5,
+              "text": "forty five."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-17",
+              "startSeconds": 31.8,
+              "endSeconds": 34,
+              "text": "It is a longer paper"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-18",
+              "startSeconds": 34,
+              "endSeconds": 35.8,
+              "text": "than paper one."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-19",
+              "startSeconds": 36,
+              "endSeconds": 37.8,
+              "text": "I would say it has"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-20",
+              "startSeconds": 37.8,
+              "endSeconds": 39.5,
+              "text": "relatively easier"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-21",
+              "startSeconds": 39.5,
+              "endSeconds": 41.5,
+              "text": "questions, especially"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-22",
+              "startSeconds": 41.5,
+              "endSeconds": 43.6,
+              "text": "for the mock you guys"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-23",
+              "startSeconds": 43.6,
+              "endSeconds": 45.5,
+              "text": "should be able to nail"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-24",
+              "startSeconds": 45.5,
+              "endSeconds": 47.6,
+              "text": "lots of these questions"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-25",
+              "startSeconds": 47.6,
+              "endSeconds": 49.5,
+              "text": "and talk it through."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-26",
+              "startSeconds": 49.6,
+              "endSeconds": 51.6,
+              "text": "Read the numbers here."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-27",
+              "startSeconds": 51.6,
+              "endSeconds": 53.12,
+              "text": "don't open paper..."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-28",
+              "startSeconds": 53.12,
+              "endSeconds": 54.6,
+              "text": "And there is some"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-29",
+              "startSeconds": 54.6,
+              "endSeconds": 56.7,
+              "text": "numerical questions, two"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-30",
+              "startSeconds": 56.7,
+              "endSeconds": 58.6,
+              "text": "decimal places guys,"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-31",
+              "startSeconds": 58.6,
+              "endSeconds": 60.8,
+              "text": "don't lose points because you"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-32",
+              "startSeconds": 60.8,
+              "endSeconds": 62.07,
+              "text": "don't put two numerical places, make sure"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-33",
+              "startSeconds": 62.07,
+              "endSeconds": 63.3,
+              "text": "to use the unit I will be sure"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-34",
+              "startSeconds": 63.3,
+              "endSeconds": 65.2,
+              "text": "on your work, you are"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-35",
+              "startSeconds": 65.2,
+              "endSeconds": 67,
+              "text": "answering one entire"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-36",
+              "startSeconds": 67,
+              "endSeconds": 69,
+              "text": "question, fully labeled"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-37",
+              "startSeconds": 69,
+              "endSeconds": 71,
+              "text": "diagrams as per usual,"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-38",
+              "startSeconds": 71,
+              "endSeconds": 72.8,
+              "text": "and then guys you are"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-39",
+              "startSeconds": 72.8,
+              "endSeconds": 74.8,
+              "text": "going to have an essay"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-40",
+              "startSeconds": 74.8,
+              "endSeconds": 76.8,
+              "text": "question, which is a big"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-41",
+              "startSeconds": 76.8,
+              "endSeconds": 78.8,
+              "text": "difference in the essay"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-42",
+              "startSeconds": 78.8,
+              "endSeconds": 80.7,
+              "text": "question here and paper"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-43",
+              "startSeconds": 80.7,
+              "endSeconds": 82.8,
+              "text": "one, is that you have"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-44",
+              "startSeconds": 82.8,
+              "endSeconds": 84.84,
+              "text": "a text and diagram to use,"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-45",
+              "startSeconds": 84.84,
+              "endSeconds": 87,
+              "text": "So skip true paper,"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-46",
+              "startSeconds": 87,
+              "endSeconds": 88.5,
+              "text": "if you don't share"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-47",
+              "startSeconds": 88.5,
+              "endSeconds": 120,
+              "text": "it..."
+            }
+          ],
+          "style": {
+            "fontFamily": "Inter",
+            "fontWeight": "semibold",
+            "fontStyle": "normal",
+            "underline": false,
+            "color": "#ffffff",
+            "backgroundColor": "rgba(0, 0, 0, 0.55)",
+            "backgroundRadius": 4,
+            "textAlign": "center",
+            "verticalAlign": "middle",
+            "lineHeight": 1.15,
+            "letterSpacing": 0,
+            "textPadding": 12,
+            "textShadow": {
+              "offsetX": 0,
+              "offsetY": 2,
+              "blur": 6,
+              "color": "rgba(0, 0, 0, 0.6)"
+            },
+            "fontSize": 43,
+            "transform": {
+              "x": 0,
+              "y": 389,
+              "width": 1344,
+              "height": 173,
+              "rotation": 0,
+              "opacity": 1
+            }
+          }
+        }
+      },
+      {
+        "id": "6013b251-ad20-4e71-bfb4-20710aa04e63",
+        "type": "audio",
+        "trackId": "track-2",
+        "from": 4550,
+        "durationInFrames": 9,
+        "label": "raw_speech_lecture.mp4",
+        "mediaId": "a1371402-6588-443e-81a7-3cb3230db440",
+        "originId": "8bd82a78-4f1a-4ab1-a0c4-b5a20ae46ba2",
+        "linkedGroupId": "0394326a-49cf-474f-b20e-9ab427bbac90",
+        "src": "",
+        "trimStart": 0,
+        "trimEnd": 0,
+        "sourceStart": 786,
+        "sourceEnd": 795,
+        "sourceDuration": 3600,
+        "sourceFps": 30
+      },
+      {
+        "id": "aa5a9ee4-c283-4db4-81a9-459dfa5c4373",
+        "trackId": "track-1",
+        "from": 4236,
+        "durationInFrames": 314,
+        "label": "raw_speech_lecture.mp4",
+        "mediaId": "a1371402-6588-443e-81a7-3cb3230db440",
+        "originId": "8bd82a78-4f1a-4ab1-a0c4-b5a20ae46ba2",
+        "sourceStart": 259,
+        "sourceEnd": 573,
+        "sourceDuration": 3600,
+        "sourceFps": 30,
+        "trimStart": 0,
+        "trimEnd": 0,
+        "type": "video",
+        "src": "",
+        "sourceWidth": 1920,
+        "sourceHeight": 1080,
+        "transform": {
+          "x": 0,
+          "y": 0,
+          "width": 1920,
+          "height": 1080,
+          "rotation": 0
+        },
+        "linkedGroupId": "f6910c35-9dee-4501-b2dd-bbaf67a333d8",
+        "transcriptCaptions": {
+          "type": "transcript",
+          "mediaId": "a1371402-6588-443e-81a7-3cb3230db440",
+          "enabled": true,
+          "updatedAt": 1787760223845,
+          "sourceTranscriptUpdatedAt": 1787760170115,
+          "timingVersion": 4,
+          "cues": [
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-0",
+              "startSeconds": 0,
+              "endSeconds": 2.1,
+              "text": "Alright guys,"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-1",
+              "startSeconds": 2.3,
+              "endSeconds": 3.8,
+              "text": "welcome to the"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-2",
+              "startSeconds": 3.8,
+              "endSeconds": 5.1,
+              "text": "discussion on"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-3",
+              "startSeconds": 5.1,
+              "endSeconds": 7.2,
+              "text": "economics paper"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-4",
+              "startSeconds": 7.2,
+              "endSeconds": 8.64,
+              "text": "two."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-5",
+              "startSeconds": 8.64,
+              "endSeconds": 10.6,
+              "text": "So paper two is"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-6",
+              "startSeconds": 10.6,
+              "endSeconds": 12.1,
+              "text": "unique in your"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-7",
+              "startSeconds": 12.1,
+              "endSeconds": 14,
+              "text": "economics in that it"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-8",
+              "startSeconds": 14,
+              "endSeconds": 16.2,
+              "text": "is the exact same for"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-9",
+              "startSeconds": 16.2,
+              "endSeconds": 18.2,
+              "text": "higher level standard"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-10",
+              "startSeconds": 18.2,
+              "endSeconds": 20.4,
+              "text": "level. If you are at"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-11",
+              "startSeconds": 20.4,
+              "endSeconds": 22.3,
+              "text": "higher level, you do not"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-12",
+              "startSeconds": 22.3,
+              "endSeconds": 24.5,
+              "text": "need to know anything that is higher"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-13",
+              "startSeconds": 24.5,
+              "endSeconds": 26.2,
+              "text": "level only for So that's work."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-14",
+              "startSeconds": 26.5,
+              "endSeconds": 27.8,
+              "text": "Just read the"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-15",
+              "startSeconds": 27.8,
+              "endSeconds": 30,
+              "text": "instructions one hour"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-16",
+              "startSeconds": 30,
+              "endSeconds": 31.5,
+              "text": "forty five."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-17",
+              "startSeconds": 31.8,
+              "endSeconds": 34,
+              "text": "It is a longer paper"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-18",
+              "startSeconds": 34,
+              "endSeconds": 35.8,
+              "text": "than paper one."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-19",
+              "startSeconds": 36,
+              "endSeconds": 37.8,
+              "text": "I would say it has"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-20",
+              "startSeconds": 37.8,
+              "endSeconds": 39.5,
+              "text": "relatively easier"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-21",
+              "startSeconds": 39.5,
+              "endSeconds": 41.5,
+              "text": "questions, especially"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-22",
+              "startSeconds": 41.5,
+              "endSeconds": 43.6,
+              "text": "for the mock you guys"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-23",
+              "startSeconds": 43.6,
+              "endSeconds": 45.5,
+              "text": "should be able to nail"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-24",
+              "startSeconds": 45.5,
+              "endSeconds": 47.6,
+              "text": "lots of these questions"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-25",
+              "startSeconds": 47.6,
+              "endSeconds": 49.5,
+              "text": "and talk it through."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-26",
+              "startSeconds": 49.6,
+              "endSeconds": 51.6,
+              "text": "Read the numbers here."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-27",
+              "startSeconds": 51.6,
+              "endSeconds": 53.12,
+              "text": "don't open paper..."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-28",
+              "startSeconds": 53.12,
+              "endSeconds": 54.6,
+              "text": "And there is some"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-29",
+              "startSeconds": 54.6,
+              "endSeconds": 56.7,
+              "text": "numerical questions, two"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-30",
+              "startSeconds": 56.7,
+              "endSeconds": 58.6,
+              "text": "decimal places guys,"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-31",
+              "startSeconds": 58.6,
+              "endSeconds": 60.8,
+              "text": "don't lose points because you"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-32",
+              "startSeconds": 60.8,
+              "endSeconds": 62.07,
+              "text": "don't put two numerical places, make sure"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-33",
+              "startSeconds": 62.07,
+              "endSeconds": 63.3,
+              "text": "to use the unit I will be sure"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-34",
+              "startSeconds": 63.3,
+              "endSeconds": 65.2,
+              "text": "on your work, you are"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-35",
+              "startSeconds": 65.2,
+              "endSeconds": 67,
+              "text": "answering one entire"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-36",
+              "startSeconds": 67,
+              "endSeconds": 69,
+              "text": "question, fully labeled"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-37",
+              "startSeconds": 69,
+              "endSeconds": 71,
+              "text": "diagrams as per usual,"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-38",
+              "startSeconds": 71,
+              "endSeconds": 72.8,
+              "text": "and then guys you are"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-39",
+              "startSeconds": 72.8,
+              "endSeconds": 74.8,
+              "text": "going to have an essay"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-40",
+              "startSeconds": 74.8,
+              "endSeconds": 76.8,
+              "text": "question, which is a big"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-41",
+              "startSeconds": 76.8,
+              "endSeconds": 78.8,
+              "text": "difference in the essay"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-42",
+              "startSeconds": 78.8,
+              "endSeconds": 80.7,
+              "text": "question here and paper"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-43",
+              "startSeconds": 80.7,
+              "endSeconds": 82.8,
+              "text": "one, is that you have"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-44",
+              "startSeconds": 82.8,
+              "endSeconds": 84.84,
+              "text": "a text and diagram to use,"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-45",
+              "startSeconds": 84.84,
+              "endSeconds": 87,
+              "text": "So skip true paper,"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-46",
+              "startSeconds": 87,
+              "endSeconds": 88.5,
+              "text": "if you don't share"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-47",
+              "startSeconds": 88.5,
+              "endSeconds": 120,
+              "text": "it..."
+            }
+          ],
+          "style": {
+            "fontFamily": "Inter",
+            "fontWeight": "semibold",
+            "fontStyle": "normal",
+            "underline": false,
+            "color": "#ffffff",
+            "backgroundColor": "rgba(0, 0, 0, 0.55)",
+            "backgroundRadius": 4,
+            "textAlign": "center",
+            "verticalAlign": "middle",
+            "lineHeight": 1.15,
+            "letterSpacing": 0,
+            "textPadding": 12,
+            "textShadow": {
+              "offsetX": 0,
+              "offsetY": 2,
+              "blur": 6,
+              "color": "rgba(0, 0, 0, 0.6)"
+            },
+            "fontSize": 43,
+            "transform": {
+              "x": 0,
+              "y": 389,
+              "width": 1344,
+              "height": 173,
+              "rotation": 0,
+              "opacity": 1
+            }
+          }
+        }
+      },
+      {
+        "id": "f1fb68e9-cfff-4ba7-9bfa-f64028850edc",
+        "type": "audio",
+        "trackId": "track-2",
+        "from": 4236,
+        "durationInFrames": 314,
+        "label": "raw_speech_lecture.mp4",
+        "mediaId": "a1371402-6588-443e-81a7-3cb3230db440",
+        "originId": "8bd82a78-4f1a-4ab1-a0c4-b5a20ae46ba2",
+        "linkedGroupId": "f6910c35-9dee-4501-b2dd-bbaf67a333d8",
+        "src": "",
+        "trimStart": 0,
+        "trimEnd": 0,
+        "sourceStart": 259,
+        "sourceEnd": 573,
+        "sourceDuration": 3600,
+        "sourceFps": 30
+      },
+      {
+        "id": "85077abb-a5d9-4f84-9f4a-763095008024",
+        "trackId": "track-1",
+        "from": 4230,
+        "durationInFrames": 6,
+        "label": "raw_speech_lecture.mp4",
+        "mediaId": "a1371402-6588-443e-81a7-3cb3230db440",
+        "originId": "8bd82a78-4f1a-4ab1-a0c4-b5a20ae46ba2",
+        "sourceStart": 63,
+        "sourceEnd": 69,
+        "sourceDuration": 3600,
+        "sourceFps": 30,
+        "trimStart": 0,
+        "trimEnd": 0,
+        "type": "video",
+        "src": "",
+        "sourceWidth": 1920,
+        "sourceHeight": 1080,
+        "transform": {
+          "x": 0,
+          "y": 0,
+          "width": 1920,
+          "height": 1080,
+          "rotation": 0
+        },
+        "linkedGroupId": "06e47540-2bb7-4e84-962a-dc37e0953a07",
+        "transcriptCaptions": {
+          "type": "transcript",
+          "mediaId": "a1371402-6588-443e-81a7-3cb3230db440",
+          "enabled": true,
+          "updatedAt": 1787760223845,
+          "sourceTranscriptUpdatedAt": 1787760170115,
+          "timingVersion": 4,
+          "cues": [
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-0",
+              "startSeconds": 0,
+              "endSeconds": 2.1,
+              "text": "Alright guys,"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-1",
+              "startSeconds": 2.3,
+              "endSeconds": 3.8,
+              "text": "welcome to the"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-2",
+              "startSeconds": 3.8,
+              "endSeconds": 5.1,
+              "text": "discussion on"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-3",
+              "startSeconds": 5.1,
+              "endSeconds": 7.2,
+              "text": "economics paper"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-4",
+              "startSeconds": 7.2,
+              "endSeconds": 8.64,
+              "text": "two."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-5",
+              "startSeconds": 8.64,
+              "endSeconds": 10.6,
+              "text": "So paper two is"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-6",
+              "startSeconds": 10.6,
+              "endSeconds": 12.1,
+              "text": "unique in your"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-7",
+              "startSeconds": 12.1,
+              "endSeconds": 14,
+              "text": "economics in that it"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-8",
+              "startSeconds": 14,
+              "endSeconds": 16.2,
+              "text": "is the exact same for"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-9",
+              "startSeconds": 16.2,
+              "endSeconds": 18.2,
+              "text": "higher level standard"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-10",
+              "startSeconds": 18.2,
+              "endSeconds": 20.4,
+              "text": "level. If you are at"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-11",
+              "startSeconds": 20.4,
+              "endSeconds": 22.3,
+              "text": "higher level, you do not"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-12",
+              "startSeconds": 22.3,
+              "endSeconds": 24.5,
+              "text": "need to know anything that is higher"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-13",
+              "startSeconds": 24.5,
+              "endSeconds": 26.2,
+              "text": "level only for So that's work."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-14",
+              "startSeconds": 26.5,
+              "endSeconds": 27.8,
+              "text": "Just read the"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-15",
+              "startSeconds": 27.8,
+              "endSeconds": 30,
+              "text": "instructions one hour"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-16",
+              "startSeconds": 30,
+              "endSeconds": 31.5,
+              "text": "forty five."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-17",
+              "startSeconds": 31.8,
+              "endSeconds": 34,
+              "text": "It is a longer paper"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-18",
+              "startSeconds": 34,
+              "endSeconds": 35.8,
+              "text": "than paper one."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-19",
+              "startSeconds": 36,
+              "endSeconds": 37.8,
+              "text": "I would say it has"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-20",
+              "startSeconds": 37.8,
+              "endSeconds": 39.5,
+              "text": "relatively easier"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-21",
+              "startSeconds": 39.5,
+              "endSeconds": 41.5,
+              "text": "questions, especially"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-22",
+              "startSeconds": 41.5,
+              "endSeconds": 43.6,
+              "text": "for the mock you guys"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-23",
+              "startSeconds": 43.6,
+              "endSeconds": 45.5,
+              "text": "should be able to nail"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-24",
+              "startSeconds": 45.5,
+              "endSeconds": 47.6,
+              "text": "lots of these questions"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-25",
+              "startSeconds": 47.6,
+              "endSeconds": 49.5,
+              "text": "and talk it through."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-26",
+              "startSeconds": 49.6,
+              "endSeconds": 51.6,
+              "text": "Read the numbers here."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-27",
+              "startSeconds": 51.6,
+              "endSeconds": 53.12,
+              "text": "don't open paper..."
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-28",
+              "startSeconds": 53.12,
+              "endSeconds": 54.6,
+              "text": "And there is some"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-29",
+              "startSeconds": 54.6,
+              "endSeconds": 56.7,
+              "text": "numerical questions, two"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-30",
+              "startSeconds": 56.7,
+              "endSeconds": 58.6,
+              "text": "decimal places guys,"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-31",
+              "startSeconds": 58.6,
+              "endSeconds": 60.8,
+              "text": "don't lose points because you"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-32",
+              "startSeconds": 60.8,
+              "endSeconds": 62.07,
+              "text": "don't put two numerical places, make sure"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-33",
+              "startSeconds": 62.07,
+              "endSeconds": 63.3,
+              "text": "to use the unit I will be sure"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-34",
+              "startSeconds": 63.3,
+              "endSeconds": 65.2,
+              "text": "on your work, you are"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-35",
+              "startSeconds": 65.2,
+              "endSeconds": 67,
+              "text": "answering one entire"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-36",
+              "startSeconds": 67,
+              "endSeconds": 69,
+              "text": "question, fully labeled"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-37",
+              "startSeconds": 69,
+              "endSeconds": 71,
+              "text": "diagrams as per usual,"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-38",
+              "startSeconds": 71,
+              "endSeconds": 72.8,
+              "text": "and then guys you are"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-39",
+              "startSeconds": 72.8,
+              "endSeconds": 74.8,
+              "text": "going to have an essay"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-40",
+              "startSeconds": 74.8,
+              "endSeconds": 76.8,
+              "text": "question, which is a big"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-41",
+              "startSeconds": 76.8,
+              "endSeconds": 78.8,
+              "text": "difference in the essay"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-42",
+              "startSeconds": 78.8,
+              "endSeconds": 80.7,
+              "text": "question here and paper"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-43",
+              "startSeconds": 80.7,
+              "endSeconds": 82.8,
+              "text": "one, is that you have"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-44",
+              "startSeconds": 82.8,
+              "endSeconds": 84.84,
+              "text": "a text and diagram to use,"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-45",
+              "startSeconds": 84.84,
+              "endSeconds": 87,
+              "text": "So skip true paper,"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-46",
+              "startSeconds": 87,
+              "endSeconds": 88.5,
+              "text": "if you don't share"
+            },
+            {
+              "id": "transcript-a1371402-6588-443e-81a7-3cb3230db440-47",
+              "startSeconds": 88.5,
+              "endSeconds": 120,
+              "text": "it..."
+            }
+          ],
+          "style": {
+            "fontFamily": "Inter",
+            "fontWeight": "semibold",
+            "fontStyle": "normal",
+            "underline": false,
+            "color": "#ffffff",
+            "backgroundColor": "rgba(0, 0, 0, 0.55)",
+            "backgroundRadius": 4,
+            "textAlign": "center",
+            "verticalAlign": "middle",
+            "lineHeight": 1.15,
+            "letterSpacing": 0,
+            "textPadding": 12,
+            "textShadow": {
+              "offsetX": 0,
+              "offsetY": 2,
+              "blur": 6,
+              "color": "rgba(0, 0, 0, 0.6)"
+            },
+            "fontSize": 43,
+            "transform": {
+              "x": 0,
+              "y": 389,
+              "width": 1344,
+              "height": 173,
+              "rotation": 0,
+              "opacity": 1
+            }
+          }
+        }
+      },
+      {
+        "id": "7f64dd5b-624d-48b4-85a1-a1e1eaf89611",
+        "type": "audio",
+        "trackId": "track-2",
+        "from": 4230,
+        "durationInFrames": 6,
+        "label": "raw_speech_lecture.mp4",
+        "mediaId": "a1371402-6588-443e-81a7-3cb3230db440",
+        "originId": "8bd82a78-4f1a-4ab1-a0c4-b5a20ae46ba2",
+        "linkedGroupId": "06e47540-2bb7-4e84-962a-dc37e0953a07",
+        "src": "",
+        "trimStart": 0,
+        "trimEnd": 0,
+        "sourceStart": 63,
+        "sourceEnd": 69,
+        "sourceDuration": 3600,
+        "sourceFps": 30
+      }
+    ],
+    "masterBusDb": 0,
+    "currentFrame": 2291,
+    "zoomLevel": 0.010604433079932953,
+    "scrollPosition": 0,
+    "transitions": [
+      {
+        "id": "4a2eae9b-0269-4765-9df0-8e8efdb5e762",
+        "leftClipId": "7700e015-9136-4ed8-8b68-c83829f23249",
+        "rightClipId": "e305a446-037a-4519-84f9-2af8fe652a5e",
+        "trackId": "track-1",
+        "type": "crossfade",
+        "durationInFrames": 1,
+        "presentation": "dissolve",
+        "timing": "linear",
+        "alignment": 0.5
+      }
+    ],
+    "keyframes": [
+      {
+        "itemId": "9806e34d-e747-4e7f-a471-dab086a0de2b",
+        "animationVersion": 2,
+        "properties": [
+          {
+            "property": "x",
+            "keyframes": [
+              {
+                "id": "3f0e0ee1-d472-4b64-a1c9-9de981184869",
+                "frame": 30,
+                "value": 80,
+                "easing": null
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "thumbnailId": "project:eFcUVTlq:cover"
+}

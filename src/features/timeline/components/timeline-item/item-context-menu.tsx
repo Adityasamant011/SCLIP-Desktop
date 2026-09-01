@@ -135,6 +135,10 @@ type LayoutActionsConfig = {
   onBentoLayout?: () => void
 }
 
+type SclipReferenceActionsConfig = {
+  onCopySclipReference: () => void
+}
+
 interface ItemContextMenuProps {
   children: ReactNode
   trackLocked: boolean
@@ -143,6 +147,7 @@ interface ItemContextMenuProps {
   linkActions?: LinkActionsConfig
   keyframeActions?: KeyframeActionsConfig
   layoutActions?: LayoutActionsConfig
+  sclipReferenceActions?: SclipReferenceActionsConfig
   mediaActions?: MediaActionsConfig
   sceneDetectionActions?: SceneDetectionActionsConfig
   captionActions?: CaptionActionsConfig
@@ -166,6 +171,7 @@ export const ItemContextMenu = memo(function ItemContextMenu({
   linkActions,
   keyframeActions,
   layoutActions,
+  sclipReferenceActions,
   mediaActions,
   sceneDetectionActions,
   captionActions,
@@ -200,6 +206,7 @@ export const ItemContextMenu = memo(function ItemContextMenu({
       linkActions={linkActions}
       keyframeActions={keyframeActions}
       layoutActions={layoutActions}
+      sclipReferenceActions={sclipReferenceActions}
       mediaActions={mediaActions}
       sceneDetectionActions={sceneDetectionActions}
       captionActions={captionActions}
@@ -252,6 +259,7 @@ const ItemContextMenuFull = memo(function ItemContextMenuFull({
   linkActions,
   keyframeActions,
   layoutActions,
+  sclipReferenceActions,
   mediaActions,
   sceneDetectionActions,
   captionActions,
@@ -310,6 +318,9 @@ const ItemContextMenuFull = memo(function ItemContextMenuFull({
           selectedCount={selectedCount}
           onBentoLayout={layoutActions?.onBentoLayout}
         />
+        {sclipReferenceActions && (
+          <SclipReferenceActions {...sclipReferenceActions} />
+        )}
         {mediaActions && <MediaActions t={t} hotkeys={hotkeys} {...mediaActions} />}
         {sceneDetectionActions && (
           <SceneDetectionActions
@@ -329,6 +340,17 @@ const ItemContextMenuFull = memo(function ItemContextMenuFull({
     </ContextMenu>
   )
 })
+
+function SclipReferenceActions({
+  onCopySclipReference,
+}: SclipReferenceActionsConfig) {
+  return (
+    <>
+      <ContextMenuItem onClick={onCopySclipReference}>Copy SCLIP reference</ContextMenuItem>
+      <ContextMenuSeparator />
+    </>
+  )
+}
 
 /**
  * Copy/paste color grade. Self-contained: reads selection, items, and the
