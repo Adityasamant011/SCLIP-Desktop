@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "prepare:sclip-runtime": "node scripts/prepare-sclip-runtime.mjs",
     "dev": "vp dev --host",
     "dev:quiet": "vp dev --host --mode perf",
     "dev:compare": "node scripts/run-dev-and-perf.mjs",

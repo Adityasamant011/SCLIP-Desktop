@@ -205,11 +205,40 @@ impl AgentGatewayState {
             // misleading "agent did not start" message.
             .env("HERMES_DASHBOARD_SESSION_TOKEN", session_token)
             .env("HERMES_MCP_SERVER", "stdio")
+            // SCLIP is an editing app, but its AI chat is intentionally a
+            // full Hermes session. Without this explicit list Hermes' coding
+            // posture can collapse the visible schemas to only editor MCP
+            // tools, which made web, files, vision and other bundled tools
+            // look as though they were missing.
+            .env(
+                "HERMES_TUI_TOOLSETS",
+                crate::hermes_runtime::SCLIP_GATEWAY_TOOLSETS,
+            )
+            // Hermes exposes its internal scheduler only to interactive or
+            // gateway sessions. SCLIP owns a long-lived local gateway, so
+            // advertise that capability explicitly instead of leaving cron
+            // unavailable in the embedded agent.
+            .env("HERMES_GATEWAY_SESSION", "1")
             .env("PYTHONNOUSERSITE", "1")
             .env("PYTHONDONTWRITEBYTECODE", "1")
             .env_remove("PYTHONHOME");
         if let Some(python_path) = runtime.python_path {
             command.env("PYTHONPATH", python_path);
+        }
+        if runtime.node_path.is_some() || runtime.browser_path.is_some() {
+            let mut paths = Vec::new();
+            if let Some(node_path) = runtime.node_path {
+                paths.push(node_path);
+            }
+            if let Some(browser_path) = runtime.browser_path {
+                paths.push(browser_path);
+            }
+            if let Some(existing) = std::env::var_os("PATH") {
+                paths.extend(std::env::split_paths(&existing));
+            }
+            let path = std::env::join_paths(paths)
+                .map_err(|error| format!("Could not prepare SCLIP browser PATH: {error}"))?;
+            command.env("PATH", path);
         }
         // Isolate the complete Hermes → watchdog → MCP subtree. This makes
         // later group termination both reliable and scoped to SCLIP's child.

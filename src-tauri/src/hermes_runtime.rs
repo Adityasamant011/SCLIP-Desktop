@@ -24,6 +24,37 @@ const LEGACY_CREDENTIAL_KEYS: &[&str] = &[
 
 const PROJECT_PROFILE_PREFIX: &str = "sclip_project_";
 
+/// The app-owned Hermes profile starts with the full general-purpose agent
+/// surface. SCLIP's editor MCP server is added separately at runtime, so the
+/// agent can use these capabilities and the video-editing tools together.
+///
+/// Provider-backed tools remain safely gated by Hermes until the user has
+/// configured their own account or local dependency; this list controls
+/// discoverability, not credential bypasses.
+const SCLIP_CORE_TOOLSETS: &[&str] = &[
+    "web",
+    "browser",
+    "terminal",
+    "file",
+    "code_execution",
+    "vision",
+    "image_gen",
+    "skills",
+    "todo",
+    "memory",
+    "session_search",
+    "clarify",
+    "delegation",
+    "cronjob",
+    "computer_use",
+];
+
+/// The embedded chat gateway has a code-workspace focus mode that would
+/// otherwise hide the general-purpose Hermes toolsets in favour of editor MCP
+/// tools. Keep its advertised surface in sync with the profile bootstrap.
+pub const SCLIP_GATEWAY_TOOLSETS: &str =
+    "web,browser,terminal,file,code_execution,vision,image_gen,skills,todo,memory,session_search,clarify,delegation,cronjob,computer_use,sclip-editor";
+
 #[derive(Debug, Clone)]
 pub struct HermesRuntimeConfig {
     pub executable: PathBuf,
@@ -34,6 +65,10 @@ pub struct HermesRuntimeConfig {
     /// runtime. Keeping this explicit prevents Python from importing a user's
     /// personal Hermes installation.
     pub python_path: Option<String>,
+    /// Bundled Node and agent-browser shims. This is prepended to PATH for
+    /// the embedded agent so end users do not need a separate Node install.
+    pub node_path: Option<PathBuf>,
+    pub browser_path: Option<PathBuf>,
     pub home: PathBuf,
     pub workdir: PathBuf,
 }
@@ -47,9 +82,21 @@ fn resolve_runtime(app: &AppHandle) -> Result<(PathBuf, Vec<String>, Option<Stri
 
     if let Ok(resource_dir) = app.path().resource_dir() {
         let runtime = resource_dir.join("hermes-runtime");
-        let python = runtime.join("python/bin/python3.11");
+        // The release builder places an embedded interpreter in the same
+        // logical location on both platforms. Keep the platform-specific
+        // executable and site-packages layouts here rather than assuming the
+        // macOS/Linux venv shape on Windows.
+        let python = if cfg!(target_os = "windows") {
+            runtime.join("python/python.exe")
+        } else {
+            runtime.join("python/bin/python3.11")
+        };
         let source = runtime.join("source");
-        let site_packages = runtime.join("venv/lib/python3.11/site-packages");
+        let site_packages = if cfg!(target_os = "windows") {
+            runtime.join("venv/Lib/site-packages")
+        } else {
+            runtime.join("venv/lib/python3.11/site-packages")
+        };
         if python.is_file() && source.join("hermes_cli/main.py").is_file() && site_packages.is_dir()
         {
             let python_path = std::env::join_paths([source, site_packages])
@@ -71,11 +118,14 @@ fn resolve_runtime(app: &AppHandle) -> Result<(PathBuf, Vec<String>, Option<Stri
     // Development checkout: SCLIP/freecut/src-tauri -> SCLIP/hermes-agent-src.
     // This path is compiled from the checkout location and is never a fallback
     // to the user's personal ~/.hermes installation.
-    candidates.push((
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../hermes-agent-src/.venv/bin/hermes"),
-        Vec::new(),
-        None,
-    ));
+    let development_hermes = if cfg!(target_os = "windows") {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../hermes-agent-src/.venv/Scripts/hermes.exe")
+    } else {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../hermes-agent-src/.venv/bin/hermes")
+    };
+    candidates.push((development_hermes, Vec::new(), None));
 
     for (candidate, arguments, python_path) in &candidates {
         if candidate.is_file() {
@@ -323,6 +373,66 @@ fn refresh_sclip_mcp_config(config_path: &Path, mcp_executable: &Path) -> Result
     Ok(had_legacy_reference)
 }
 
+/// Apply only missing, app-owned capability defaults. This lets SCLIP upgrades
+/// repair profiles created before the full Hermes surface was enabled without
+/// replacing a user's chosen web-search or browser provider.
+fn ensure_sclip_tool_defaults(config_path: &Path) -> Result<(), String> {
+    let contents = fs::read_to_string(config_path).map_err(|error| error.to_string())?;
+
+    if let Ok(mut config) = serde_json::from_str::<serde_json::Value>(&contents) {
+        let root = config
+            .as_object_mut()
+            .ok_or("SCLIP Hermes config must be an object")?;
+
+        let browser = root.entry("browser").or_insert_with(|| json!({}));
+        let browser = browser
+            .as_object_mut()
+            .ok_or("SCLIP browser config must be an object")?;
+        browser
+            .entry("backend".to_string())
+            .or_insert_with(|| json!("off"));
+        browser
+            .entry("engine".to_string())
+            .or_insert_with(|| json!("lightpanda"));
+
+        let web = root.entry("web").or_insert_with(|| json!({}));
+        let web = web
+            .as_object_mut()
+            .ok_or("SCLIP web config must be an object")?;
+        web.entry("search_backend".to_string())
+            .or_insert_with(|| json!("ddgs"));
+
+        let serialized =
+            serde_json::to_string_pretty(&config).map_err(|error| error.to_string())?;
+        fs::write(config_path, serialized).map_err(|error| error.to_string())?;
+        return Ok(());
+    }
+
+    // Hermes subsequently normalizes JSON config to YAML. Appending only a
+    // missing top-level section preserves all user settings and avoids a YAML
+    // dependency in the desktop host.
+    let has_browser = contents
+        .lines()
+        .any(|line| !line.starts_with([' ', '\t']) && line.trim() == "browser:");
+    let has_web = contents
+        .lines()
+        .any(|line| !line.starts_with([' ', '\t']) && line.trim() == "web:");
+    if has_browser && has_web {
+        return Ok(());
+    }
+
+    let mut additions = String::new();
+    if !has_browser {
+        additions.push_str("browser:\n  backend: \"off\"\n  engine: lightpanda\n");
+    }
+    if !has_web {
+        additions.push_str("web:\n  search_backend: ddgs\n");
+    }
+    let separator = if contents.ends_with('\n') { "" } else { "\n" };
+    fs::write(config_path, format!("{contents}{separator}{additions}"))
+        .map_err(|error| error.to_string())
+}
+
 fn bootstrap_home(home: &Path, mcp_executable: &Path, workdir: &Path) -> Result<(), String> {
     fs::create_dir_all(home).map_err(|error| error.to_string())?;
 
@@ -350,9 +460,29 @@ fn bootstrap_home(home: &Path, mcp_executable: &Path, workdir: &Path) -> Result<
                 "user_profile_enabled": true,
                 "write_approval": false
             },
+            // Use Hermes' built-in browser tool surface rather than silently
+            // switching to an incidental Browser Use CLI found on the host.
+            // This makes a packaged browser backend deterministic for every
+            // downloader. Lightpanda supports low-overhead text browsing; a
+            // bundled Chromium can still be selected by a future release for
+            // screenshot-heavy browsing.
+            "browser": {
+                "backend": "off",
+                "engine": "lightpanda"
+            },
+            // DDGS is the no-account default for ordinary web research. The
+            // packaged runtime includes its small Python dependency. Users can
+            // still choose a paid/keyed provider later without losing this
+            // default.
+            "web": {
+                "search_backend": "ddgs"
+            },
             "plugins": {
                 "enabled": [],
                 "disabled": ["sclip"]
+            },
+            "platform_toolsets": {
+                "cli": SCLIP_CORE_TOOLSETS
             },
             "mcp_servers": sclip_mcp_server_config(mcp_executable)
         });
@@ -371,6 +501,8 @@ fn bootstrap_home(home: &Path, mcp_executable: &Path, workdir: &Path) -> Result<
         // tools on the next session instead of silently using stale metadata.
         let _ = fs::remove_file(home.join("cache/mcp_schema_cache.json"));
     }
+
+    ensure_sclip_tool_defaults(&config_path)?;
 
     // Set the app-owned profile's terminal skin after Hermes has normalized
     // its config format. This never reads or changes personal Hermes config.
@@ -505,6 +637,18 @@ pub fn prepare(
         .filter(|path| path.is_dir())
         .unwrap_or_else(|| home.clone());
     let mcp_executable = std::env::current_exe().map_err(|error| error.to_string())?;
+    let node_path = app
+        .path()
+        .resource_dir()
+        .ok()
+        .map(|resources| resources.join("hermes-runtime/node/node_modules/node/bin"))
+        .filter(|path| path.is_dir());
+    let browser_path = app
+        .path()
+        .resource_dir()
+        .ok()
+        .map(|resources| resources.join("hermes-runtime/node/node_modules/.bin"))
+        .filter(|path| path.is_dir());
 
     bootstrap_home(&home, &mcp_executable, &workdir)?;
     // Existing projects do not necessarily open during an app upgrade. Keep
@@ -516,6 +660,8 @@ pub fn prepare(
         executable,
         arguments,
         python_path,
+        node_path,
+        browser_path,
         home,
         workdir,
     })
